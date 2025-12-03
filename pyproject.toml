@@ -7,5 +7,6 @@ requires-python = ">=3.8"
 dependencies = [
     "opencv-python",
     "numpy",
-    "onnxruntime",
+    "onnxruntime==1.18.0",
+    "onnxruntime-gpu==1.19.2",
 ]

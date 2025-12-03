@@ -19,26 +19,26 @@ class ModelConfig:
     backend: str = "motion"
 
     # Path to an ONNX model (used when backend == "onnx")
-    model_path: Path = ROOT_DIR / "models" / "detector.onnx"
+    model_path: Path = ROOT_DIR / "models" / "yolov9-c.onnx"
 
     # Expected input size for the ONNX model (width, height).
     # Common YOLO-style models use 640x640 or 416x416.
     input_size: Tuple[int, int] = (640, 640)
 
     # Confidence threshold for detections
-    confidence_threshold: float = 0.4
+    confidence_threshold: float = 0.2
 
     # NMS IoU threshold (only used by ONNX backend)
-    nms_iou_threshold: float = 0.5
+    nms_iou_threshold: float = 0.2
 
     # Class IDs to track (COCO-style IDs by default)
     track_class_ids: List[int] = None
 
     def __post_init__(self) -> None:
-        # Default to people and common vehicles in COCO if not specified:
-        # 0=person, 1=bicycle, 2=car, 3=motorcycle, 5=bus, 7=truck
+        # Default to common vehicle classes in COCO if not specified:
+        # 2=car, 3=motorcycle, 5=bus, 7=truck
         if self.track_class_ids is None:
-            self.track_class_ids = [0, 1, 2, 3, 5, 7]
+            self.track_class_ids = [2, 3, 5, 7]
 
 
 @dataclass
@@ -99,4 +99,3 @@ def get_default_config() -> AppConfig:
     """
 
     return AppConfig()
-
