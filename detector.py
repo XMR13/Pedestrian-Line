@@ -33,18 +33,8 @@ class Detector:
             try:
                 import onnxruntime as ort  # type: ignore
 
-                available = ort.get_available_providers()
-                providers = []
-                # Prefer GPU if available, but always keep CPU as fallback
-                if "CUDAExecutionProvider" in available:
-                    providers.append("CUDAExecutionProvider")
-                if "DmlExecutionProvider" in available:
-                    providers.append("DmlExecutionProvider")
-                providers.append("CPUExecutionProvider")
-
                 self._onnx_session = ort.InferenceSession(
-                    str(self.config.model_path),
-                    providers=providers,
+                    str(self.config.model_path), providers=["CPUExecutionProvider"]
                 )
                 self._backend = "onnx"
             except Exception as exc:  # pragma: no cover - defensive
@@ -140,13 +130,12 @@ class Detector:
 
         input_name = self._onnx_session.get_inputs()[0].name
         outputs = self._onnx_session.run(None, {input_name: blob})
+        preds = outputs[0]
 
-        # Some YOLO exports (e.g., Ultralytics YOLOv8/9) return shape (1, 84, 8400)
-        # and may include duplicate outputs. Handle this explicitly.
-        pred0 = outputs[0]
-
-        boxes_xyxy, scores, class_ids = self._postprocess_yolo_generic(
-            pred0, w, h, dw, dh, scale
+        # (1, N, 5 + num_classes)
+        preds = np.squeeze(preds, axis=0)
+        boxes_xyxy, scores, class_ids = self._postprocess_yolo(
+            preds, w, h, dw, dh, scale
         )
 
         detections: List[Detection] = []
@@ -170,7 +159,7 @@ class Detector:
             )
         return detections
 
-    def _postprocess_yolo_generic(
+    def _postprocess_yolo(
         self,
         preds: np.ndarray,
         orig_w: int,
@@ -181,37 +170,19 @@ class Detector:
     ):
         """
         Convert YOLO-style predictions into (xyxy, score, class_id) arrays.
-
-        Supports two common layouts:
-        - (1, N, 5 + C): [cx, cy, w, h, obj, class_scores...]
-        - (1, 84, 8400): Ultralytics YOLOv8/9 export (no explicit obj column,
-          just class scores after internal objectness); we take max class score.
         """
 
-        # Case A: (1, N, 5 + C)
-        if preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[2] >= 5:
-            preds = np.squeeze(preds, axis=0)
-            boxes = preds[:, 0:4]
-            objectness = preds[:, 4:5]
-            class_scores = preds[:, 5:]
+        boxes = preds[:, 0:4]
+        objectness = preds[:, 4:5]
+        class_scores = preds[:, 5:]
 
-            class_ids = np.argmax(class_scores, axis=1)
-            class_conf = class_scores[np.arange(class_scores.shape[0]), class_ids]
-            scores = objectness.squeeze(-1) * class_conf
+        # Best class per detection
+        class_ids = np.argmax(class_scores, axis=1)
+        class_conf = class_scores[np.arange(class_scores.shape[0]), class_ids]
 
-        # Case B: (1, 84, 8400) -> (8400, 84)
-        elif preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[1] == 84:
-            preds = np.squeeze(preds, axis=0)  # (84, 8400)
-            preds = preds.T  # (8400, 84)
-            boxes = preds[:, :4]
-            class_scores = preds[:, 4:]
-            class_ids = np.argmax(class_scores, axis=1)
-            scores = class_scores[np.arange(class_scores.shape[0]), class_ids]
+        scores = objectness.squeeze(-1) * class_conf
 
-        else:
-            raise ValueError(f"Unsupported YOLO output shape: {preds.shape}")
-
-        # Filter by confidence
+        # Filter low scores early for efficiency
         mask = scores >= self.config.confidence_threshold
         boxes = boxes[mask]
         scores = scores[mask]
@@ -220,7 +191,7 @@ class Detector:
         if boxes.size == 0:
             return np.empty((0, 4)), np.empty((0,)), np.empty((0,), dtype=int)
 
-        # cx, cy, w, h -> x1, y1, x2, y2 (in letterboxed space)
+        # cx, cy, w, h -> x1, y1, x2, y2 (in letterboxed image space)
         cx, cy, w_box, h_box = boxes.T
         x1 = cx - w_box / 2
         y1 = cy - h_box / 2
