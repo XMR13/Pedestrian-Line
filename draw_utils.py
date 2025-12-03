@@ -18,27 +18,15 @@ def draw_tracks(
     color: Color = (0, 255, 0),
 ) -> None:
     """
-    Draw bounding boxes and track IDs on the frame in-place.
+    Draw bounding boxes for tracks on the frame in-place.
+
+    Track IDs are kept internally for counting but are not drawn, to keep
+    the visualization focused on the objects themselves.
     """
 
     for track in tracks:
         x1, y1, x2, y2 = map(int, track.as_xyxy())
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-
-        label = f"ID {track.track_id}"
-        if track.class_id is not None:
-            label += f" | C{track.class_id}"
-
-        cv2.putText(
-            frame,
-            label,
-            (x1, max(0, y1 - 5)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            color,
-            1,
-            cv2.LINE_AA,
-        )
 
 
 def draw_line_and_counts(
@@ -73,4 +61,3 @@ def draw_line_and_counts(
         2,
         cv2.LINE_AA,
     )
-
