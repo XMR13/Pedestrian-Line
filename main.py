@@ -7,12 +7,19 @@ from typing import Optional, Tuple
 
 import cv2
 import json
+import sys
 
 from config import AppConfig, get_default_config
 from detector import Detector
 from draw_utils import draw_line_and_counts, draw_tracks
 from line_counter import LineCounter
 from tracker import Tracker
+
+# Optional progress bar (tqdm). If not installed, progress display is skipped.
+try:  # pragma: no cover - optional dependency
+    from tqdm import tqdm
+except Exception:  # pragma: no cover - safe fallback
+    tqdm = None
 
 
 def _parse_args() -> argparse.Namespace:
@@ -66,6 +73,11 @@ def _parse_args() -> argparse.Namespace:
         "--select-line",
         action="store_true",
         help="Interactively pick the counting line on the first frame.",
+    )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable progress bar (useful if tqdm is not installed or when logging).",
     )
     return parser.parse_args()
 
@@ -238,6 +250,27 @@ def main() -> None:
     if max_frames is not None:
         print(f"[main] Frame limit: {max_frames} (via --max-frames/--max-seconds)")
 
+    # Prepare progress bar
+    progress_total = None
+    # If user set a frame cap, use that; else if video reports length, use it.
+    reported_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if max_frames is not None:
+        progress_total = max_frames
+    elif reported_total > 0:
+        progress_total = reported_total
+
+    progress_bar = None
+    if not args.no_progress and tqdm is not None:
+        progress_bar = tqdm(
+            total=progress_total,
+            unit="frame",
+            desc="Processing",
+            file=sys.stdout,
+            leave=False,
+        )
+    elif not args.no_progress and tqdm is None:
+        print("[main] tqdm is not installed; run `uv run pip install tqdm` to enable a progress bar.")
+
     frame_index = 0
 
     while True:
@@ -264,9 +297,13 @@ def main() -> None:
                 break
 
         frame_index += 1
+        if progress_bar is not None:
+            progress_bar.update(1)
 
     cap.release()
     writer.release()
+    if progress_bar is not None:
+        progress_bar.close()
     if args.show:
         cv2.destroyAllWindows()
 

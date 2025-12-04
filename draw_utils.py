@@ -11,6 +11,23 @@ from structures import Track
 
 Color = Tuple[int, int, int]
 
+# COCO class names for labeling boxes (0–79).
+COCO_NAMES = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
+    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
+    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
+    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
+    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
+    "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
+    "mouse", "remote", "keyboard", "cell phone", "microwave", "oven",
+    "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+    "teddy bear", "hair drier", "toothbrush",
+]
+
 
 def draw_tracks(
     frame: np.ndarray,
@@ -31,6 +48,38 @@ def draw_tracks(
             continue
         x1, y1, x2, y2 = map(int, track.as_xyxy())
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+        # Optional label with class name/id and score
+        label = None
+        if track.class_id is not None and 0 <= track.class_id < len(COCO_NAMES):
+            label = COCO_NAMES[track.class_id]
+        elif track.class_id is not None:
+            label = str(track.class_id)
+
+        if label is not None:
+            text = f"{label}"
+            (tw, th), _ = cv2.getTextSize(
+                text, cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, thickness=1
+            )
+            # Background box for readability
+            cv2.rectangle(
+                frame,
+                (x1, y1 - th - 6),
+                (x1 + tw + 4, y1),
+                (0, 0, 0),
+                thickness=-1,
+            )
+            # Text
+            cv2.putText(
+                frame,
+                text,
+                (x1 + 2, y1 - 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
 
 
 def draw_line_and_counts(

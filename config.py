@@ -25,16 +25,17 @@ class ModelConfig:
     # Common YOLO-style models use 640x640 or 416x416.
     input_size: Tuple[int, int] = (640, 640)
 
-    # Confidence threshold for detections
-    confidence_threshold: float = 0.45
+    # Confidence threshold for detections.
+    # Slightly lower so distant / mildly blurred vehicles are kept.
+    confidence_threshold: float = 0.35
 
     # NMS IoU threshold (only used by ONNX backend)
     # Lowered slightly to suppress near-duplicate boxes produced by adjacent anchors.
     nms_iou_threshold: float = 0.45
 
     # Minimum box area as a fraction of the full frame area.
-    # Very small boxes (e.g. noise on leaves or distant specks) are ignored.
-    min_box_area_ratio: float = 0.0005
+    # Lowered so distant vehicles are not filtered out too aggressively.
+    min_box_area_ratio: float = 0.0002
 
     # Class IDs to track (COCO-style IDs by default)
     track_class_ids: List[int] = None
@@ -46,7 +47,7 @@ class ModelConfig:
 
     def __post_init__(self) -> None:
         # Default to common road-user classes in COCO if not specified:
-        # 0=person, 2=car, 3=motorcycle, 5=bus, 7=truck
+        # 0=person, 1=bicycle, 2=car, 3=motorcycle, 5=bus, 7=truck
         if self.track_class_ids is None:
             self.track_class_ids = [1, 2, 3, 5, 7]
         if self.ignore_regions is None:
@@ -67,8 +68,15 @@ class TrackerConfig:
     (without Kalman filtering).
     """
 
-    max_distance: float = 60.0  # pixels, center-to-center distance
-    max_lost: int = 30  # max frames to keep a lost track
+    # How far a detection is allowed to move (in pixels, center-to-center)
+    # between frames while still being matched to the same track. Increased
+    # a bit so fast-moving vehicles remain linked.
+    max_distance: float = 80.0
+
+    # How many frames we keep a track alive without a detection before
+    # considering it lost. Slightly higher to tolerate brief occlusions
+    # or blurred frames for fast vehicles.
+    max_lost: int = 45
 
 
 @dataclass
