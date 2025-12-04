@@ -125,6 +125,7 @@ class Detector:
 
         img = frame_bgr
         h, w = img.shape[:2]
+        frame_area = float(w * h)
 
         # Letterbox resize
         scale = min(input_width / w, input_height / h)
@@ -150,8 +151,16 @@ class Detector:
         )
 
         detections: List[Detection] = []
+        min_area = self.config.min_box_area_ratio * frame_area
         for (x1, y1, x2, y2), score, class_id in zip(boxes_xyxy, scores, class_ids):
             if score < self.config.confidence_threshold:
+                continue
+            # Filter out very small boxes that are likely noise
+            box_area = (x2 - x1) * (y2 - y1)
+            if box_area < min_area:
+                continue
+            # Filter out detections whose center falls inside any ignore region
+            if self._is_in_ignore_region((x1 + x2) * 0.5, (y1 + y2) * 0.5, w, h):
                 continue
             if (
                 self.config.track_class_ids
@@ -244,6 +253,21 @@ class Detector:
         indices = self._nms(boxes_xyxy, scores, self.config.nms_iou_threshold)
 
         return boxes_xyxy[indices], scores[indices], class_ids[indices]
+
+    def _is_in_ignore_region(self, cx: float, cy: float, width: int, height: int) -> bool:
+        """
+        Return True if the point (cx, cy) lies inside any normalized ignore region.
+        """
+
+        if not self.config.ignore_regions:
+            return False
+
+        nx = cx / float(width)
+        ny = cy / float(height)
+        for x1, y1, x2, y2 in self.config.ignore_regions:
+            if x1 <= nx <= x2 and y1 <= ny <= y2:
+                return True
+        return False
 
     @staticmethod
     def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndarray:

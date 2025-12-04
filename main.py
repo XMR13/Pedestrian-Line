@@ -181,16 +181,15 @@ def main() -> None:
         raise SystemExit(f"Failed to open video: {input_path}")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    if width <= 0 or height <= 0:
-        # Fallback: read one frame to infer size
-        ret, frame = cap.read()
-        if not ret:
-            raise SystemExit("Could not read any frame from input video.")
-        height, width = frame.shape[:2]
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    # Always infer the actual frame size from the first frame so that
+    # normalized coordinates from line_picker.py map back exactly, even if
+    # the container metadata reports a slightly different height/width.
+    ret, frame0 = cap.read()
+    if not ret:
+        raise SystemExit("Could not read any frame from input video.")
+    height, width = frame0.shape[:2]
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     # Derive a frame limit if the user provided one in seconds
     max_frames: Optional[int] = args.max_frames
@@ -252,7 +251,9 @@ def main() -> None:
         tracks = tracker.update(detections, frame_index)
         line_counter.update(tracks)
 
-        draw_tracks(frame, tracks)
+        # Draw only tracks that were actually updated in this frame to
+        # avoid "stuck" boxes when a track is kept alive across occlusions.
+        draw_tracks(frame, tracks, frame_index=frame_index)
         draw_line_and_counts(frame, line_counter)
 
         writer.write(frame)

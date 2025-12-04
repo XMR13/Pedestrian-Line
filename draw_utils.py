@@ -15,6 +15,7 @@ Color = Tuple[int, int, int]
 def draw_tracks(
     frame: np.ndarray,
     tracks: Iterable[Track],
+    frame_index: int | None = None,
     color: Color = (0, 255, 0),
 ) -> None:
     """
@@ -25,6 +26,9 @@ def draw_tracks(
     """
 
     for track in tracks:
+        # Optionally draw only tracks that were updated on this frame.
+        if frame_index is not None and track.last_seen_frame != frame_index:
+            continue
         x1, y1, x2, y2 = map(int, track.as_xyxy())
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
