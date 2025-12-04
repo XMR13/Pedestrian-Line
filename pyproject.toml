@@ -3,10 +3,10 @@ name = "pedestrian-line"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "opencv-python",
     "numpy",
-    "onnxruntime==1.18.0",
-    "onnxruntime-gpu==1.19.2",
+    "onnxruntime-gpu==1.20.2",
+    "pyyaml>=6.0.3",
 ]

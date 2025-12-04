@@ -197,8 +197,40 @@ class Detector:
           just class scores after internal objectness); we take max class score.
         """
 
-        # Case A: (1, N, 5 + C)
-        if preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[2] >= 5:
+        # Case 0: Some YOLO exports (end2end) return already-decoded boxes:
+        # (1, N, 6) -> [x1, y1, x2, y2, score, class_id]
+        if (
+            preds.ndim == 3
+            and preds.shape[0] == 1
+            and preds.shape[2] == 6
+        ):
+            preds = np.squeeze(preds, axis=0)
+            boxes_xyxy = preds[:, 0:4]
+            scores = preds[:, 4]
+            class_ids = preds[:, 5].astype(int)
+            return boxes_xyxy, scores, class_ids
+
+        # Important: handle the YOLOv8/YOLOv9 (1, 84, 8400) layout
+        # *before* the generic (1, N, 5 + C) case, otherwise it will be
+        # misinterpreted and produce nonsense box coordinates and class IDs.
+        if preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[1] == 84:
+            # Match the working oi.py script:
+            #   - output[0] has shape (84, 8400)
+            #   - transpose to (8400, 84)
+            #   - first 4 values are [cx, cy, w, h] in the letterboxed space
+            #   - the remaining 80 values are per-class scores (logits or probs)
+            preds = np.squeeze(preds, axis=0)  # (84, 8400)
+            preds = preds.T  # (8400, 84)
+            boxes = preds[:, :4]
+            class_scores = preds[:, 4:]
+
+            # Use the same semantics as oi.py:
+            # pick the best class per anchor and treat that value as the score.
+            class_ids = np.argmax(class_scores, axis=1)
+            scores = class_scores[np.arange(class_scores.shape[0]), class_ids]
+
+        # Case A: generic YOLO layout (1, N, 5 + C)
+        elif preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[2] >= 5:
             preds = np.squeeze(preds, axis=0)
             boxes = preds[:, 0:4]
             objectness = preds[:, 4:5]
@@ -207,15 +239,6 @@ class Detector:
             class_ids = np.argmax(class_scores, axis=1)
             class_conf = class_scores[np.arange(class_scores.shape[0]), class_ids]
             scores = objectness.squeeze(-1) * class_conf
-
-        # Case B: (1, 84, 8400) -> (8400, 84)
-        elif preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[1] == 84:
-            preds = np.squeeze(preds, axis=0)  # (84, 8400)
-            preds = preds.T  # (8400, 84)
-            boxes = preds[:, :4]
-            class_scores = preds[:, 4:]
-            class_ids = np.argmax(class_scores, axis=1)
-            scores = class_scores[np.arange(class_scores.shape[0]), class_ids]
 
         else:
             raise ValueError(f"Unsupported YOLO output shape: {preds.shape}")
@@ -280,7 +303,8 @@ class Detector:
         x2 = boxes[:, 2]
         y2 = boxes[:, 3]
 
-        areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+        # Standard area computation; no +1 so IoU matches common YOLO post-processing
+        areas = (x2 - x1) * (y2 - y1)
         order = scores.argsort()[::-1]
 
         keep = []

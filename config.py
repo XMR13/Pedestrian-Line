@@ -19,21 +19,22 @@ class ModelConfig:
     backend: str = "motion"
 
     # Path to an ONNX model (used when backend == "onnx")
-    model_path: Path = ROOT_DIR / "models" / "yolov9-s.onnx"
+    model_path: Path = ROOT_DIR / "models" / "yolov9-s_v2.onnx"
 
     # Expected input size for the ONNX model (width, height).
     # Common YOLO-style models use 640x640 or 416x416.
     input_size: Tuple[int, int] = (640, 640)
 
     # Confidence threshold for detections
-    confidence_threshold: float = 0.5
+    confidence_threshold: float = 0.45
 
     # NMS IoU threshold (only used by ONNX backend)
-    nms_iou_threshold: float = 0.5
+    # Lowered slightly to suppress near-duplicate boxes produced by adjacent anchors.
+    nms_iou_threshold: float = 0.45
 
     # Minimum box area as a fraction of the full frame area.
     # Very small boxes (e.g. noise on leaves or distant specks) are ignored.
-    min_box_area_ratio: float = 0.001
+    min_box_area_ratio: float = 0.0005
 
     # Class IDs to track (COCO-style IDs by default)
     track_class_ids: List[int] = None
@@ -44,10 +45,10 @@ class ModelConfig:
     ignore_regions: List[Tuple[float, float, float, float]] = None
 
     def __post_init__(self) -> None:
-        # Default to common vehicle classes in COCO if not specified:
-        # 2=car, 3=motorcycle, 5=bus, 7=truck
+        # Default to common road-user classes in COCO if not specified:
+        # 0=person, 2=car, 3=motorcycle, 5=bus, 7=truck
         if self.track_class_ids is None:
-            self.track_class_ids = [2, 3, 5, 7]
+            self.track_class_ids = [1, 2, 3, 5, 7]
         if self.ignore_regions is None:
             self.ignore_regions = [
                 # Left foliage / pole area
