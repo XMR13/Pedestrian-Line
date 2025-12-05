@@ -7,7 +7,7 @@ wheels/
 *.egg-info
 
 
-#folders
+# folders (local data / large artifacts)
 media/
 Progress/
 Models/
@@ -15,5 +15,5 @@ docs/
 
 # Virtual environments
 .venv
-AGENTS.md
 plan.md
+AGENTS.md

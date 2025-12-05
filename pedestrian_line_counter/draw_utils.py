@@ -5,8 +5,8 @@ from typing import Iterable, Tuple
 import cv2
 import numpy as np
 
-from line_counter import LineCounter
-from structures import Track
+from .line_counter import LineCounter
+from .structures import Track
 
 
 Color = Tuple[int, int, int]

@@ -18,23 +18,30 @@ The core pipeline is:
 Architecture (High Level)
 -------------------------
 
-- `config.py` – configuration dataclasses for the whole app.
-- `detector.py` – ONNXRuntime‑based YOLO‑style detector wrapper, plus a
+Core application code now lives under the `pedestrian_line_counter/`
+package:
+
+- `pedestrian_line_counter/config.py` – configuration dataclasses for the whole app.
+- `pedestrian_line_counter/detector.py` – ONNXRuntime‑based YOLO‑style detector wrapper, plus a
   motion‑based fallback.
-- `tracker.py` – lightweight greedy multi‑object tracker.
-- `line_counter.py` – virtual line + direction logic (A→B and B→A).
-- `draw_utils.py` – drawing helpers for tracks and counters.
+- `pedestrian_line_counter/tracker.py` – lightweight greedy multi‑object tracker.
+- `pedestrian_line_counter/line_counter.py` – virtual line + direction logic (A→B and B→A).
+- `pedestrian_line_counter/draw_utils.py` – drawing helpers for tracks and counters.
 - Ignore regions and noise filtering are built into the detector:
   - `ModelConfig.ignore_regions` (normalized rectangles) drops detections whose
     center lies in static foliage/occlusion zones (defaults target the left
     banana leaves and top‑right leaf).
   - `ModelConfig.min_box_area_ratio` filters out tiny boxes.
-- `line_picker.py` – interactive GUI to pick line(s) and save them to JSON.
-- `main.py` – CLI entry point that ties everything together.
-- `structures.py` – small data classes for `Detection` and `Track`.
+- `pedestrian_line_counter/line_picker.py` – interactive GUI to pick line(s) and save them to JSON.
+- `pedestrian_line_counter/structures.py` – small data classes for `Detection` and `Track`.
+- `pedestrian_line_counter/main.py` – main CLI implementation.
+- `main.py` – thin wrapper that calls into `pedestrian_line_counter.main`
+  so `python main.py` keeps working.
 - `media/` – local input/output videos (ignored by Git).
 - `Models/` – local ONNX model weights (ignored by Git).
 - `Progress/` – session logs that track work against `plan.md`.
+- `scripts/` – helper/debug scripts (e.g. ONNX inspection); not required
+  for normal use.
 
 
 Dependencies & Setup
@@ -115,10 +122,10 @@ JSON.
 1. Pick the line and save it:
 
 ```bash
-uv run python line_picker.py \
+uv run python pedestrian_line_counter/line_picker.py \
   --input media/input.mp4 \
   --lines 1 \
-  --save line.json
+  --save config/line.json
 ```
 
 Controls:
@@ -136,7 +143,7 @@ uv run python main.py \
   --model Models/yolov9-c.onnx \
   --input media/input.mp4 \
   --output media/output_with_line.mp4 \
-  --line-json line.json \
+  --line-json config/line.json \
   --show
 ```
 

@@ -5,8 +5,8 @@ from typing import Dict, Iterable, List
 
 import numpy as np
 
-from config import TrackerConfig
-from structures import Detection, Track
+from .config import TrackerConfig
+from .structures import Detection, Track
 
 
 @dataclass

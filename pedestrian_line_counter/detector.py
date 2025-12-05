@@ -6,8 +6,8 @@ from typing import List, Optional
 import cv2
 import numpy as np
 
-from config import ModelConfig
-from structures import Detection
+from .config import ModelConfig
+from .structures import Detection
 
 
 @dataclass

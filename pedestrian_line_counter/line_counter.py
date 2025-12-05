@@ -5,12 +5,19 @@ from typing import Dict, Iterable, Tuple
 
 import numpy as np
 
-from structures import Track
+from .structures import Track
 
 
 @dataclass
 class LineCounter:
     """
+    Line virtual yang menghitung dan mentrack objek yang melewati garis tersebut
+    dari dua arah sekaligus.
+
+    Semantik area
+    - Ketika sebuah objek bergerak dari area 'negatif' garis ke area 'positif' garis, maka naikkan variabel a_to_b
+    - jika sebaliknya, bergerak dari bagian 'positif' ke arae negatif' maka' maka tambahkan variabel a_to_b
+
     Virtual line that counts tracked objects crossing from one side to the other.
 
     Direction semantics:
@@ -78,4 +85,3 @@ class LineCounter:
         if cross < 0:
             return -1
         return 0
-

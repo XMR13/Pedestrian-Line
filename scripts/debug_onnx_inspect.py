@@ -4,7 +4,7 @@ and see how many boxes survive our post-processing.
 
 Usage (from project root):
 
-    uv run python debug_onnx_inspect.py \
+    uv run python scripts/debug_onnx_inspect.py \
         --input media/video3.mp4 \
         --model Models/yolov9-s.onnx
 
@@ -21,8 +21,8 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
-from config import ModelConfig
-from detector import Detector
+from pedestrian_line_counter.config import ModelConfig
+from pedestrian_line_counter.detector import Detector
 
 
 def parse_args() -> argparse.Namespace:
@@ -136,4 +136,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
