@@ -19,12 +19,14 @@ class Detector:
     - \"motion\": simple background-subtraction detector (no classes).
     - \"onnx\": ONNXRuntime-based detector (YOLO-style), if onnxruntime
       and a suitable model are available.
+    - \"torch\" : Support Backend pytorch jika tersedia
     """
 
     config: ModelConfig
     _backend: str = None
     _motion_subtractor: Optional[cv2.BackgroundSubtractor] = None
     _onnx_session: Optional[object] = None
+    _torch_detector: Optional[object] = None
 
     def __post_init__(self) -> None:
         backend = (self.config.backend or "motion").lower()
@@ -52,6 +54,14 @@ class Detector:
                 print("[detector] Falling back to motion-based detector.")
                 backend = "motion"
 
+        if backend == "torch":
+            # Lazy import untuk mereka yang memungkinkan hal ini
+            # to install it.
+            from .torch_detector import TorchDetector
+
+            self._torch_detector = TorchDetector(self.config)
+            self._backend = "torch"
+
         if backend == "motion":
             self._motion_subtractor = cv2.createBackgroundSubtractorMOG2(
                 history=500, varThreshold=16, detectShadows=True
@@ -60,12 +70,15 @@ class Detector:
 
     def detect(self, frame_bgr: np.ndarray) -> List[Detection]:
         """
-        Run detection on a single BGR frame and return a list of Detection.
+        Lakukan deteksi pada satu frame dan kembalian list deteksi yagn diperlukan.
         """
 
         if self._backend == "onnx" and self._onnx_session is not None:
             return self._detect_onnx(frame_bgr)
+        if self._backend == "torch" and self._torch_detector is not None:
+            return self._torch_detector.detect(frame_bgr)
 
+        # Default / fallback
         return self._detect_motion(frame_bgr)
 
     # --------------------------------------------------------------------- #

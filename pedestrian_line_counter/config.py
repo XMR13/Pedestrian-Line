@@ -18,7 +18,9 @@ class ModelConfig:
     # "onnx" | "motion"
     backend: str = "motion"
 
-    # ONNX model(used when backend == "onnx").
+    # Path to a model file.
+    # - When backend == "onnx": expected to be an ONNX file.
+    # - When backend == "torch": expected to be a Torch `.pt` / `.pth` file.
     # Defaults to a typical YOLOv9-s export under the local Models/ folder.
     model_path: Path = ROOT_DIR / "Models" / "yolov9-s_v2.onnx"
 
@@ -41,6 +43,14 @@ class ModelConfig:
     # Normalisasi area area ini menjadi dengan rentang: list of (x1, y1, x2, y2) in [0,1] coords.
     # Any detection whose box center lies inside one of these regions is dropped..
     ignore_regions: List[Tuple[float, float, float, float]] = None
+
+    # Torch-specific options (used only when backend == "torch")
+    # device:
+    #   - "auto": use CUDA if available, otherwise CPU.
+    #   - "cpu", "cuda", or any valid torch device string.
+    torch_device: str = "auto"
+    # Whether to run the model in half precision when using CUDA.
+    torch_use_half: bool = False
 
     def __post_init__(self) -> None:
         # Penggunaan kelas koko pada projek ini, untuk data lengkapnya bisa dilihat di Models/metadata.yaml:

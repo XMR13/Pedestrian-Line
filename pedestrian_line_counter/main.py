@@ -38,8 +38,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backend",
         type=str,
-        choices=["motion", "onnx"],
-        help="Detector backend: 'motion' (no model), 'onnx', dan torch.",
+        choices=["motion", "onnx", "torch"],
+        help="Detector backend: 'motion' (no model), 'onnx', atau 'torch'.",
     )
     parser.add_argument(
         "--model",

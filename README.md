@@ -49,7 +49,7 @@ Dependencies & Setup
 
 Requirements:
 
-- Python 3.8+.
+- Python 3.10+.
 - `uv` as the Python package manager.
 
 Install dependencies:
@@ -62,8 +62,8 @@ Key runtime dependencies (from `pyproject.toml`):
 
 - `opencv-python`
 - `numpy`
-- `onnxruntime` (CPU)
-- `onnxruntime-gpu` (optional, if you have a compatible GPU)
+- `onnxruntime` / `onnxruntime-gpu` (ONNX backend, default)
+- (optional) `torch` if you want to use the Torch backend.
 
 
 Model & Data Layout
@@ -146,6 +146,34 @@ uv run python main.py \
   --line-json config/line.json \
   --show
 ```
+
+
+Optional Torch Backend
+----------------------
+
+If you prefer to experiment with a PyTorch model instead of ONNX:
+
+- Install PyTorch in your environment (for example, following the official
+  PyTorch instructions for your OS / CUDA setup).
+- Place your Torch model weights (e.g. `model.pt`) somewhere accessible,
+  typically under `Models/`.
+- Run the app with `--backend torch` and point `--model` to the `.pt` file:
+
+```bash
+uv run python main.py \
+  --backend torch \
+  --model Models/your_model.pt \
+  --input media/input.mp4 \
+  --output media/output_torch.mp4 \
+  --line-json config/line.json \
+  --show
+```
+
+The Torch backend expects the loaded model to accept a `(1, 3, H, W)` float
+tensor in `[0, 1]` and return detections shaped roughly like `(N, 6)` with
+`[x1, y1, x2, y2, score, class_id]`. If your model uses a different
+format, you can adapt `pedestrian_line_counter/torch_detector.py` as
+needed.
 
 
 Motion‑Only Backend (No Model)
