@@ -12,14 +12,15 @@ from .structures import Detection, Track
 @dataclass
 class Tracker:
     """
-    Lightweight multi-object tracker.
+    Multi objek tracker
+
+    Simmple greedy tracker (belum menggunakan tracker SOTA)
 
     This is a simple greedy tracker:
-    - Computes center points for detections and existing tracks.
-    - Greedily matches detections to the nearest track within a distance
-      threshold.
-    - Creates new tracks for unmatched detections.
-    - Removes tracks that have been lost for too many frames.
+    - Menhgitung titik tengah untuk deteksi dan track yang ada
+    - Secara greedy mencari deteksi ke track terdekat
+    - Buat tracking terbaru
+    - menghapus track yang ada 
     """
 
     config: TrackerConfig
@@ -86,7 +87,7 @@ class Tracker:
     @staticmethod
     def _pairwise_distances(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
-        Compute pairwise Euclidean distances between two sets of points.
+        Menghitugn pairwase euclidian distance dari 2 buah titik.
         """
 
         if a.size == 0 or b.size == 0:

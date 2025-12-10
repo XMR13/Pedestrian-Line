@@ -20,7 +20,8 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover - safe fallback
     tqdm = None
 
-
+# mendefinisikan command terlebih dahulu (later integration
+# bisa langsung dijadikan argumen dari command
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Menghtitung orang dan kendaraan ."
@@ -82,6 +83,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _build_line_points(cfg: AppConfig, width: int, height: int) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    #adalah fungsi yang mengembalikan build line points
     sx, sy = cfg.line.start_norm
     ex, ey = cfg.line.end_norm
     p1 = (int(sx * width), int(sy * height))

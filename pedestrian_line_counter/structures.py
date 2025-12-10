@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 @dataclass
 class Detection:
     """
-    A single object detection result.
+    Hasil deteksi objek.
     """
 
     x1: float
@@ -28,7 +28,7 @@ class Detection:
 @dataclass
 class Track:
     """
-    A tracked object with a stable ID.
+    Objek yang di track dengan stable ID.
     """
 
     track_id: int

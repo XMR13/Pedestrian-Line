@@ -125,4 +125,5 @@ def get_default_config() -> AppConfig:
     Mengembalikan config app.
     """
 
+    # melakukan return config untuk semua yang default
     return AppConfig()
