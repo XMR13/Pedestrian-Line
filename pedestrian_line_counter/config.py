@@ -30,10 +30,10 @@ class ModelConfig:
     # Confidence threshold sebelum model bisa menentukan bahwa objek tersebut patut diteteksi.
     confidence_threshold: float = 0.35
 
-    # NMS IoU threshold (only used by ONNX backend)
+    # NMS IoU Threshold (only used by ONNX backend)
     nms_iou_threshold: float = 0.45
 
-    # Minimum box area as a fraction of the full frame area.
+    # Minimum box area dibandingkan dengan bagian area yang lain.
     # Lowered so distant vehicles are not filtered out too aggressively.
     min_box_area_ratio: float = 0.0002
 
@@ -44,19 +44,20 @@ class ModelConfig:
     # Any detection whose box center lies inside one of these regions is dropped..
     ignore_regions: List[Tuple[float, float, float, float]] = None
 
-    # Torch-specific options (used only when backend == "torch")
+    # Opsi yang spesifik dengan torch (used only when backend == "torch")
     # device:
-    #   - "auto": use CUDA if available, otherwise CPU.
+    #   - "auto": Menggunakan CUDA jika tersedia, jika belum terrsedia, gunakan CPU.
     #   - "cpu", "cuda", or any valid torch device string.
     torch_device: str = "auto"
-    # Whether to run the model in half precision when using CUDA.
+    # Jalnkakn model ini dengan half precision or not?.
     torch_use_half: bool = False
 
     def __post_init__(self) -> None:
         # Penggunaan kelas koko pada projek ini, untuk data lengkapnya bisa dilihat di Models/metadata.yaml:
         # 0=person, 1=bicycle, 2=car, 3=motorcycle, 5=bus, 7=truck
+        # hasil dari ini bis dapat diatur dengan menggunakan config file
         if self.track_class_ids is None:
-            self.track_class_ids = [1, 2, 3, 5, 7]
+            self.track_class_ids =  [1, 2, 3, 5, 7]
         if self.ignore_regions is None:
             self.ignore_regions = [
                 # Left foliage / pole area
@@ -86,7 +87,7 @@ class LineConfig:
     """
     Konfigurasi perhitungan virtual.
 
-    Garis didefinisikan dengan koordinat hasil normalisasi relaitf terhadap
+    Garis didefinisikan dengan koordinat hasil normalisasi relatif terhadap
     vidoe framenya
 .
     """

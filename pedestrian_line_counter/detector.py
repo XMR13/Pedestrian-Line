@@ -37,7 +37,7 @@ class Detector:
 
                 available = ort.get_available_providers()
                 providers = []
-                # Prefer GPU if available, but always keep CPU as fallback
+                # Menggunakan GPU lebih disarankan 
                 if "CUDAExecutionProvider" in available:
                     providers.append("CUDAExecutionProvider")
                 if "DmlExecutionProvider" in available:
@@ -122,15 +122,17 @@ class Detector:
     # --------------------------------------------------------------------- #
     def _detect_onnx(self, frame_bgr: np.ndarray) -> List[Detection]:
         """
+        ONNX inference dengan berbasis generic
         A generic YOLO-style ONNX inference path.
-
-        This implementation assumes a single output tensor shaped like
-        (batch, num_detections, 5 + num_classes):
+        
+        Implementasi ini mengasumsikan bahwa output dari prediksi ini 
+        memiliki bentuk tensor sebagai berikut
+        (batch, num_detect, 5 + num_classes)
         [cx, cy, w, h, objectness, class_scores...].
 
-        You may need to adapt this function if your model uses a different
-        layout. The rest of the pipeline (tracker, line counter, drawing)
-        will stay the same.
+        Pastikan adaptasi fungsi ini jika menggunakan layout yang berbeda.
+        Pipeline yang lain (tracker, line counter, drawing) akan tetap sama 
+        seperti biasanya.
         """
 
         assert self._onnx_session is not None
@@ -155,7 +157,8 @@ class Detector:
         input_name = self._onnx_session.get_inputs()[0].name
         outputs = self._onnx_session.run(None, {input_name: blob})
 
-        # Some YOLO exports (e.g., Ultralytics YOLOv8/9) return shape (1, 84, 8400)
+        # post process untuk algoritma yolo 
+        # bisa mebaca backend yang terbaru (Output aneh) serta bisa juga 
         # and may include duplicate outputs. Handle this explicitly.
         pred0 = outputs[0]
 
@@ -202,12 +205,12 @@ class Detector:
         scale: float,
     ):
         """
-        Convert YOLO-style predictions into (xyxy, score, class_id) arrays.
+        Mengkonversi YOLO-style predicitons mejadi seperti ini (xyxy, score, class_id).
 
-        Supports two common layouts:
-        - (1, N, 5 + C): [cx, cy, w, h, obj, class_scores...]
-        - (1, 84, 8400): Ultralytics YOLOv8/9 export (no explicit obj column,
-          just class scores after internal objectness); we take max class score.
+        Support layout yang common
+        - (1, N, 5 + C) : [cx, cy, w, h, object, class_scores..]
+        - (1, 84, 8400) : Untuk model yolo yang lebih modern, hanya kelass score saja.
+          Kemudian diambil nilai maksimalnya
         """
 
         # Case 0: Some YOLO exports (end2end) return already-decoded boxes:
@@ -222,27 +225,25 @@ class Detector:
             scores = preds[:, 4]
             class_ids = preds[:, 5].astype(int)
             return boxes_xyxy, scores, class_ids
-
-        # Important: handle the YOLOv8/YOLOv9 (1, 84, 8400) layout
-        # *before* the generic (1, N, 5 + C) case, otherwise it will be
-        # misinterpreted and produce nonsense box coordinates and class IDs.
+        
+        # Handle yolov8/yolov9 (1, 84 8400) output (versi yoolo terbaru)
+        # sebelum generic (1, N, 5 + C) case, selain itu akan direpresentasikan dan tidak bisa diprediksi
         if preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[1] == 84:
-            # Match the working oi.py script:
-            #   - output[0] has shape (84, 8400)
-            #   - transpose to (8400, 84)
-            #   - first 4 values are [cx, cy, w, h] in the letterboxed space
-            #   - the remaining 80 values are per-class scores (logits or probs)
+            # agar matching the py script
+            # - output [0] memiliki shape (84, 8400)
+            # - transpose menjadi (8400, 84)
+            # - empat value pertama dalah [cx, cy, w, h] di space
+            # - remaining values adalah skor per kelasnya (logits atau probs)
             preds = np.squeeze(preds, axis=0)  # (84, 8400)
             preds = preds.T  # (8400, 84)
             boxes = preds[:, :4]
             class_scores = preds[:, 4:]
 
-            # Use the same semantics as oi.py:
-            # pick the best class per anchor and treat that value as the score.
+            #ambil best clas per anchor dan ambil valuenya sebagai skkor tersebut
             class_ids = np.argmax(class_scores, axis=1)
             scores = class_scores[np.arange(class_scores.shape[0]), class_ids]
 
-        # Case A: generic YOLO layout (1, N, 5 + C)
+        # Generic yolo yang lain dengan lain sebagai berikut (1, N, 5 + C)
         elif preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[2] >= 5:
             preds = np.squeeze(preds, axis=0)
             boxes = preds[:, 0:4]

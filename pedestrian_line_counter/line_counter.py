@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Tuple, Optional
 
 import numpy as np
 
@@ -30,6 +30,9 @@ class LineCounter:
     p2: Tuple[int, int]
     count_a_to_b: int = 0
     count_b_to_a: int = 0
+    count_by_class_dir: Dict[str, Dict[int, int]] = field(
+        default_factory=lambda: {"a_to_b": {}, "b_to_a": {}}
+    )
     _track_sides: Dict[int, int] = field(default_factory=dict)
 
     def update(self, tracks: Iterable[Track]) -> None:
@@ -43,6 +46,7 @@ class LineCounter:
             current_ids.add(track.track_id)
 
             px, py = track.bottom_center()
+
             side = self._point_side(px, py)
             if side == 0:
                 continue
@@ -52,8 +56,10 @@ class LineCounter:
                 # Crossing detected
                 if prev_side < 0 < side:
                     self.count_a_to_b += 1
+                    self._bump_class_count("a_to_b", track.class_id)
                 elif prev_side > 0 > side:
                     self.count_b_to_a += 1
+                    self._bump_class_count("b_to_a", track.class_id)
 
             self._track_sides[track.track_id] = side
 
@@ -81,3 +87,11 @@ class LineCounter:
         if cross < 0:
             return -1
         return 0
+
+    def _bump_class_count(self, direction: str, class_id: Optional[int]) -> None:
+        if class_id is None:
+            return
+        if direction not in self.count_by_class_dir:
+            self.count_by_class_dir[direction] = {}
+        counts = self.count_by_class_dir[direction]
+        counts[class_id] = counts.get(class_id, 0) + 1
