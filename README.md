@@ -147,6 +147,18 @@ uv run python main.py \
   --show
 ```
 
+For multiple cameras/roads, save one line JSON per camera (for example under
+`config/cameras/road_a.json`) and run:
+
+```bash
+uv run python main.py \
+  --backend onnx \
+  --model Models/yolov9-c.onnx \
+  --input media/road_a.mp4 \
+  --output media/road_a_out.mp4 \
+  --camera road_a
+```
+
 
 Optional Torch Backend
 ----------------------

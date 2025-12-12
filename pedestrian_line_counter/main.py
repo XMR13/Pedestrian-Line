@@ -9,7 +9,7 @@ import cv2
 import json
 import sys
 
-from .config import AppConfig, get_default_config
+from .config import AppConfig, ROOT_DIR, get_default_config
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter
@@ -51,6 +51,16 @@ def _parse_args() -> argparse.Namespace:
         "--line-json",
         type=str,
         help="Path to line JSON from line_picker.py (uses first line's normalized coords).",
+    )
+    parser.add_argument(
+        "--camera",
+        type=str,
+        help=(
+            "Nama camera atau path per-camera line untuk JSON"
+            "Jika diberikan sebuah nama, melihat ke config/camera/<name>.json atau config/<name>.json"
+            "Camera name or path to a per-camera line JSON. "
+            "If a name is given, looks for config/cameras/<name>.json then config/<name>.json."
+        ),
     )
     parser.add_argument(
         "--show",
@@ -169,8 +179,27 @@ def main() -> None:
         cfg.model.backend = args.backend
     if args.model:
         cfg.model.model_path = Path(args.model)
+    line_path: Optional[Path] = None
     if args.line_json:
         line_path = Path(args.line_json)
+    elif args.camera:
+        cam_arg = Path(args.camera)
+        if cam_arg.exists():
+            line_path = cam_arg
+        else:
+            candidate1 = ROOT_DIR / "config" / "cameras" / f"{args.camera}.json"
+            candidate2 = ROOT_DIR / "config" / f"{args.camera}.json"
+            if candidate1.exists():
+                line_path = candidate1
+            elif candidate2.exists():
+                line_path = candidate2
+            else:
+                raise SystemExit(
+                    f"Camera line JSON not found for '{args.camera}'. "
+                    f"Tried: {candidate1} and {candidate2}"
+                )
+
+    if line_path is not None:
         if not line_path.exists():
             raise SystemExit(f"Line JSON not found: {line_path}")
         data = json.loads(line_path.read_text())
