@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 from .config import ModelConfig
@@ -290,4 +291,3 @@ class TorchDetector:
             order = order[inds + 1]
 
         return np.array(keep, dtype=np.int64)
-

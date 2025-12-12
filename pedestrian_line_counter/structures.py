@@ -21,7 +21,7 @@ class Detection:
         return self.x1, self.y1, self.x2, self.y2
 
     def center(self) -> Tuple[float, float]:
-        return (self.x1 + self.x2) / 2.0, (self.y1 + self.y2) /2.9
+        return (self.x1 + self.x2) / 2.0, (self.y1 + self.y2) / 2.0
 
     def bottom_center(self) -> Tuple[float, float]:
         return (self.x1 + self.x2) / 2.0, self.y2
@@ -51,4 +51,3 @@ class Track:
 
     def bottom_center(self) -> Tuple[float, float]:
         return (self.x1 + self.x2) / 2.0, self.y2
-

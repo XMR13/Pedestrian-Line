@@ -87,7 +87,7 @@ class Tracker:
     @staticmethod
     def _pairwise_distances(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
-        Menghitugn pairwase euclidian distance dari 2 buah titik.
+        Menghitung pairwase euclidian distance dari 2 buah titik.
         """
 
         if a.size == 0 or b.size == 0:

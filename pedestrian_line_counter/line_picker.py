@@ -3,7 +3,7 @@ Interactive line picker for counting.
 
 Usage (Windows/GUI environment):
 
-    uv run -p 3.8 python line_picker.py --input media/WhatsApp\ Video\ 2025-12-03\ at\ 11.23.31_60de7c28.mp4 --lines 1 --save lines.json
+    uv run python pedestrian_line_counter/line_picker.py --input media/WhatsApp\ Video\ 2025-12-03\ at\ 11.23.31_60de7c28.mp4 --lines 1 --save lines.json
 
 Controls:
     - Left click: add a point.
