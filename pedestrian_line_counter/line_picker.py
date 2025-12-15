@@ -26,6 +26,7 @@ from typing import List, Tuple
 
 import cv2
 
+from .videoio_utils import open_video_capture
 
 Point = Tuple[int, int]
 NormPoint = Tuple[float, float]
@@ -60,7 +61,7 @@ def load_first_frame(path: Path):
         img = cv2.imread(str(path))
         return img
 
-    cap = cv2.VideoCapture(str(path))
+    cap = open_video_capture(path)
     if not cap.isOpened():
         return None
     ret, frame = cap.read()

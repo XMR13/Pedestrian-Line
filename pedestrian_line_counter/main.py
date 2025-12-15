@@ -4,6 +4,7 @@ import argparse
 import math
 from pathlib import Path
 from typing import Optional, Tuple
+import time
 
 import cv2
 import json
@@ -14,6 +15,7 @@ from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
 from .tracker import Tracker
+from .videoio_utils import open_video_capture
 
 try:  # pragma: no cover - optional dependency
     from tqdm import tqdm
@@ -105,6 +107,45 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable progress bar (useful if tqdm is not installed or when logging).",
     )
+    parser.add_argument(
+        "--stale-frames",
+        type=int,
+        default=2,
+        help=(
+            "Draw tracks that were not updated for up to N frames (helps debug "
+            "short detection dropouts). Use 0 to draw only tracks updated on the current frame."
+        ),
+    )
+    parser.add_argument(
+        "--resize-to",
+        type=str,
+        default=None,
+        help=(
+            "Optional processing/output size, e.g. '848x478'. "
+            "If set, frames are resized to this size to match performance/visuals across videos."
+        ),
+    )
+    parser.add_argument(
+        "--no-draw",
+        action="store_true",
+        help="Disable drawing overlays (useful for benchmarking).",
+    )
+    parser.add_argument(
+        "--no-write",
+        action="store_true",
+        help="Disable writing output video (useful for benchmarking).",
+    )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Print simple per-stage timing stats while processing.",
+    )
+    parser.add_argument(
+        "--benchmark-every",
+        type=int,
+        default=250,
+        help="How often (in frames) to print benchmark stats when --benchmark is set.",
+    )
     return parser.parse_args()
 
 
@@ -126,6 +167,18 @@ def _build_line_points_from_norm(
     sx, sy = start_norm
     ex, ey = end_norm
     return (int(sx * width), int(sy * height)), (int(ex * width), int(ey * height))
+
+
+def _parse_size(spec: str) -> Tuple[int, int]:
+    spec = (spec or "").strip().lower()
+    if "x" not in spec:
+        raise ValueError(f"Invalid size '{spec}'. Expected format like 848x478.")
+    w_str, h_str = spec.split("x", 1)
+    w = int(w_str)
+    h = int(h_str)
+    if w <= 0 or h <= 0:
+        raise ValueError(f"Invalid size '{spec}': width/height must be > 0.")
+    return w, h
 
 
 def _load_lines_from_json(path: Path) -> list[tuple[tuple[float, float], tuple[float, float]]]:
@@ -168,7 +221,7 @@ def _select_line_interactively(
     Memungkinkan user untuk memilih garis nya
     """
 
-    cap = cv2.VideoCapture(str(video_path))
+    cap = open_video_capture(video_path)
     if not cap.isOpened():
         print(f"[main] Failed to open video for line selection: {video_path}")
         return None
@@ -280,12 +333,22 @@ def main() -> None:
 
     if args.line_mode == "gate" and args.select_line:
         raise SystemExit("--select-line is only supported for --line-mode single. Use line_picker.py to save 2 lines.")
+    if args.resize_to and args.select_line:
+        raise SystemExit("--select-line is not supported together with --resize-to. Use line_picker.py to save the line JSON.")
 
-    cap = cv2.VideoCapture(str(input_path))
+    cap = open_video_capture(input_path)
     if not cap.isOpened():
         raise SystemExit(f"Failed to open video: {input_path}")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    reported_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    reported_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    backend_name = None
+    if hasattr(cap, "getBackendName"):
+        try:
+            backend_name = cap.getBackendName()
+        except Exception:
+            backend_name = None
 
     # Always infer the actual frame size from the first frame so that
     # normalized coordinates from line_picker.py map back exactly, even if
@@ -293,7 +356,13 @@ def main() -> None:
     ret, frame0 = cap.read()
     if not ret:
         raise SystemExit("Could not read any frame from input video.")
-    height, width = frame0.shape[:2]
+    input_height, input_width = frame0.shape[:2]
+    height, width = input_height, input_width
+    if args.resize_to:
+        try:
+            width, height = _parse_size(args.resize_to)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     # Menentukan maksimla frame dari waktu seconds
@@ -329,7 +398,9 @@ def main() -> None:
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+    writer = None
+    if not args.no_write:
+        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
 
     detector = Detector(cfg.model)
     tracker = Tracker(cfg.tracker)
@@ -352,8 +423,19 @@ def main() -> None:
     else:
         line_counter = LineCounter(p1=p1, p2=p2)
 
-    print(f"[main] Processing {input_path} -> {output_path}")
-    print(f"[main] Resolution: {width}x{height} @ {fps:.2f} FPS")
+    print(f"[main] Processing {input_path} -> {output_path if not args.no_write else '(no-write)'}")
+    if (input_width, input_height) != (width, height):
+        print(f"[main] Input decoded size: {input_width}x{input_height} @ {fps:.2f} FPS")
+        print(f"[main] Processing size: {width}x{height}")
+    else:
+        print(f"[main] Resolution: {width}x{height} @ {fps:.2f} FPS")
+    if backend_name:
+        print(f"[main] Video backend: {backend_name}")
+    if reported_w and reported_h and (reported_w != input_width or reported_h != input_height):
+        print(
+            f"[main] Reported size differs: {reported_w}x{reported_h} "
+            f"(using decoded {input_width}x{input_height})"
+        )
     print(f"[main] Detector backend: {cfg.model.backend}")
     if args.line_mode == "gate":
         (a1, a2), (b1, b2) = line_counter.lines
@@ -388,28 +470,66 @@ def main() -> None:
         print("[main] tqdm is not installed; run `uv run pip install tqdm` to enable a progress bar.")
 
     frame_index = 0
+    warned_size_mismatch = False
+    t_read = 0.0
+    t_detect = 0.0
+    t_track = 0.0
+    t_count = 0.0
+    t_draw = 0.0
+    t_write = 0.0
+    t_total = 0.0
+    t_frames = 0
 
     while True:
+        t0_total = time.perf_counter()
         if max_frames is not None and frame_index >= max_frames:
             break
+        t0 = time.perf_counter()
         ret, frame = cap.read()
         if not ret:
             break
 
+        # Normalize frame size for the pipeline/output.
+        if frame.shape[0] != height or frame.shape[1] != width:
+            if not warned_size_mismatch:
+                print(
+                    f"[main] Warning: decoded frame size {frame.shape[1]}x{frame.shape[0]} "
+                    f"does not match processing size {width}x{height}; resizing."
+                )
+                warned_size_mismatch = True
+            frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+        t_read += time.perf_counter() - t0
+
+        t0 = time.perf_counter()
         detections = detector.detect(frame)
+        t_detect += time.perf_counter() - t0
+
+        t0 = time.perf_counter()
         tracks = tracker.update(detections, frame_index)
+        t_track += time.perf_counter() - t0
+
         if args.line_mode == "gate":
             tracks_updated = [t for t in tracks if t.last_seen_frame == frame_index]
+            t0 = time.perf_counter()
             line_counter.update(tracks_updated, frame_index)
+            t_count += time.perf_counter() - t0
         else:
+            t0 = time.perf_counter()
             line_counter.update(tracks)
+            t_count += time.perf_counter() - t0
 
         # Gambar setiap gambar yang telah diupdate 
         # avoid "stuck" boxes when a track is kept alive across occlusions.
-        draw_tracks(frame, tracks, frame_index=frame_index)
-        draw_line_and_counts(frame, line_counter)
+        if not args.no_draw:
+            t0 = time.perf_counter()
+            draw_tracks(frame, tracks, frame_index=frame_index, stale_max_age=args.stale_frames)
+            draw_line_and_counts(frame, line_counter)
+            t_draw += time.perf_counter() - t0
 
-        writer.write(frame)
+        if writer is not None:
+            t0 = time.perf_counter()
+            writer.write(frame)
+            t_write += time.perf_counter() - t0
 
         if args.show:
             cv2.imshow("Pedestrian/Vehicle Line Counter", frame)
@@ -420,12 +540,39 @@ def main() -> None:
         if progress_bar is not None:
             progress_bar.update(1)
 
+        t_total += time.perf_counter() - t0_total
+        t_frames += 1
+        if args.benchmark and t_frames > 0 and (t_frames % max(args.benchmark_every, 1) == 0):
+            fps_eff = float(t_frames) / max(t_total, 1e-9)
+            print(
+                f"[bench] frames={t_frames} fps={fps_eff:.2f} "
+                f"read={1000*t_read/t_frames:.1f}ms "
+                f"det={1000*t_detect/t_frames:.1f}ms "
+                f"track={1000*t_track/t_frames:.1f}ms "
+                f"count={1000*t_count/t_frames:.1f}ms "
+                f"draw={1000*t_draw/t_frames:.1f}ms "
+                f"write={1000*t_write/t_frames:.1f}ms"
+            )
+
     cap.release()
-    writer.release()
+    if writer is not None:
+        writer.release()
     if progress_bar is not None:
         progress_bar.close()
     if args.show:
         cv2.destroyAllWindows()
+
+    if args.benchmark and t_frames > 0:
+        fps_eff = float(t_frames) / max(t_total, 1e-9)
+        print(
+            f"[bench] done frames={t_frames} fps={fps_eff:.2f} "
+            f"read={1000*t_read/t_frames:.1f}ms "
+            f"det={1000*t_detect/t_frames:.1f}ms "
+            f"track={1000*t_track/t_frames:.1f}ms "
+            f"count={1000*t_count/t_frames:.1f}ms "
+            f"draw={1000*t_draw/t_frames:.1f}ms "
+            f"write={1000*t_write/t_frames:.1f}ms"
+        )
 
     print(
         f"[main] Done. A->B: {line_counter.count_a_to_b}, "
