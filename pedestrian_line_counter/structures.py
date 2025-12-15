@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, Optional, Tuple
 
 
 @dataclass
@@ -42,6 +42,10 @@ class Track:
     score: float
     class_id: Optional[int]
     last_seen_frame: int
+    # Display identifier (untuk per track event)
+    display_class_id: Optional[int] = None
+    display_id: Optional[int] = None
+    display_ids_by_class: Dict[int, int] = field(default_factory=dict)
 
     def as_xyxy(self) -> Tuple[float, float, float, float]:
         return self.x1, self.y1, self.x2, self.y2

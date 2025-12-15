@@ -35,19 +35,46 @@ class Detector:
             try:
                 import onnxruntime as ort  # type: ignore
 
-                available = ort.get_available_providers()
-                providers = []
-                # Menggunakan GPU lebih disarankan 
-                if "CUDAExecutionProvider" in available:
-                    providers.append("CUDAExecutionProvider")
-                if "DmlExecutionProvider" in available:
-                    providers.append("DmlExecutionProvider")
-                providers.append("CPUExecutionProvider")
+                # Memilih provider yang bisa diakses.
+                candidate_providers = [
+                    "CUDAExecutionProvider",
+                    "DmlExecutionProvider",
+                    "CPUExecutionProvider",
+                ]
 
-                self._onnx_session = ort.InferenceSession(
-                    str(self.config.model_path),
-                    providers=providers,
-                )
+                #memiliki atribut sebagai berikut:
+                providers = candidate_providers
+                if hasattr(ort, "get_available_providers"):
+                    try:
+                        available = ort.get_available_providers()
+                        providers = [p for p in candidate_providers if p in available]
+                        if not providers:
+                            providers = ["CPUExecutionProvider"]
+                    except Exception:
+                        providers = candidate_providers
+                else:
+                    print(
+                        "[detector] onnxruntime missing get_available_providers(); "
+                        "using best-effort provider list."
+                    )
+
+                try:
+                    self._onnx_session = ort.InferenceSession(
+                        str(self.config.model_path),
+                        providers=providers,
+                    )
+                except TypeError:
+                    # Older ort may not accept providers kwarg.
+                    self._onnx_session = ort.InferenceSession(str(self.config.model_path))
+                except Exception:
+                    # jika gpu provide rtidka tersdia (fail) gunakan nilai CPU only
+                    if providers != ["CPUExecutionProvider"]:
+                        self._onnx_session = ort.InferenceSession(
+                            str(self.config.model_path),
+                            providers=["CPUExecutionProvider"],
+                        )
+                    else:
+                        raise
                 self._backend = "onnx"
             except Exception as exc:  # pragma: no cover - defensive
                 print(f"[detector] Failed to initialize ONNX backend: {exc}")
@@ -56,7 +83,7 @@ class Detector:
 
         if backend == "torch":
             # Lazy import untuk mereka yang memungkinkan hal ini
-            # to install it.
+            # Jika menggunakan torch
             from .torch_detector import TorchDetector
 
             self._torch_detector = TorchDetector(self.config)
@@ -87,7 +114,7 @@ class Detector:
     def _detect_motion(self, frame_bgr: np.ndarray) -> List[Detection]:
         fgmask = self._motion_subtractor.apply(frame_bgr)
 
-        # Remove noise
+        # Hilangi noise dengan beberap operation yang digunakan pada open cv
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, kernel)
         fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_CLOSE, kernel)
@@ -171,11 +198,11 @@ class Detector:
         for (x1, y1, x2, y2), score, class_id in zip(boxes_xyxy, scores, class_ids):
             if score < self.config.confidence_threshold:
                 continue
-            # Filter out very small boxes that are likely noise
+            # filter kotak yang kecil yang berpotensi memunculkan noise
             box_area = (x2 - x1) * (y2 - y1)
             if box_area < min_area:
                 continue
-            # Filter out detections whose center falls inside any ignore region
+            #memfilter deteksi yang berada di tengah
             if self._is_in_ignore_region((x1 + x2) * 0.5, (y1 + y2) * 0.5, w, h):
                 continue
             if (

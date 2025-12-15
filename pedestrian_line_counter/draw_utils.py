@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Tuple
 
 import cv2
 import numpy as np
 
-from .line_counter import LineCounter
 from .structures import Track
 
 
@@ -34,30 +33,54 @@ def draw_tracks(
     tracks: Iterable[Track],
     frame_index: int | None = None,
     color: Color = (0, 255, 0),
+    stale_max_age: int = 2,
 ) -> None:
     """
-    Draw bounding boxes for tracks on the frame in-place.
+    Menggambar bounding box di track on per frame jika objek tersebut terdeteksi
 
-    Track IDs are kept internally for counting but are not drawn, to keep
-    the visualization focused on the objects themselves.
+    Track ID digambar denagn label yang compact dan membantu mendiagnosis pergantian ID 
+    dan under/over count, terutama pada saat kondisi ketika banyak kendaraan yang melewati garis
     """
 
     for track in tracks:
-        # Optionally draw only tracks that were updated on this frame.
-        if frame_index is not None and track.last_seen_frame != frame_index:
-            continue
+        is_updated = frame_index is None or track.last_seen_frame == frame_index
+        if not is_updated and frame_index is not None:
+            age = int(frame_index - track.last_seen_frame)
+            if age > int(max(stale_max_age, 0)):
+                continue
+
         x1, y1, x2, y2 = map(int, track.as_xyxy())
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        if is_updated:
+            box_color = color
+            thickness = 2
+            text_color = (255, 255, 255)
+        else:
+            box_color = (140, 140, 140)
+            thickness = 1
+            text_color = (220, 220, 220)
 
-        # Optional label with class name/id and score
-        label = None
-        if track.class_id is not None and 0 <= track.class_id < len(COCO_NAMES):
-            label = COCO_NAMES[track.class_id]
-        elif track.class_id is not None:
-            label = str(track.class_id)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, thickness)
 
-        if label is not None:
-            text = f"{label}"
+        #  Label yang tertate rapi : "<class>  #<track_id>" (atau hanya "#<track_id>")
+        cid = track.class_id
+        disp_ud = None
+        if cid is not None:
+            cls_key = int(cid)
+            disp_id = track.display_ids_by_class.get(cls_key)
+        if disp_id is None and track.display_id is not None and track.display_class_id == cid:
+            disp_id = track.display_id
+        if disp_id == None:
+            disp_id = track.track_id
+
+        if cid is not None and 0 <= cid < len(COCO_NAMES):
+            cls = COCO_NAMES[cid]
+            text = f"{cls}-{disp_id}"
+        elif cid is not None:
+            text = f"{cid}-{disp_id}"
+        else:
+            text = f"#{disp_id}"
+
+        if text:
             (tw, th), _ = cv2.getTextSize(
                 text, cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, thickness=1
             )
@@ -76,7 +99,7 @@ def draw_tracks(
                 (x1 + 2, y1 - 4),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
-                (255, 255, 255),
+                text_color,
                 1,
                 cv2.LINE_AA,
             )
@@ -84,17 +107,29 @@ def draw_tracks(
 
 def draw_line_and_counts(
     frame: np.ndarray,
-    line_counter: LineCounter,
+    line_counter: Any,
     color: Color = (0, 255, 255),
 ) -> None:
     """
-    Draw the virtual line and the current counts on the frame in-place.
+    Menggambar garis vritual dan perhitungan sekarang dengan frame yang ditempat (in-place)
     """
 
-    p1 = tuple(map(int, line_counter.p1))
-    p2 = tuple(map(int, line_counter.p2))
+    lines = None
+    if hasattr(line_counter, "lines"):
+        try:
+            lines = list(line_counter.lines)
+        except Exception:
+            lines = None
+    if not lines and hasattr(line_counter, "p1") and hasattr(line_counter, "p2"):
+        lines = [(line_counter.p1, line_counter.p2)]
 
-    cv2.line(frame, p1, p2, color, 2)
+    if lines:
+        line_colors = [color, (255, 255, 0)]
+        for idx, (p1_raw, p2_raw) in enumerate(lines):
+            p1 = tuple(map(int, p1_raw))
+            p2 = tuple(map(int, p2_raw))
+            c = line_colors[idx % len(line_colors)]
+            cv2.line(frame, p1, p2, c, 2)
 
     text = f"A->B: {line_counter.count_a_to_b} | B->A: {line_counter.count_b_to_a}"
     a_to_b_text = _format_class_counts_dir(

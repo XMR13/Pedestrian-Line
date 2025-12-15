@@ -28,7 +28,7 @@ class ModelConfig:
     input_size: Tuple[int, int] = (640, 640)
 
     # Confidence threshold sebelum model bisa menentukan bahwa objek tersebut patut diteteksi.
-    confidence_threshold: float = 0.5
+    confidence_threshold: float = 0.45
 
     # NMS IoU Threshold (only used by ONNX backend)
     nms_iou_threshold: float = 0.45
@@ -80,6 +80,10 @@ class TrackerConfig:
     # Nilai agak besar karena untuk kendaraan yang melaju dengan kecepatan di atas rata-rata.
     max_distance: float = 80.0
     max_lost: int = 45
+    # Track re-association tweaks:
+    # - When a track is not updated for a few frames (detector dropout / occlusion),
+    #   allow a larger matching radius to prevent track fragmentation.
+    max_distance_scale_cap: int = 5
 
 
 @dataclass

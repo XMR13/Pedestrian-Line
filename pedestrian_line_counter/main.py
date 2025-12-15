@@ -12,7 +12,7 @@ import sys
 from .config import AppConfig, ROOT_DIR, get_default_config
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
-from .line_counter import LineCounter
+from .line_counter import LineCounter, TwoLineGateCounter
 from .tracker import Tracker
 
 try:  # pragma: no cover - optional dependency
@@ -50,7 +50,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--line-json",
         type=str,
-        help="Path to line JSON from line_picker.py (uses first line's normalized coords).",
+        help=(
+            "Path to line JSON from line_picker.py. "
+            "For --line-mode single: uses the first line. "
+            "For --line-mode gate: uses the first two lines."
+        ),
     )
     parser.add_argument(
         "--camera",
@@ -85,6 +89,18 @@ def _parse_args() -> argparse.Namespace:
         help="Interactively pick the counting line on the first frame.",
     )
     parser.add_argument(
+        "--line-mode",
+        type=str,
+        default="single",
+        choices=["single", "gate"],
+        help=(
+            "Menentukan mode garis yang ingin digunakan"
+            "'single' menghitung hanya dengan menggunakan 1 garis (default behaviour)"
+            "'gate' menggunakan 2 buah garis dan meentukan arahnya berdasarkan urutan"
+            "(line1->line2 = A->B, line2->line1 = B->A)."
+        ),
+    )
+    parser.add_argument(
         "--no-progress",
         action="store_true",
         help="Disable progress bar (useful if tqdm is not installed or when logging).",
@@ -99,6 +115,50 @@ def _build_line_points(cfg: AppConfig, width: int, height: int) -> Tuple[Tuple[i
     p1 = (int(sx * width), int(sy * height))
     p2 = (int(ex * width), int(ey * height))
     return p1, p2
+
+
+def _build_line_points_from_norm(
+    start_norm: Tuple[float, float],
+    end_norm: Tuple[float, float],
+    width: int,
+    height: int,
+) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    sx, sy = start_norm
+    ex, ey = end_norm
+    return (int(sx * width), int(sy * height)), (int(ex * width), int(ey * height))
+
+
+def _load_lines_from_json(path: Path) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    data = json.loads(path.read_text())
+    if not data:
+        return []
+
+    # Current format: list[{ "normalized": {"start":[x,y],"end":[x,y]}, ... }]
+    if isinstance(data, list):
+        out: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            norm = item.get("normalized")
+            if not isinstance(norm, dict):
+                continue
+            start = norm.get("start")
+            end = norm.get("end")
+            if start is None or end is None:
+                continue
+            out.append(((float(start[0]), float(start[1])), (float(end[0]), float(end[1]))))
+        return out
+
+    # Legacy-ish fallback: dict with normalized keys.
+    if isinstance(data, dict) and "normalized" in data:
+        norm = data["normalized"]
+        start = norm.get("start")
+        end = norm.get("end")
+        if start is None or end is None:
+            return []
+        return [((float(start[0]), float(start[1])), (float(end[0]), float(end[1])))]
+
+    return []
 
 
 def _select_line_interactively(
@@ -179,6 +239,7 @@ def main() -> None:
         cfg.model.backend = args.backend
     if args.model:
         cfg.model.model_path = Path(args.model)
+
     line_path: Optional[Path] = None
     if args.line_json:
         line_path = Path(args.line_json)
@@ -199,23 +260,26 @@ def main() -> None:
                     f"Tried: {candidate1} and {candidate2}"
                 )
 
+    lines_norm: list[tuple[tuple[float, float], tuple[float, float]]] = []
     if line_path is not None:
         if not line_path.exists():
             raise SystemExit(f"Line JSON not found: {line_path}")
-        data = json.loads(line_path.read_text())
-        if not data:
-            raise SystemExit(f"Line JSON is empty: {line_path}")
-        first = data[0]
-        start_norm = tuple(first["normalized"]["start"])
-        end_norm = tuple(first["normalized"]["end"])
-        cfg.line.start_norm = (float(start_norm[0]), float(start_norm[1]))
-        cfg.line.end_norm = (float(end_norm[0]), float(end_norm[1]))
+        lines_norm = _load_lines_from_json(line_path)
+        if not lines_norm:
+            raise SystemExit(f"Line JSON is empty or invalid: {line_path}")
+        # Default: populate cfg with the first line (single-line mode).
+        (start_norm, end_norm) = lines_norm[0]
+        cfg.line.start_norm = start_norm
+        cfg.line.end_norm = end_norm
 
     input_path = cfg.io.input_path
     output_path = cfg.io.output_path
 
     if not input_path.exists():
         raise SystemExit(f"Input video not found: {input_path}")
+
+    if args.line_mode == "gate" and args.select_line:
+        raise SystemExit("--select-line is only supported for --line-mode single. Use line_picker.py to save 2 lines.")
 
     cap = cv2.VideoCapture(str(input_path))
     if not cap.isOpened():
@@ -270,12 +334,35 @@ def main() -> None:
     detector = Detector(cfg.model)
     tracker = Tracker(cfg.tracker)
 
-    line_counter = LineCounter(p1=p1, p2=p2)
+    if args.line_mode == "gate":
+        if len(lines_norm) < 2:
+            raise SystemExit(
+                "--line-mode gate requires 2 lines in --line-json/--camera JSON (pick with line_picker.py --lines 2)."
+            )
+        (l1_start, l1_end) = lines_norm[0]
+        (l2_start, l2_end) = lines_norm[1]
+        l1_p1, l1_p2 = _build_line_points_from_norm(l1_start, l1_end, width, height)
+        l2_p1, l2_p2 = _build_line_points_from_norm(l2_start, l2_end, width, height)
+        line_counter = TwoLineGateCounter(
+            line1_p1=l1_p1,
+            line1_p2=l1_p2,
+            line2_p1=l2_p1,
+            line2_p2=l2_p2,
+        )
+    else:
+        line_counter = LineCounter(p1=p1, p2=p2)
 
     print(f"[main] Processing {input_path} -> {output_path}")
     print(f"[main] Resolution: {width}x{height} @ {fps:.2f} FPS")
     print(f"[main] Detector backend: {cfg.model.backend}")
-    print(f"[main] Line: {p1} -> {p2}")
+    if args.line_mode == "gate":
+        (a1, a2), (b1, b2) = line_counter.lines
+        print(f"[main] Line mode: gate")
+        print(f"[main] Line 1: {a1} -> {a2}")
+        print(f"[main] Line 2: {b1} -> {b2}")
+    else:
+        print(f"[main] Line mode: single")
+        print(f"[main] Line: {p1} -> {p2}")
     if max_frames is not None:
         print(f"[main] Frame limit: {max_frames} (via --max-frames/--max-seconds)")
 
@@ -311,7 +398,11 @@ def main() -> None:
 
         detections = detector.detect(frame)
         tracks = tracker.update(detections, frame_index)
-        line_counter.update(tracks)
+        if args.line_mode == "gate":
+            tracks_updated = [t for t in tracks if t.last_seen_frame == frame_index]
+            line_counter.update(tracks_updated, frame_index)
+        else:
+            line_counter.update(tracks)
 
         # Gambar setiap gambar yang telah diupdate 
         # avoid "stuck" boxes when a track is kept alive across occlusions.
