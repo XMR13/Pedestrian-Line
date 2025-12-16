@@ -19,7 +19,8 @@ Pipeline inti dari project ini adalah sebagai berikut::
 > write annotated output video + print counts → Output into analytics dashbord
 >
 
-Ilustrasi cara program ini digunakan adaldh
+Ilustrasi cara program ini digunakan adalah sebagai berikut
+![gambar arsitektur](media/readme/cara_kerja.png)
 
 
 Architecture (High Level)
@@ -43,6 +44,9 @@ package:
 - `main.py` – Wrapper untuk menjalani main. `pedestrian_line_counter.main`
   so `python main.py` keeps working.
 - `scripts/` –  Debug script (tidak memiliki pengaruh terhadap jalannya program).
+
+Untuk arsitekturnya bisa dirujuk dari gambar berikut ini
+![gambar arsitektur](media/readme/arch.png)
 
 
 Dependencies & Setup
