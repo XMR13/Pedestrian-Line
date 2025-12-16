@@ -13,17 +13,16 @@ from .structures import Detection
 @dataclass
 class Detector:
     """
-    High-level detector wrapper that can use different backends.
+    High level detector wrapper yang bisa menggunakan beberapa macam backend.   
 
     Supported backends:
-    - \"motion\": simple background-subtraction detector (no classes).
-    - \"onnx\": ONNXRuntime-based detector (YOLO-style), if onnxruntime
-      and a suitable model are available.
-    - \"torch\" : Support Backend pytorch jika tersedia
+    - \"motion\": dengan melakukan perhitungan melalui background yang bergerak (no classes).
+    - \"onnx\": Berbasis ONNXruntime dengan style (model YOLO) (.onnx)
+    - \"torch\" : Menggunakan backend model pytoch (.pt) 
     """
 
     config: ModelConfig
-    _backend: str = None
+    _backend: str = None #deafult value aadalah None, dan akan dilakukan pengecekan terhadap jenis backend yang tersedia
     _motion_subtractor: Optional[cv2.BackgroundSubtractor] = None
     _onnx_session: Optional[object] = None
     _torch_detector: Optional[object] = None

@@ -1,35 +1,79 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
 
 
-def open_video_capture(path: Path) -> cv2.VideoCapture:
+def open_video_capture(
+    source: Union[str, Path],
+    *,
+    open_timeout_ms: Optional[int] = None,
+    read_timeout_ms: Optional[int] = None,
+) -> cv2.VideoCapture:
     """
-    Open a video file robustly across OpenCV backends.
+    Menjalankan video dengan openCV backend
+    Open a video source robustly across OpenCV backends.
 
-    On some builds/platforms, CAP_GSTREAMER can struggle with certain file paths
-    (notably those with spaces) when given as a plain filename. Prefer FFmpeg
-    when available, then fall back to CAP_ANY.
+    Pada beberapa build/CAP_GSTREAMER bisa mengeluarkan error untuk beberapa file path 
+    (terkhususnya dengan spaces) ketika diberikan suatu nama. Menggunakan ffmpeg jika tersedia, 
+    apabila tidak, maka gunakan CAP_ANY
+
+    Supports:
+    - Local file paths
+    - Stream URLs (e.g. RTSP)
     """
 
-    # Prefer FFmpeg when present.
-    cap = cv2.VideoCapture(str(path), cv2.CAP_FFMPEG)
-    if cap.isOpened():
+    source_str = str(source)
+
+    def _set_timeouts(cap: cv2.VideoCapture) -> None:
+        if open_timeout_ms is not None and hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+            try:
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, float(open_timeout_ms))
+            except Exception:
+                pass
+        if read_timeout_ms is not None and hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+            try:
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, float(read_timeout_ms))
+            except Exception:
+                pass
+
+    # Prefer FFPMEG jika tersedia.
+    if open_timeout_ms is not None or read_timeout_ms is not None:
+        cap = cv2.VideoCapture()
+        _set_timeouts(cap)
+        try:
+            cap.open(source_str, cv2.CAP_FFMPEG)
+        except Exception:
+            pass
+        if cap.isOpened():
+            return cap
+        cap.release()
+    else:
+        cap = cv2.VideoCapture(source_str, cv2.CAP_FFMPEG)
+        if cap.isOpened():
+            return cap
+        cap.release()
+
+    if open_timeout_ms is not None or read_timeout_ms is not None:
+        cap = cv2.VideoCapture()
+        _set_timeouts(cap)
+        try:
+            cap.open(source_str, cv2.CAP_ANY)
+        except Exception:
+            pass
         return cap
-    cap.release()
 
-    cap = cv2.VideoCapture(str(path), cv2.CAP_ANY)
+    cap = cv2.VideoCapture(source_str, cv2.CAP_ANY)
     return cap
 
 
 def read_first_frame(path: Path) -> Tuple[Optional[np.ndarray], Optional[cv2.VideoCapture]]:
     """
-    Read the first frame of a video, returning both the frame and the opened capture.
-    The caller owns the capture and should release it when done.
+    Membaca frame pertama dari video, mengemnalikan frame dan membuka capture
+    Caller memiliki capture tersebut dan harus mengembalikannya setelah selesai
     """
 
     cap = open_video_capture(path)
@@ -40,4 +84,3 @@ def read_first_frame(path: Path) -> Tuple[Optional[np.ndarray], Optional[cv2.Vid
         cap.release()
         return None, None
     return frame, cap
-

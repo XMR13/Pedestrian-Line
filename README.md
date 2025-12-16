@@ -1,47 +1,48 @@
 Pedestrian / Vehicle Line Counter
 ================================
 
-This project processes a video of a road and counts how many
-**people/vehicles** cross a virtual line in each direction. It is designed
-to be:
+## Deksripsi Project
 
-- Simple and reusable.
-- Configurable (no hard‑coded absolute paths).
-- Friendly to commercial use (permissive dependencies).
+Project ini memproses video di jalan dan akan menghitung berapa banyak **kendaraan** (sesuai dengan spesifik user) akan melewati garis virtual. 
 
-The core pipeline is:
+Selain menghitung banyak kendaraan yang melewati garis virtual tersebut, dia juga akan menhgitung kendaraan berdasarkan arah kendaraan tersebut **(A->B) atau (B->A)**, serta menghitung berdasrkan kelas kendaraant tersebut. 
+
+Project ini direncanakan untuk memenuhi kriteria sebagai berikut:
+
+
+-  Mudah digunakan dan modular..
+- Bisa digunaan untuk aplikasi komersial (menggunakan aplikasi dan library dengan *license* permisif).
+
+Pipeline inti dari project ini adalah sebagai berikut::
 
 > video → detect objects → track objects → count line crossings →
-> write annotated output video + print counts
+> write annotated output video + print counts → Output into analytics dashbord
+>
+
+Ilustrasi cara program ini digunakan adaldh
 
 
 Architecture (High Level)
 -------------------------
 
-Core application code now lives under the `pedestrian_line_counter/`
+Aplikasi inti dari project ini berada di package `pedestrian_line_counter/`
 package:
 
-- `pedestrian_line_counter/config.py` – configuration dataclasses for the whole app.
-- `pedestrian_line_counter/detector.py` – ONNXRuntime‑based YOLO‑style detector wrapper, plus a
-  motion‑based fallback.
-- `pedestrian_line_counter/tracker.py` – lightweight greedy multi‑object tracker.
-- `pedestrian_line_counter/line_counter.py` – virtual line + direction logic (A→B and B→A).
-- `pedestrian_line_counter/draw_utils.py` – drawing helpers for tracks and counters.
-- Ignore regions and noise filtering are built into the detector:
+- `pedestrian_line_counter/config.py` – Konfigurasi aplikasi.
+- `pedestrian_line_counter/detector.py` – ONNXruntime detector yang menggunakan backbone yolo sebagai algoritmanya, jika tidak berhasil akan *fallback* untuk menggunakan native *motion-based* detektor.
+- `pedestrian_line_counter/tracker.py` – Greedy multi object tracker.
+- `pedestrian_line_counter/line_counter.py` –  Logika garis vritual + logika untuk menentukan arah kendaraan tersebut (A→B and B→A).
+- `pedestrian_line_counter/draw_utils.py` – Helper untuk menggambar/menambah visual pada output program.
+- Optional ignore regions and noise filtering are built into the detector:
   - `ModelConfig.ignore_regions` (normalized rectangles) drops detections whose
-    center lies in static foliage/occlusion zones (defaults target the left
-    banana leaves and top‑right leaf).
+    center lies in configured occlusion zones (default: none).
   - `ModelConfig.min_box_area_ratio` filters out tiny boxes.
-- `pedestrian_line_counter/line_picker.py` – interactive GUI to pick line(s) and save them to JSON.
-- `pedestrian_line_counter/structures.py` – small data classes for `Detection` and `Track`.
-- `pedestrian_line_counter/main.py` – main CLI implementation.
-- `main.py` – thin wrapper that calls into `pedestrian_line_counter.main`
+- `pedestrian_line_counter/line_picker.py` – Helper script untuk menentukan garis berdasarkan gambar/kamera, kemudian disimpan kedalam format JSON.
+- `pedestrian_line_counter/structures.py` – Data class untuk objek for `Detection` and `Track`.
+- `pedestrian_line_counter/main.py` – Implementasi inti CLI.
+- `main.py` – Wrapper untuk menjalani main. `pedestrian_line_counter.main`
   so `python main.py` keeps working.
-- `media/` – local input/output videos (ignored by Git).
-- `Models/` – local ONNX model weights (ignored by Git).
-- `Progress/` – session logs that track work against `plan.md`.
-- `scripts/` – helper/debug scripts (e.g. ONNX inspection); not required
-  for normal use.
+- `scripts/` –  Debug script (tidak memiliki pengaruh terhadap jalannya program).
 
 
 Dependencies & Setup
@@ -63,14 +64,13 @@ Key runtime dependencies (from `pyproject.toml`):
 - `opencv-python`
 - `numpy`
 - `onnxruntime` / `onnxruntime-gpu` (ONNX backend, default)
-- (optional) `torch` if you want to use the Torch backend.
+- (optional) `torch` Jika ingin menggunakan backend model `pytorch.`
 
 
 Model & Data Layout
 -------------------
 
-The repository does **not** store large binaries (models or videos) in Git.
-You must place them locally:
+Repo ini tidak menyimpan model atau file biner yang besar, agra bisa menggunakan program ini, kamu harus mendownload model sendiri.
 
 - ONNX model file:
   - Expected: `Models/yolov9-c.onnx`
@@ -84,16 +84,17 @@ You must place them locally:
   - You can override via `--output`.
 
 
-Basic Usage
+Penggunaan sederhana
 -----------
 
 From WSL or a shell:
 
 ```bash
-cd "/mnt/d/RZQ/Coding/Python/Projects/Pedestrian Line"
+cd "/Pedestrian Line"
 ```
 
-Run with ONNX detector and explicit model path:
+Jalankan dengan detektor onnx dan model path
+yang ingin digunakan. Jika ingin model default bisa diatur melaui `config.py`
 
 ```bash
 uv run python main.py \
@@ -104,25 +105,24 @@ uv run python main.py \
   --show
 ```
 
-What this does:
+Apa yang dilakukan:
 
-- Loads the ONNX model with `onnxruntime` (GPU if available, else CPU).
-- Runs detection → tracking → line counting for each frame.
-- Draws bounding boxes, the virtual line, and live A→B / B→A counts.
-- Saves an annotated video to `media/output_test.mp4`.
-- Prints final totals when finished.
+-  Load model ONNX ke `onnxruntime` (GPU jika tersedia, kalau tidak kembali ke penggunaan CPU). 
+-  Menjalankan deteksi → Tracking → Menghitung untuk setiap frame 
+-  Menggambar bounding box, garis virtual, dan secara live A→B / B→A.
+-  Menyimpan video hasil anotasi ke `media/output_test.mp4`.
+-  Memprint hasil ketika sudah selesai menjalankan program (video sudah terselesaikan)
 
 
-Picking the Counting Line Interactively
+Menentukan garis virtual untuk setiap kamera yang ada
 ---------------------------------------
 
-You can define the line once using `line_picker.py` and then reuse it via
-JSON.
+Apabila terdapat lebih dari 1 buah kamera yang akan digunakan, pastinya garis - garis yang digunakan berpotensi terletak di tempat yang berbeda, maka dair itu, project ini juga bisa mengakomodir user untuk menentukan garisnya sendiri, dan menyimpannya kek dalam JSON
 
-1. Pick the line and save it:
+1. Pilih garis yang diigninakkn dan save:
 
 ```bash
-uv run python pedestrian_line_counter/line_picker.py \
+uv run python -m pedestrian_line_counter.line_picker \
   --input media/input.mp4 \
   --lines 1 \
   --save config/line.json
@@ -130,12 +130,12 @@ uv run python pedestrian_line_counter/line_picker.py \
 
 Controls:
 
-- Left click: add points.
-- `R` or `C`: reset points.
-- `Enter` / `Space`: accept when required points are placed.
+- Klik kiri: add points.
+- `R` atau `C`: Reset titik.
+- `Enter` / `Space`: Menyimpan titik dan garis yang telah ditentukan.
 - `Esc` / `Q`: cancel.
 
-2. Run the main app with that line:
+2. Jalankan aplikasi tersebut dengan garis tadi:
 
 ```bash
 uv run python main.py \
@@ -147,8 +147,8 @@ uv run python main.py \
   --show
 ```
 
-For multiple cameras/roads, save one line JSON per camera (for example under
-`config/cameras/road_a.json`) and run:
+Untuk menggunakan beberapa camera/multi camera
+terutama yang disimpan di `config/camera/<line>`:
 
 ```bash
 uv run python main.py \
@@ -160,16 +160,15 @@ uv run python main.py \
 ```
 
 
-Optional Torch Backend
+Backend pytorch (opsional)
 ----------------------
 
-If you prefer to experiment with a PyTorch model instead of ONNX:
+Jika lebih memiliih untuk menjalankan program ini dengan pytorch dibandingkan dengan onnx maka bisa harus memenuhi hal seperti ni
 
-- Install PyTorch in your environment (for example, following the official
-  PyTorch instructions for your OS / CUDA setup).
-- Place your Torch model weights (e.g. `model.pt`) somewhere accessible,
-  typically under `Models/`.
-- Run the app with `--backend torch` and point `--model` to the `.pt` file:
+- Menginstall library pytorch
+- Letakkan model dengan ekstensi pytorch `.pt` di dalam folder `Models/`.
+- Jalankan aplikasi dengan arguman `--backend torch` dan pilih model dengan ekstensi `.pt` tersebut sebagai model utamanya.
+
 
 ```bash
 uv run python main.py \
@@ -181,18 +180,17 @@ uv run python main.py \
   --show
 ```
 
-The Torch backend expects the loaded model to accept a `(1, 3, H, W)` float
-tensor in `[0, 1]` and return detections shaped roughly like `(N, 6)` with
-`[x1, y1, x2, y2, score, class_id]`. If your model uses a different
-format, you can adapt `pedestrian_line_counter/torch_detector.py` as
+Backend dari pytorch ini mengininkan model dengan dimensi `(1, 3, H, W)` float tensor dengan range nilai berada di `[0,1]` dan akan mengembalikan output dengan shape `(N, 6)`. dengan `[x1, y1, x2, y2, score, class_id]`.
+
+Jika model yang digunakan memiliki format yang berbeda, maka bisa diadaptasi dengan memodifikasi `pedestrian_line_counter/torch_detector.py`.
+
 needed.
 
 
 Motion‑Only Backend (No Model)
 ------------------------------
 
-For quick debugging or if you don’t have an ONNX model yet, you can use
-the motion‑based backend:
+Untuk debugging secara cepat jika tidak memiliki model ONNX maupun torch, motion-only ini juga menjadi default backup jika kedua model dengan ekstensi tersebut tidak tersedia:
 
 ```bash
 uv run python main.py \
@@ -202,22 +200,37 @@ uv run python main.py \
   --show
 ```
 
-This uses background subtraction instead of a learned detector, so it
-won’t classify objects but still gives you a feel for the tracking and
-counting behaviour.
+Metode yang digunakana adalah *background subtraction*, bukan detektor yang belajar dari data yang ada, jadi metode ini tidak bisa mengklasifikasikan objek. Namun, bisa dijadikan alternatif cepat untuk mentrack berapa banyak kendaraan yang melewati area tersebut.
+
+Live RTSP Mode (Experimental)
+-----------------------------
+
+Next step dari project ini adalah menjalankan semua ini dengan RTSP live feed, terutama dengan menggunakan `--rtsp-url`. Direkomendasikan untuk menjalankannya seperti ini (tidak ada file output, periodic logging, serta pmebatasan fps)
 
 
-Progress Tracking
------------------
+```bash
+uv run python main.py \
+  --backend onnx \
+  --model Models/yolov9-c.onnx \
+  --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
+  --camera road_a \
+  --no-write \
+  --target-fps 10 \
+  --log-every-seconds 5
+```
 
-Development progress is tracked in:
+Jika ingin menambahan sedikit clip, bisa dengan argumen tambahan `--output`.
 
-- `plan.md` – high‑level architecture and roadmap (kept in sync with the
-  actual implementation).
-- `Progress/` – per‑session Markdown logs that record:
-  - What changed (files added/modified/deleted).
-  - How it maps to the plan.
-  - Next steps.
+```bash
+uv run python main.py \
+  --backend onnx \
+  --model Models/yolov9-c.onnx \
+  --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
+  --camera road_a \
+  --output media/live_60s.mp4 \
+  --max-seconds 60
+```
 
-When you make significant changes, add or update a session file in
-`Progress/` following the instructions in `Progress/README.md`.
+Note: in live mode, writing is disabled by default unless you set `--output`
+or a duration/frame limit, to avoid unbounded file growth.
+

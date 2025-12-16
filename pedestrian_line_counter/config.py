@@ -28,7 +28,7 @@ class ModelConfig:
     input_size: Tuple[int, int] = (640, 640)
 
     # Confidence threshold sebelum model bisa menentukan bahwa objek tersebut patut diteteksi.
-    confidence_threshold: float = 0.45
+    confidence_threshold: float = 0.5
 
     # NMS IoU Threshold (only used by ONNX backend)
     nms_iou_threshold: float = 0.45
@@ -59,12 +59,8 @@ class ModelConfig:
         if self.track_class_ids is None:
             self.track_class_ids =  [1, 2, 3, 5, 7]
         if self.ignore_regions is None:
-            self.ignore_regions = [
-                # Left foliage / pole area
-                (0.0, 0.0, 0.45, 1.0),
-                # Top-right leaf occlusion
-                (0.82, 0.0, 1.0, 0.25),
-            ]
+            # Default: do not suppress any region. Configure per-camera if needed.
+            self.ignore_regions = []
 
 
 @dataclass

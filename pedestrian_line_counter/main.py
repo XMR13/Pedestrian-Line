@@ -14,6 +14,7 @@ from .config import AppConfig, ROOT_DIR, get_default_config
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
+from .stream_reader import StreamReader
 from .tracker import Tracker
 from .videoio_utils import open_video_capture
 
@@ -32,6 +33,12 @@ def _parse_args() -> argparse.Namespace:
         "--input",
         type=str,
         help="Path ke input yang diigninkan",
+    )
+    parser.add_argument(
+        "--rtsp-url",
+        type=str,
+        default=None,
+        help="RTSP URL for live mode. If set, --input is not used.",
     )
     parser.add_argument(
         "--output",
@@ -145,6 +152,36 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=250,
         help="How often (in frames) to print benchmark stats when --benchmark is set.",
+    )
+    parser.add_argument(
+        "--queue-size",
+        type=int,
+        default=3,
+        help="Live mode only: bounded reader queue size (drops oldest when full).",
+    )
+    parser.add_argument(
+        "--target-fps",
+        type=float,
+        default=None,
+        help="Live mode only: process at most this FPS by dropping frames.",
+    )
+    parser.add_argument(
+        "--log-every-seconds",
+        type=float,
+        default=None,
+        help="Print current totals every N seconds (useful in headless live mode).",
+    )
+    parser.add_argument(
+        "--open-timeout-ms",
+        type=int,
+        default=None,
+        help="VideoCapture open timeout in ms (best-effort; mainly for RTSP).",
+    )
+    parser.add_argument(
+        "--read-timeout-ms",
+        type=int,
+        default=None,
+        help="VideoCapture read timeout in ms (best-effort; mainly for RTSP).",
     )
     return parser.parse_args()
 
@@ -283,6 +320,16 @@ def main() -> None:
     args = _parse_args()
     cfg = get_default_config()
 
+    is_live = args.rtsp_url is not None
+    if is_live and args.input:
+        raise SystemExit("Use only one source: either --input (file) or --rtsp-url (live).")
+    if args.queue_size <= 0:
+        raise SystemExit("--queue-size must be > 0")
+    if args.target_fps is not None and args.target_fps <= 0:
+        raise SystemExit("--target-fps must be > 0")
+    if args.log_every_seconds is not None and args.log_every_seconds <= 0:
+        raise SystemExit("--log-every-seconds must be > 0")
+
     # Allow CLI overrides
     if args.input:
         cfg.io.input_path = Path(args.input)
@@ -328,19 +375,34 @@ def main() -> None:
     input_path = cfg.io.input_path
     output_path = cfg.io.output_path
 
-    if not input_path.exists():
+    if not is_live and not input_path.exists():
         raise SystemExit(f"Input video not found: {input_path}")
 
     if args.line_mode == "gate" and args.select_line:
         raise SystemExit("--select-line is only supported for --line-mode single. Use line_picker.py to save 2 lines.")
+    if is_live and args.select_line:
+        raise SystemExit("--select-line is not supported in --rtsp-url mode yet. Use --line-json/--camera instead.")
     if args.resize_to and args.select_line:
         raise SystemExit("--select-line is not supported together with --resize-to. Use line_picker.py to save the line JSON.")
 
-    cap = open_video_capture(input_path)
+    source_label = args.rtsp_url if is_live else str(input_path)
+    cap = open_video_capture(
+        args.rtsp_url if is_live else input_path,
+        open_timeout_ms=args.open_timeout_ms,
+        read_timeout_ms=args.read_timeout_ms,
+    )
     if not cap.isOpened():
-        raise SystemExit(f"Failed to open video: {input_path}")
+        raise SystemExit(f"Failed to open video source: {source_label}")
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    if fps <= 0.0:
+        fps = float(args.target_fps) if (is_live and args.target_fps) else 30.0
+    writer_fps = fps
+    if is_live and args.target_fps:
+        # In live mode we may drop frames (via StreamReader's bounded queue) to
+        # honor --target-fps. If we write the output with the source-reported FPS,
+        # playback becomes sped up. Clamp to the effective processing rate.
+        writer_fps = min(float(args.target_fps), fps) if fps > 0.0 else float(args.target_fps)
     reported_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
     reported_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
     backend_name = None
@@ -363,18 +425,23 @@ def main() -> None:
             width, height = _parse_size(args.resize_to)
         except ValueError as exc:
             raise SystemExit(str(exc))
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    if not is_live:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     # Menentukan maksimla frame dari waktu seconds
     max_frames: Optional[int] = args.max_frames
+    max_end_time_s: Optional[float] = None
     if args.max_seconds is not None:
         seconds_limit = max(args.max_seconds, 0)
-        frames_from_seconds = int(math.ceil(seconds_limit * fps))
-        max_frames = (
-            frames_from_seconds
-            if max_frames is None
-            else min(max_frames, frames_from_seconds)
-        )
+        if is_live:
+            max_end_time_s = time.time() + float(seconds_limit)
+        else:
+            frames_from_seconds = int(math.ceil(seconds_limit * fps))
+            max_frames = (
+                frames_from_seconds
+                if max_frames is None
+                else min(max_frames, frames_from_seconds)
+            )
 
     
     if args.select_line:
@@ -399,8 +466,14 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = None
+    if is_live and args.output is None and not args.no_write and max_end_time_s is None and max_frames is None:
+        print(
+            "[main] Live mode: default output is disabled to avoid unbounded file growth. "
+            "Use --output or --max-seconds (or --max-frames), or pass --no-write explicitly."
+        )
+        args.no_write = True
     if not args.no_write:
-        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+        writer = cv2.VideoWriter(str(output_path), fourcc, writer_fps, (width, height))
 
     detector = Detector(cfg.model)
     tracker = Tracker(cfg.tracker)
@@ -423,7 +496,10 @@ def main() -> None:
     else:
         line_counter = LineCounter(p1=p1, p2=p2)
 
-    print(f"[main] Processing {input_path} -> {output_path if not args.no_write else '(no-write)'}")
+    print(
+        f"[main] Processing {source_label} -> "
+        f"{output_path if not args.no_write else '(no-write)'}"
+    )
     if (input_width, input_height) != (width, height):
         print(f"[main] Input decoded size: {input_width}x{input_height} @ {fps:.2f} FPS")
         print(f"[main] Processing size: {width}x{height}")
@@ -479,82 +555,127 @@ def main() -> None:
     t_write = 0.0
     t_total = 0.0
     t_frames = 0
+    last_log_time_s = time.time()
+    next_due_time_s: Optional[float] = None
 
-    while True:
-        t0_total = time.perf_counter()
-        if max_frames is not None and frame_index >= max_frames:
-            break
-        t0 = time.perf_counter()
-        ret, frame = cap.read()
-        if not ret:
-            break
+    pending_first_frame = frame0 if is_live else None
+    reader: Optional[StreamReader] = None
+    if is_live:
+        reader = StreamReader(cap, queue_size=args.queue_size)
+        reader.start()
 
-        # Normalize frame size for the pipeline/output.
-        if frame.shape[0] != height or frame.shape[1] != width:
-            if not warned_size_mismatch:
-                print(
-                    f"[main] Warning: decoded frame size {frame.shape[1]}x{frame.shape[0]} "
-                    f"does not match processing size {width}x{height}; resizing."
-                )
-                warned_size_mismatch = True
-            frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
-        t_read += time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        detections = detector.detect(frame)
-        t_detect += time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        tracks = tracker.update(detections, frame_index)
-        t_track += time.perf_counter() - t0
-
-        if args.line_mode == "gate":
-            tracks_updated = [t for t in tracks if t.last_seen_frame == frame_index]
-            t0 = time.perf_counter()
-            line_counter.update(tracks_updated, frame_index)
-            t_count += time.perf_counter() - t0
-        else:
-            t0 = time.perf_counter()
-            line_counter.update(tracks)
-            t_count += time.perf_counter() - t0
-
-        # Gambar setiap gambar yang telah diupdate 
-        # avoid "stuck" boxes when a track is kept alive across occlusions.
-        if not args.no_draw:
-            t0 = time.perf_counter()
-            draw_tracks(frame, tracks, frame_index=frame_index, stale_max_age=args.stale_frames)
-            draw_line_and_counts(frame, line_counter)
-            t_draw += time.perf_counter() - t0
-
-        if writer is not None:
-            t0 = time.perf_counter()
-            writer.write(frame)
-            t_write += time.perf_counter() - t0
-
-        if args.show:
-            cv2.imshow("Pedestrian/Vehicle Line Counter", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+    try:
+        while True:
+            t0_total = time.perf_counter()
+            if max_frames is not None and frame_index >= max_frames:
+                break
+            if max_end_time_s is not None and time.time() >= max_end_time_s:
                 break
 
-        frame_index += 1
-        if progress_bar is not None:
-            progress_bar.update(1)
+            if is_live and args.target_fps:
+                now = time.time()
+                if next_due_time_s is None:
+                    next_due_time_s = now
+                if now < next_due_time_s:
+                    time.sleep(max(next_due_time_s - now, 0.0))
 
-        t_total += time.perf_counter() - t0_total
-        t_frames += 1
-        if args.benchmark and t_frames > 0 and (t_frames % max(args.benchmark_every, 1) == 0):
-            fps_eff = float(t_frames) / max(t_total, 1e-9)
-            print(
-                f"[bench] frames={t_frames} fps={fps_eff:.2f} "
-                f"read={1000*t_read/t_frames:.1f}ms "
-                f"det={1000*t_detect/t_frames:.1f}ms "
-                f"track={1000*t_track/t_frames:.1f}ms "
-                f"count={1000*t_count/t_frames:.1f}ms "
-                f"draw={1000*t_draw/t_frames:.1f}ms "
-                f"write={1000*t_write/t_frames:.1f}ms"
-            )
+            t0 = time.perf_counter()
+            if pending_first_frame is not None:
+                frame = pending_first_frame
+                pending_first_frame = None
+            elif reader is not None:
+                item = reader.get(timeout_s=1.0)
+                if item is None:
+                    break
+                frame = item.frame
+            else:
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-    cap.release()
+            # Normalize frame size for the pipeline/output.
+            if frame.shape[0] != height or frame.shape[1] != width:
+                if not warned_size_mismatch:
+                    print(
+                        f"[main] Warning: decoded frame size {frame.shape[1]}x{frame.shape[0]} "
+                        f"does not match processing size {width}x{height}; resizing."
+                    )
+                    warned_size_mismatch = True
+                frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+            t_read += time.perf_counter() - t0
+
+            t0 = time.perf_counter()
+            detections = detector.detect(frame)
+            t_detect += time.perf_counter() - t0
+
+            t0 = time.perf_counter()
+            tracks = tracker.update(detections, frame_index)
+            t_track += time.perf_counter() - t0
+
+            if args.line_mode == "gate":
+                tracks_updated = [t for t in tracks if t.last_seen_frame == frame_index]
+                t0 = time.perf_counter()
+                line_counter.update(tracks_updated, frame_index)
+                t_count += time.perf_counter() - t0
+            else:
+                t0 = time.perf_counter()
+                line_counter.update(tracks)
+                t_count += time.perf_counter() - t0
+
+            # Gambar setiap gambar yang telah diupdate 
+            # avoid "stuck" boxes when a track is kept alive across occlusions.
+            if not args.no_draw:
+                t0 = time.perf_counter()
+                draw_tracks(frame, tracks, frame_index=frame_index, stale_max_age=args.stale_frames)
+                draw_line_and_counts(frame, line_counter)
+                t_draw += time.perf_counter() - t0
+
+            if writer is not None:
+                t0 = time.perf_counter()
+                writer.write(frame)
+                t_write += time.perf_counter() - t0
+
+            if args.show:
+                cv2.imshow("Pedestrian/Vehicle Line Counter", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+
+            frame_index += 1
+            if progress_bar is not None:
+                progress_bar.update(1)
+
+            t_total += time.perf_counter() - t0_total
+            t_frames += 1
+            if args.target_fps:
+                next_due_time_s = time.time() + (1.0 / max(float(args.target_fps), 1e-9))
+
+            if args.log_every_seconds:
+                now = time.time()
+                if (now - last_log_time_s) >= float(args.log_every_seconds):
+                    print(
+                        f"[live] frames={t_frames} A->B={line_counter.count_a_to_b} "
+                        f"B->A={line_counter.count_b_to_a}"
+                    )
+                    last_log_time_s = now
+
+            if args.benchmark and t_frames > 0 and (t_frames % max(args.benchmark_every, 1) == 0):
+                fps_eff = float(t_frames) / max(t_total, 1e-9)
+                print(
+                    f"[bench] frames={t_frames} fps={fps_eff:.2f} "
+                    f"read={1000*t_read/t_frames:.1f}ms "
+                    f"det={1000*t_detect/t_frames:.1f}ms "
+                    f"track={1000*t_track/t_frames:.1f}ms "
+                    f"count={1000*t_count/t_frames:.1f}ms "
+                    f"draw={1000*t_draw/t_frames:.1f}ms "
+                    f"write={1000*t_write/t_frames:.1f}ms"
+                )
+    except KeyboardInterrupt:
+        print("[main] Interrupted (Ctrl-C). Shutting down...")
+
+    if reader is not None:
+        reader.stop()
+    else:
+        cap.release()
     if writer is not None:
         writer.release()
     if progress_bar is not None:

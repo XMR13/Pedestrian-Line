@@ -3,7 +3,9 @@ Interactive line picker for counting.
 
 Usage (Windows/GUI environment):
 
-    uv run python pedestrian_line_counter/line_picker.py --input media/WhatsApp\ Video\ 2025-12-03\ at\ 11.23.31_60de7c28.mp4 --lines 1 --save lines.json
+    uv run python -m pedestrian_line_counter.line_picker --input media/input.mp4 --lines 1 --save lines.json
+    # also works when run as a script from the repo root:
+    uv run python pedestrian_line_counter/line_picker.py --input media/input.mp4 --lines 1 --save lines.json
 
 Controls:
     - Left click: add a point.
@@ -26,7 +28,12 @@ from typing import List, Tuple
 
 import cv2
 
-from .videoio_utils import open_video_capture
+try:
+    #ketika mengkesekusi sebagai modul: `python -m pedestrian_line_counter.line_picker`
+    from .videoio_utils import open_video_capture
+except ImportError:  # pragma: no cover
+    # Ketika dieksekusi dengan script dari repo root : `python pedestrian_line_counter/line_picker.py'
+    from pedestrian_line_counter.videoio_utils import open_video_capture
 
 Point = Tuple[int, int]
 NormPoint = Tuple[float, float]
