@@ -18,6 +18,7 @@ class Detector:
     Supported backends:
     - \"motion\": dengan melakukan perhitungan melalui background yang bergerak (no classes).
     - \"onnx\": Berbasis ONNXruntime dengan style (model YOLO) (.onnx)
+    - \"tensorrt\": TensorRT engine runtime (.engine) for Jetson / NVIDIA GPUs.
     - \"torch\" : Menggunakan backend model pytoch (.pt) 
     """
 
@@ -25,6 +26,7 @@ class Detector:
     _backend: str = None #deafult value aadalah None, dan akan dilakukan pengecekan terhadap jenis backend yang tersedia
     _motion_subtractor: Optional[cv2.BackgroundSubtractor] = None
     _onnx_session: Optional[object] = None
+    _trt_runner: Optional[object] = None
     _torch_detector: Optional[object] = None
 
     def __post_init__(self) -> None:
@@ -80,6 +82,18 @@ class Detector:
                 print("[detector] Falling back to motion-based detector.")
                 backend = "motion"
 
+        if backend == "tensorrt":
+            if str(self.config.model_path).lower().endswith(".onnx"):
+                raise RuntimeError(
+                    "TensorRT backend expects a TensorRT engine file (.engine). "
+                    "Build an engine on the target device and pass it via --model."
+                )
+            from .tensorrt_runner import TensorRTRunner
+
+            self._trt_runner = TensorRTRunner(self.config.model_path,
+                                              input_size=self.config.input_size)
+            self._backend = "tensorrt"
+
         if backend == "torch":
             # Lazy import untuk mereka yang memungkinkan hal ini
             # Jika menggunakan torch
@@ -101,6 +115,8 @@ class Detector:
 
         if self._backend == "onnx" and self._onnx_session is not None:
             return self._detect_onnx(frame_bgr)
+        if self._backend == "tensorrt" and self._trt_runner is not None:
+            return self._detect_tensorrt(frame_bgr)
         if self._backend == "torch" and self._torch_detector is not None:
             return self._torch_detector.detect(frame_bgr)
 
@@ -221,6 +237,75 @@ class Detector:
             )
         return detections
 
+    # --------------------------------------------------------------------- #
+    # TensorRT (YOLO-style) detector (Menggunakan model ekstensi .engine)
+    # --------------------------------------------------------------------- #
+    def _detect_tensorrt(self, frame_bgr: np.ndarray) -> List[Detection]:
+        """
+        TensorRT infernece backend
+
+        Asumsikan engine mengoutputkan a YOLO-style tensor yang sudah sesuai dengan 
+        _postprocess_yolo_generic'.
+        """
+
+        assert self._trt_runner is not None
+
+        input_width, input_height = self._trt_runner.input_hw
+        img = frame_bgr
+        h, w = img.shape[:2]
+        frame_area = float(w * h)
+
+        # letterbox resize (same dengan onnx, namun input sizenya diturunkan dari .engine model file)
+        scale = min(input_width / w, input_height / h)
+        new_w, new_h = int(w * scale), int(h * scale)
+        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        canvas = np.full((input_height, input_width, 3), 114, dtype=np.uint8)
+        dw, dh = (input_width - new_w) // 2, (input_height - new_h) // 2
+        canvas[dh : dh + new_h, dw : dw + new_w] = resized
+
+        blob = canvas[:, :, ::-1].astype(np.float32) / 255.0  # BGR->RGB, normalize
+        blob = np.transpose(blob, (2, 0, 1))  # HWC -> CHW
+        blob = np.expand_dims(blob, 0)
+
+        outputs = self._trt_runner.infer(blob)
+        if not outputs:
+            return []
+        
+        # pilih most yolo output jika .engine memiliki beberapa output
+        pred0 = outputs[0]
+        for out in outputs:
+            if out.ndim == 3 and out.shape[0] == 1:
+                pred0 = out
+                break
+
+        boxes_xyxy, scores, class_ids = self._postprocess_yolo_generic(
+            pred0, w, h, dw, dh, scale
+        )
+
+        detections: List[Detection] = []
+        min_area = self.config.min_box_area_ratio * frame_area
+        for (x1, y1, x2, y2), score, class_id in zip(boxes_xyxy, scores, class_ids):
+            if score < self.config.confidence_threshold:
+                continue
+            box_area = (x2 - x1) * (y2 - y1)
+            if box_area < min_area:
+                continue
+            if self._is_in_ignore_region((x1 + x2) * 0.5, (y1 + y2) * 0.5, w, h):
+                continue
+            if self.config.track_class_ids and class_id not in self.config.track_class_ids:
+                continue
+            detections.append(
+                Detection(
+                    x1=float(x1),
+                    y1=float(y1),
+                    x2=float(x2),
+                    y2=float(y2),
+                    score=float(score),
+                    class_id=int(class_id),
+                )
+            )
+        return detections
+
     def _postprocess_yolo_generic(
         self,
         preds: np.ndarray,
@@ -266,6 +351,15 @@ class Detector:
             class_scores = preds[:, 4:]
 
             #ambil best clas per anchor dan ambil valuenya sebagai skkor tersebut
+            class_ids = np.argmax(class_scores, axis=1)
+            scores = class_scores[np.arange(class_scores.shape[0]), class_ids]
+
+        # Layout alternatif lagi yang terkadang dihasilkan ketika mengotuptukan hal ini  (1, K, 84)
+        # dimana 84 = 4 Box parameter (x, y , w, h) ditambah dengan 80 class score (tidak ada objectness)
+        elif preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[2] == 84:
+            preds = np.squeeze(preds, axis=0)  # (K, 84)
+            boxes = preds[:, :4]
+            class_scores = preds[:, 4:]
             class_ids = np.argmax(class_scores, axis=1)
             scores = class_scores[np.arange(class_scores.shape[0]), class_ids]
 

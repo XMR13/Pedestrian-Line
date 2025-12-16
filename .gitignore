@@ -8,7 +8,7 @@ wheels/
 
 
 # folders (local data / large artifacts)
-media/
+media/prog/
 Progress/
 Models/
 docs/

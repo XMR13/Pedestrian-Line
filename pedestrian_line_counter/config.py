@@ -14,12 +14,12 @@ class ModelConfig:
     Konfirugasi yang bisa di set untuk detektor, pada config ini juga terdapat
     metode alternatif untuk menjalankan program, seperti model torch dan kemudian non AI model.
     """
-
-    # "onnx" | "motion"
+    # "onnx" | "tensorrt" | "motion"
     backend: str = "motion"
 
     # Path to a model file.
     # - When backend == "onnx": expected to be an ONNX file.
+    # - When backend == "tensorrt": expected to be a TensorRT `.engine` file (built on target device).
     # - When backend == "torch": expected to be a Torch `.pt` / `.pth` file.
     # Defaults to a typical YOLOv9-s export under the local Models/ folder.
     model_path: Path = ROOT_DIR / "Models" / "yolov9-s_v2.onnx"

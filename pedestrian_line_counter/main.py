@@ -48,13 +48,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backend",
         type=str,
-        choices=["motion", "onnx", "torch"],
-        help="Detector backend: 'motion' (no model), 'onnx', atau 'torch'.",
+        choices=["motion", "onnx", "tensorrt", "torch"],
+        help="Detector backend: 'motion' (no model), 'onnx', 'tensorrt' (.engine), atau 'torch'.",
     )
     parser.add_argument(
         "--model",
         type=str,
-        help="Tambahkan model yang diinginkan (bisa berupa .pt atau .onnx). Overrides config.",
+        help="Model path override (.onnx for onnx, .engine for tensorrt, .pt/.pth for torch).",
     )
     parser.add_argument(
         "--line-json",

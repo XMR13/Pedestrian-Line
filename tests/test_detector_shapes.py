@@ -71,6 +71,34 @@ def test_postprocess_ultralytics_84xk_layout() -> None:
     assert np.allclose(scores, [0.9, 0.8, 0.7])
 
 
+def test_postprocess_kx84_layout() -> None:
+    det = _make_detector()
+
+    k = 3
+    preds = np.zeros((1, k, 84), dtype=np.float32)
+
+    # Anchor 0
+    preds[0, 0, 0:4] = [50, 50, 20, 10]
+    preds[0, 0, 4 + 2] = 0.9  # class 2
+
+    # Anchor 1
+    preds[0, 1, 0:4] = [20, 20, 10, 10]
+    preds[0, 1, 4 + 7] = 0.8  # class 7
+
+    # Anchor 2
+    preds[0, 2, 0:4] = [80, 40, 12, 8]
+    preds[0, 2, 4 + 5] = 0.7  # class 5
+
+    boxes, scores, class_ids = det._postprocess_yolo_generic(
+        preds, orig_w=100, orig_h=100, dw=0, dh=0, scale=1.0
+    )
+
+    assert boxes.shape[0] == 3
+    assert boxes.shape[1] == 4
+    assert class_ids.tolist() == [2, 7, 5]
+    assert np.allclose(scores, [0.9, 0.8, 0.7])
+
+
 def test_postprocess_generic_5_plus_c_layout() -> None:
     det = _make_detector()
 
@@ -92,4 +120,3 @@ def test_postprocess_generic_5_plus_c_layout() -> None:
     assert boxes.shape == (2, 4)
     assert class_ids.tolist() == [1, 2]
     assert np.allclose(scores, [0.8 * 0.9, 0.5 * 1.0])
-
