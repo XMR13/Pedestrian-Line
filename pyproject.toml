@@ -1,7 +1,7 @@
 [project]
 name = "pedestrian-line"
 version = "0.2.0"
-description = "Add your description here"
+description = "Directional line-crossing counter for target vehicle subclasses (video/RTSP)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

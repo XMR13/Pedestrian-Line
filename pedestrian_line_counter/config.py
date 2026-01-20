@@ -1,6 +1,8 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # Project root (one level above the package directory)
@@ -22,7 +24,7 @@ class ModelConfig:
     # - When backend == "tensorrt": expected to be a TensorRT `.engine` file (built on target device).
     # - When backend == "torch": expected to be a Torch `.pt` / `.pth` file.
     # Defaults to a typical YOLOv9-s export under the local Models/ folder.
-    model_path: Path = ROOT_DIR / "Models" / "yolov9-s_v2.onnx"
+    model_path: Path = ROOT_DIR / "Models" / "vehicle_subclasses.onnx"
 
     # Common YOLO-style models use 640x640 or 416x416.
     input_size: Tuple[int, int] = (640, 640)
@@ -37,12 +39,28 @@ class ModelConfig:
     # Lowered so distant vehicles are not filtered out too aggressively.
     min_box_area_ratio: float = 0.0002
 
-    # ID kelas yang akan termasuk bagian dari tracking
-    track_class_ids: List[int] = None
+    # ID kelas yang akan termasuk bagian dari tracking + counting.
+    #
+    # Penting: untuk backend berbasis model ("onnx"/"tensorrt"/"torch"), project ini
+    # didesain untuk menghitung *hanya* kelas kendaraan target. Jadi biasanya kamu
+    # akan mengisi list ini dengan class_id kendaraan yang relevan untuk use-case ini.
+    #
+    # Jika list ini kosong, model-based backend dapat menolak untuk jalan (lihat `allow_all_classes`).
+    track_class_ids: List[int] = field(default_factory=list)
+
+    # Optional mapping `class_id -> name` untuk overlay dan laporan.
+    # Format yang didukung:
+    # - YAML: `{names: [..]}` atau `{names: {0: "truck", 1: "pickup"}}`
+    # - JSON: list atau dict dengan key int/str-int.
+    class_names_path: Optional[Path] = None
 
     # Normalisasi area area ini menjadi dengan rentang: list of (x1, y1, x2, y2) in [0,1] coords.
     # Any detection whose box center lies inside one of these regions is dropped..
-    ignore_regions: List[Tuple[float, float, float, float]] = None
+    ignore_regions: List[Tuple[float, float, float, float]] = field(default_factory=list)
+
+    # Advanced escape hatch: allow running model-based backends without class filtering.
+    # Default False to avoid accidentally counting irrelevant classes.
+    allow_all_classes: bool = False
 
     # Opsi yang spesifik dengan torch (used only when backend == "torch")
     # device:
@@ -52,15 +70,47 @@ class ModelConfig:
     # Jalnkakn model ini dengan half precision or not?.
     torch_use_half: bool = False
 
-    def __post_init__(self) -> None:
-        # Penggunaan kelas koko pada projek ini, untuk data lengkapnya bisa dilihat di Models/metadata.yaml:
-        # 0=person, 1=bicycle, 2=car, 3=motorcycle, 5=bus, 7=truck
-        # hasil dari ini bis dapat diatur dengan menggunakan config file
-        if self.track_class_ids is None:
-            self.track_class_ids =  [1, 2, 3, 5, 7]
-        if self.ignore_regions is None:
-            # Default: do not suppress any region. Configure per-camera if needed.
-            self.ignore_regions = []
+def load_class_names(path: Path) -> Dict[int, str]:
+    """
+    Load a class-name map from YAML or JSON.
+
+    Supported shapes:
+    - YAML dict with `names: [...]` or `names: {id: name, ...}`
+    - JSON list: ["truck", "pickup", ...]  (index is class_id)
+    - JSON dict: {"0": "truck", "1": "pickup", ...}
+
+    Returns a dict mapping integer class IDs to display names.
+    """
+
+    suffix = path.suffix.lower()
+    if suffix in {".yaml", ".yml"}:
+        import yaml  # type: ignore
+
+        data = yaml.safe_load(path.read_text())
+    elif suffix == ".json":
+        import json
+
+        data = json.loads(path.read_text())
+    else:
+        raise ValueError(f"Unsupported class names file type: {path}")
+
+    if isinstance(data, dict) and "names" in data:
+        data = data["names"]
+
+    if isinstance(data, list):
+        return {int(i): str(name) for i, name in enumerate(data)}
+
+    if isinstance(data, dict):
+        out: Dict[int, str] = {}
+        for k, v in data.items():
+            try:
+                cid = int(k)
+            except Exception:
+                continue
+            out[cid] = str(v)
+        return out
+
+    raise ValueError(f"Invalid class names file contents: {path}")
 
 
 @dataclass
@@ -104,7 +154,7 @@ class IOConfig:
     """
 
     # Dapat di ovveride dengan menggunakan Command Line Interfae.
-    input_path: Path = ROOT_DIR / "media" / "WhatsApp Video 2025-12-03 at 11.23.31_60de7c28.mp4"
+    input_path: Path = ROOT_DIR / "media" / "input.mp4"
     output_path: Path = ROOT_DIR / "output.mp4"
 
 
@@ -115,10 +165,10 @@ class AppConfig:
     .
     """
 
-    model: ModelConfig = ModelConfig()
-    tracker: TrackerConfig = TrackerConfig()
-    line: LineConfig = LineConfig()
-    io: IOConfig = IOConfig()
+    model: ModelConfig = field(default_factory=ModelConfig)
+    tracker: TrackerConfig = field(default_factory=TrackerConfig)
+    line: LineConfig = field(default_factory=LineConfig)
+    io: IOConfig = field(default_factory=IOConfig)
 
 
 def get_default_config() -> AppConfig:

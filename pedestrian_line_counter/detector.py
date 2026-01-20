@@ -32,6 +32,15 @@ class Detector:
     def __post_init__(self) -> None:
         backend = (self.config.backend or "motion").lower()
 
+        if backend in {"onnx", "tensorrt", "torch"} and not self.config.track_class_ids and not getattr(
+            self.config, "allow_all_classes", False
+        ):
+            raise ValueError(
+                "Model-based backends require an explicit target class filter. "
+                "Set `ModelConfig.track_class_ids` (or pass `--class-ids`) to the vehicle subclass IDs "
+                "you want to count, or set `ModelConfig.allow_all_classes=True` for debugging."
+            )
+
         if backend == "onnx":
             try:
                 import onnxruntime as ort  # type: ignore

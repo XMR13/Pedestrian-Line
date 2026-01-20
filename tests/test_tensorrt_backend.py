@@ -13,6 +13,7 @@ def test_tensorrt_backend_reports_missing_deps(monkeypatch, tmp_path: Path) -> N
 
     cfg = ModelConfig(backend="tensorrt")
     cfg.model_path = engine_path
+    cfg.allow_all_classes = True
 
     import builtins
 
@@ -35,6 +36,7 @@ def test_tensorrt_backend_rejects_onnx_path(tmp_path: Path) -> None:
 
     cfg = ModelConfig(backend="tensorrt")
     cfg.model_path = onnx_path
+    cfg.allow_all_classes = True
 
     with pytest.raises(RuntimeError):
         Detector(cfg)

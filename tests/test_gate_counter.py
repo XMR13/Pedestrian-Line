@@ -38,6 +38,7 @@ def test_gate_counts_a_to_b_when_crossing_line1_then_line2() -> None:
     ]
 
     for i, (x, y) in enumerate(positions):
+        # class_id here is an arbitrary "vehicle subclass" ID for testing.
         gate.update([_make_track(1, x, y, class_id=2, frame_index=i)], frame_index=i)
 
     assert gate.count_a_to_b == 1
@@ -66,6 +67,7 @@ def test_gate_counts_b_to_a_when_crossing_line2_then_line1() -> None:
     ]
 
     for i, (x, y) in enumerate(positions):
+        # class_id here is an arbitrary "vehicle subclass" ID for testing.
         gate.update([_make_track(2, x, y, class_id=7, frame_index=i)], frame_index=i)
 
     assert gate.count_a_to_b == 0
@@ -97,4 +99,3 @@ def test_gate_does_not_count_if_only_one_line_crossed() -> None:
 
     assert gate.count_a_to_b == 0
     assert gate.count_b_to_a == 0
-

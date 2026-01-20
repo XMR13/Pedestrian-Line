@@ -1,14 +1,18 @@
-Pedestrian / Vehicle Line Counter
+Vehicle Subclass Line Counter
 ================================
 
 ## Deksripsi Project
 
-Project ini memproses video di jalan dan akan menghitung berapa banyak **kendaraan** (sesuai dengan spesifik user) akan melewati garis virtual. 
+Project ini memproses video di jalan dan akan menghitung berapa banyak **kendaraan tertentu** (mis. *truck, trailer, pickup*, dll — daftar kelas akan ditentukan kemudian) yang melewati garis virtual.
 
-Selain menghitung banyak kendaraan yang melewati garis virtual tersebut, dia juga akan menhgitung kendaraan berdasarkan arah kendaraan tersebut **(A->B) atau (B->A)**, serta menghitung berdasrkan kelas kendaraant tersebut. 
+Selain menghitung banyak kendaraan yang melewati garis virtual tersebut, program ini juga menghitung berdasarkan arah kendaraan **(A->B) atau (B->A)**, serta menghitung berdasarkan **kelas kendaraan** (sesuai model yang digunakan).
 
 Project ini direncanakan untuk memenuhi kriteria sebagai berikut:
 
+- Fokus baru (overhaul):
+  - Bukan untuk tracking person/pedestrian.
+  - Hanya tracking + counting **kelas kendaraan target** (kelas kendaraan lain tidak dihitung).
+  - Model yang tersedia saat ini belum cukup untuk klasifikasi spesifik tersebut, jadi langkah terdekat adalah **annotasi dataset** untuk melatih model baru.
 
 -  Mudah digunakan dan modular..
 - Bisa digunaan untuk aplikasi komersial (menggunakan aplikasi dan library dengan *license* permisif).
@@ -77,15 +81,35 @@ Model & Data Layout
 Repo ini tidak menyimpan model atau file biner yang besar, agra bisa menggunakan program ini, kamu harus mendownload model sendiri.
 
 - ONNX model file:
-  - Expected: `Models/yolov9-c.onnx`
-  - You can change the path via `--model` or by editing `ModelConfig` in
-    `config.py`.
+  - Expected (placeholder): `Models/vehicle_subclasses.onnx`
+  - You can change the path via `--model` or by editing `ModelConfig.model_path` in `pedestrian_line_counter/config.py`.
+  - Penting: untuk backend berbasis model (`onnx`/`tensorrt`/`torch`) kamu **wajib** mengatur filter kelas target (`--class-ids`) supaya tidak menghitung kelas yang tidak relevan.
 - Input videos:
   - Default: a sample file under `media/` (see `IOConfig` in `config.py`).
   - You can override via `--input`.
 - Output videos:
   - Default: `output.mp4` in the project root (see `IOConfig`).
   - You can override via `--output`.
+
+Dataset & Annotasi (Priority)
+-----------------------------
+
+Karena target kelas kendaraan (truck/trailer/pickup/dll) adalah **custom**, langkah pertama adalah menyiapkan dataset dan melakukan annotasi bounding box.
+
+- Panduan detail: lihat `docs/annotation_workflow.md`.
+- Output yang direkomendasikan untuk training: format YOLO (images + labels + `data.yaml` berisi `names:`).
+- Jika ingin otomatis mengambil kandidat gambar dari video (tanpa line counting), gunakan:
+
+```bash
+uv run python scripts/extract_candidates.py \
+  --input media/input.mp4 \
+  --output-dir data/candidates/input_mp4 \
+  --backend onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --max-per-track 3 \
+  --warmup-frames 5
+```
 
 
 Penggunaan sederhana
@@ -103,7 +127,8 @@ yang ingin digunakan. Jika ingin model default bisa diatur melaui `config.py`
 ```bash
 uv run python main.py \
   --backend onnx \
-  --model Models/yolov9-c.onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
   --input media/input.mp4 \
   --output media/output_test.mp4 \
   --show
@@ -144,7 +169,8 @@ Controls:
 ```bash
 uv run python main.py \
   --backend onnx \
-  --model Models/yolov9-c.onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
   --input media/input.mp4 \
   --output media/output_with_line.mp4 \
   --line-json config/line.json \
@@ -157,7 +183,8 @@ terutama yang disimpan di `config/camera/<line>`:
 ```bash
 uv run python main.py \
   --backend onnx \
-  --model Models/yolov9-c.onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
   --input media/road_a.mp4 \
   --output media/road_a_out.mp4 \
   --camera road_a
@@ -178,6 +205,7 @@ Jika lebih memiliih untuk menjalankan program ini dengan pytorch dibandingkan de
 uv run python main.py \
   --backend torch \
   --model Models/your_model.pt \
+  --class-ids 0,1,2 \
   --input media/input.mp4 \
   --output media/output_torch.mp4 \
   --line-json config/line.json \
@@ -215,7 +243,8 @@ Next step dari project ini adalah menjalankan semua ini dengan RTSP live feed, t
 ```bash
 uv run python main.py \
   --backend onnx \
-  --model Models/yolov9-c.onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
   --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
   --camera road_a \
   --no-write \
@@ -228,7 +257,8 @@ Jika ingin menambahan sedikit clip, bisa dengan argumen tambahan `--output`.
 ```bash
 uv run python main.py \
   --backend onnx \
-  --model Models/yolov9-c.onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
   --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
   --camera road_a \
   --output media/live_60s.mp4 \
@@ -237,4 +267,3 @@ uv run python main.py \
 
 Note: in live mode, writing is disabled by default unless you set `--output`
 or a duration/frame limit, to avoid unbounded file growth.
-

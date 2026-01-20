@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -10,22 +10,10 @@ from .structures import Track
 
 Color = Tuple[int, int, int]
 
-# COCO class names for labeling boxes (0–79).
-COCO_NAMES = [
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
-    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
-    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
-    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
-    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
-    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
-    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
-    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
-    "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
-    "mouse", "remote", "keyboard", "cell phone", "microwave", "oven",
-    "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
-    "teddy bear", "hair drier", "toothbrush",
-]
+def _class_name(class_id: int, class_names: Optional[Mapping[int, str]] = None) -> str:
+    if class_names and int(class_id) in class_names:
+        return str(class_names[int(class_id)])
+    return str(int(class_id))
 
 
 def draw_tracks(
@@ -34,6 +22,7 @@ def draw_tracks(
     frame_index: int | None = None,
     color: Color = (0, 255, 0),
     stale_max_age: int = 2,
+    class_names: Optional[Mapping[int, str]] = None,
 ) -> None:
     """
     Menggambar bounding box di track on per frame jika objek tersebut terdeteksi
@@ -72,11 +61,9 @@ def draw_tracks(
         if disp_id == None:
             disp_id = track.track_id
 
-        if cid is not None and 0 <= cid < len(COCO_NAMES):
-            cls = COCO_NAMES[cid]
+        if cid is not None:
+            cls = _class_name(int(cid), class_names=class_names)
             text = f"{cls}-{disp_id}"
-        elif cid is not None:
-            text = f"{cid}-{disp_id}"
         else:
             text = f"#{disp_id}"
 
@@ -109,6 +96,7 @@ def draw_line_and_counts(
     frame: np.ndarray,
     line_counter: Any,
     color: Color = (0, 255, 255),
+    class_names: Optional[Mapping[int, str]] = None,
 ) -> None:
     """
     Menggambar garis vritual dan perhitungan sekarang dengan frame yang ditempat (in-place)
@@ -133,10 +121,10 @@ def draw_line_and_counts(
 
     text = f"A->B: {line_counter.count_a_to_b} | B->A: {line_counter.count_b_to_a}"
     a_to_b_text = _format_class_counts_dir(
-        line_counter.count_by_class_dir.get("a_to_b", {})
+        line_counter.count_by_class_dir.get("a_to_b", {}), class_names=class_names
     )
     b_to_a_text = _format_class_counts_dir(
-        line_counter.count_by_class_dir.get("b_to_a", {})
+        line_counter.count_by_class_dir.get("b_to_a", {}), class_names=class_names
     )
 
     # Letakkan text di atas kiri frame tersebut
@@ -167,13 +155,13 @@ def draw_line_and_counts(
         )
 
 
-def _format_class_counts_dir(counts: Dict[int, int]) -> str:
+def _format_class_counts_dir(counts: Dict[int, int], class_names: Optional[Mapping[int, str]] = None) -> str:
     if not counts:
         return ""
 
     items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:4]
     parts = []
     for cid, val in items:
-        name = COCO_NAMES[cid] if 0 <= cid < len(COCO_NAMES) else str(cid)
+        name = _class_name(int(cid), class_names=class_names)
         parts.append(f"{name} {val}")
     return " | ".join(parts)

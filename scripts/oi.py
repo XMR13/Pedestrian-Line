@@ -13,8 +13,9 @@ IMG_SIZE   = 640
 CONF_THRES = 0.5
 IOU_THRES  = 0.55
 
-# COCO: 0=person, 2=car, 7=truck etc.
-# default: person, car, truck. Change this set to what you want.
+# Legacy debug helper for COCO-like models.
+# If you are using a custom vehicle-subclass model (truck/trailer/pickup/etc),
+# prefer loading names via a YOLO `data.yaml` and update `ALLOWED_CLASS_IDS` accordingly.
 ALLOWED_CLASS_IDS = {0, 2, 7,3}
 # ========================================================
 

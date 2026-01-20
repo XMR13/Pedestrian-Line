@@ -12,6 +12,7 @@ media/prog/
 Progress/
 Models/
 docs/
+media/
 
 # Virtual environments
 .venv

@@ -10,7 +10,7 @@ import cv2
 import json
 import sys
 
-from .config import AppConfig, ROOT_DIR, get_default_config
+from .config import AppConfig, ROOT_DIR, get_default_config, load_class_names
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
@@ -27,7 +27,7 @@ except Exception:  # pragma: no cover - safe fallback
 # bisa langsung dijadikan argumen dari command
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Menghtitung orang dan kendaraan ."
+        description="Menghitung kendaraan target (vehicle subclasses) yang melintasi garis virtual."
     )
     parser.add_argument(
         "--input",
@@ -55,6 +55,29 @@ def _parse_args() -> argparse.Namespace:
         "--model",
         type=str,
         help="Model path override (.onnx for onnx, .engine for tensorrt, .pt/.pth for torch).",
+    )
+    parser.add_argument(
+        "--class-ids",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated integer class IDs to track/count (required for model backends). "
+            "Example: '0,1,2'."
+        ),
+    )
+    parser.add_argument(
+        "--class-names",
+        type=str,
+        default=None,
+        help=(
+            "Optional class names mapping file (YAML/JSON) for overlays/reports. "
+            "Supports YOLO-style `data.yaml` with `names:`."
+        ),
+    )
+    parser.add_argument(
+        "--allow-all-classes",
+        action="store_true",
+        help="Debug only: allow running model backends without --class-ids (counts all detected classes).",
     )
     parser.add_argument(
         "--line-json",
@@ -339,6 +362,15 @@ def main() -> None:
         cfg.model.backend = args.backend
     if args.model:
         cfg.model.model_path = Path(args.model)
+    if args.allow_all_classes:
+        cfg.model.allow_all_classes = True
+    if args.class_ids:
+        try:
+            cfg.model.track_class_ids = [int(x.strip()) for x in args.class_ids.split(",") if x.strip() != ""]
+        except Exception:
+            raise SystemExit(f"Invalid --class-ids value: '{args.class_ids}'. Expected comma-separated integers.")
+    if args.class_names:
+        cfg.model.class_names_path = Path(args.class_names)
 
     line_path: Optional[Path] = None
     if args.line_json:
@@ -475,6 +507,19 @@ def main() -> None:
     if not args.no_write:
         writer = cv2.VideoWriter(str(output_path), fourcc, writer_fps, (width, height))
 
+    if cfg.model.backend.lower() in {"onnx", "tensorrt", "torch"} and not cfg.model.track_class_ids and not cfg.model.allow_all_classes:
+        raise SystemExit(
+            "Model-based backend selected but no target classes configured. "
+            "Pass --class-ids (comma-separated) to specify which vehicle subclasses to count, "
+            "or use --allow-all-classes for debugging."
+        )
+
+    class_names_map = None
+    if cfg.model.class_names_path is not None:
+        if not cfg.model.class_names_path.exists():
+            raise SystemExit(f"Class names file not found: {cfg.model.class_names_path}")
+        class_names_map = load_class_names(cfg.model.class_names_path)
+
     detector = Detector(cfg.model)
     tracker = Tracker(cfg.tracker)
 
@@ -513,6 +558,10 @@ def main() -> None:
             f"(using decoded {input_width}x{input_height})"
         )
     print(f"[main] Detector backend: {cfg.model.backend}")
+    if cfg.model.track_class_ids:
+        print(f"[main] Target class IDs: {sorted(set(cfg.model.track_class_ids))}")
+    if class_names_map:
+        print(f"[main] Class names loaded: {len(class_names_map)} classes")
     if args.line_mode == "gate":
         (a1, a2), (b1, b2) = line_counter.lines
         print(f"[main] Line mode: gate")
@@ -626,8 +675,14 @@ def main() -> None:
             # avoid "stuck" boxes when a track is kept alive across occlusions.
             if not args.no_draw:
                 t0 = time.perf_counter()
-                draw_tracks(frame, tracks, frame_index=frame_index, stale_max_age=args.stale_frames)
-                draw_line_and_counts(frame, line_counter)
+                draw_tracks(
+                    frame,
+                    tracks,
+                    frame_index=frame_index,
+                    stale_max_age=args.stale_frames,
+                    class_names=class_names_map,
+                )
+                draw_line_and_counts(frame, line_counter, class_names=class_names_map)
                 t_draw += time.perf_counter() - t0
 
             if writer is not None:
@@ -636,7 +691,7 @@ def main() -> None:
                 t_write += time.perf_counter() - t0
 
             if args.show:
-                cv2.imshow("Pedestrian/Vehicle Line Counter", frame)
+                cv2.imshow("Vehicle Subclass Line Counter", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
