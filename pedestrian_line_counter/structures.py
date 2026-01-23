@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Literal
 
 
 @dataclass
@@ -55,3 +55,25 @@ class Track:
 
     def bottom_center(self) -> Tuple[float, float]:
         return (self.x1 + self.x2) / 2.0, self.y2
+
+
+Direction = Literal["A_TO_B", "B_TO_A"]
+LineMode = Literal["line", "gate"]
+
+
+@dataclass(frozen=True)
+class CrossingEvent:
+    """
+    A single line-crossing event produced by the counter.
+
+    This is intentionally small and edge-friendly; the portal uploader can enrich
+    it (site/camera/run IDs, timestamps, etc.) before ingestion.
+    """
+
+    track_id: int
+    direction: Direction
+    frame_index: int
+    class_id: Optional[int] = None
+    confidence: Optional[float] = None
+    bbox_xyxy: Optional[Tuple[int, int, int, int]] = None
+    line_mode: LineMode = "line"

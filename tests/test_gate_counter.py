@@ -37,13 +37,17 @@ def test_gate_counts_a_to_b_when_crossing_line1_then_line2() -> None:
         (70, 50),
     ]
 
+    events = []
     for i, (x, y) in enumerate(positions):
         # class_id here is an arbitrary "vehicle subclass" ID for testing.
-        gate.update([_make_track(1, x, y, class_id=2, frame_index=i)], frame_index=i)
+        events.extend(gate.update([_make_track(1, x, y, class_id=2, frame_index=i)], frame_index=i))
 
     assert gate.count_a_to_b == 1
     assert gate.count_b_to_a == 0
     assert gate.count_by_class_dir["a_to_b"].get(2) == 1
+    assert len(events) == 1
+    assert events[0].direction == "A_TO_B"
+    assert events[0].class_id == 2
 
 
 def test_gate_counts_b_to_a_when_crossing_line2_then_line1() -> None:
@@ -66,13 +70,17 @@ def test_gate_counts_b_to_a_when_crossing_line2_then_line1() -> None:
         (35, 50),  # line1 crossing confirmed here => B->A
     ]
 
+    events = []
     for i, (x, y) in enumerate(positions):
         # class_id here is an arbitrary "vehicle subclass" ID for testing.
-        gate.update([_make_track(2, x, y, class_id=7, frame_index=i)], frame_index=i)
+        events.extend(gate.update([_make_track(2, x, y, class_id=7, frame_index=i)], frame_index=i))
 
     assert gate.count_a_to_b == 0
     assert gate.count_b_to_a == 1
     assert gate.count_by_class_dir["b_to_a"].get(7) == 1
+    assert len(events) == 1
+    assert events[0].direction == "B_TO_A"
+    assert events[0].class_id == 7
 
 
 def test_gate_does_not_count_if_only_one_line_crossed() -> None:
@@ -94,8 +102,10 @@ def test_gate_does_not_count_if_only_one_line_crossed() -> None:
         (52, 50),
     ]
 
+    events = []
     for i, (x, y) in enumerate(positions):
-        gate.update([_make_track(3, x, y, class_id=3, frame_index=i)], frame_index=i)
+        events.extend(gate.update([_make_track(3, x, y, class_id=3, frame_index=i)], frame_index=i))
 
     assert gate.count_a_to_b == 0
     assert gate.count_b_to_a == 0
+    assert len(events) == 0

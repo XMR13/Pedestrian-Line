@@ -38,13 +38,17 @@ def test_counts_a_to_b_once_with_class() -> None:
         (42, 35),
     ]
 
+    events = []
     for i, (x, y) in enumerate(positions):
         # class_id here is an arbitrary "vehicle subclass" ID for testing.
-        lc.update([_make_track(1, x, y, class_id=2, frame_index=i)])
+        events.extend(lc.update([_make_track(1, x, y, class_id=2, frame_index=i)], frame_index=i))
 
     assert lc.count_a_to_b == 1
     assert lc.count_b_to_a == 0
     assert lc.count_by_class_dir["a_to_b"].get(2) == 1
+    assert len(events) == 1
+    assert events[0].direction == "A_TO_B"
+    assert events[0].class_id == 2
 
 
 def test_counts_b_to_a_once_with_class() -> None:
@@ -60,10 +64,14 @@ def test_counts_b_to_a_once_with_class() -> None:
         (60, 55),
     ]
 
+    events = []
     for i, (x, y) in enumerate(positions):
         # class_id here is an arbitrary "vehicle subclass" ID for testing.
-        lc.update([_make_track(2, x, y, class_id=7, frame_index=i)])
+        events.extend(lc.update([_make_track(2, x, y, class_id=7, frame_index=i)], frame_index=i))
 
     assert lc.count_a_to_b == 0
     assert lc.count_b_to_a == 1
     assert lc.count_by_class_dir["b_to_a"].get(7) == 1
+    assert len(events) == 1
+    assert events[0].direction == "B_TO_A"
+    assert events[0].class_id == 7

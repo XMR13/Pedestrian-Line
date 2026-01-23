@@ -142,6 +142,28 @@ Apa yang dilakukan:
 -  Menyimpan video hasil anotasi ke `media/output_test.mp4`.
 -  Memprint hasil ketika sudah selesai menjalankan program (video sudah terselesaikan)
 
+Logging per-crossing (filesystem-first)
+--------------------------------------
+
+Untuk kebutuhan dashboard/website (portal) nanti, kamu bisa menulis **event per crossing** ke disk (JSONL) dan (opsional) thumbnail per event:
+
+```bash
+python3 -m pedestrian_line_counter.main \
+  --backend onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --input media/input.mp4 \
+  --spool-dir data/traffic_runs \
+  --site-id subang \
+  --camera-id cam_01
+```
+
+Output (contoh):
+
+- `data/traffic_runs/YYYY-MM-DD/<run_uid>/run.json`
+- `data/traffic_runs/YYYY-MM-DD/<run_uid>/events.jsonl`
+- `data/traffic_runs/YYYY-MM-DD/<run_uid>/thumbs/<event_uid>.jpg`
+
 
 Menentukan garis virtual untuk setiap kamera yang ada
 ---------------------------------------

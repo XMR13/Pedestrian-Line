@@ -5,7 +5,7 @@ from typing import Dict, Iterable, Tuple, Optional, List
 
 import numpy as np
 
-from .structures import Track
+from .structures import Track, CrossingEvent
 
 
 @dataclass
@@ -64,11 +64,12 @@ class LineCounter:
 
     _tracks: Dict[int, _TrackState] = field(default_factory=dict)
 
-    def update(self, tracks: Iterable[Track]) -> None:
+    def update(self, tracks: Iterable[Track], frame_index: int = 0) -> List[CrossingEvent]:
         """
         Update angkanya berdasarkan jumlah hasil tracking yanga ada.
         """
 
+        events: List[CrossingEvent] = []
         current_ids = set()
 
         line_vec = np.array([float(self.p2[0] - self.p1[0]), float(self.p2[1] - self.p1[1])], dtype=np.float32)
@@ -119,7 +120,9 @@ class LineCounter:
                 state.crossing_post_points.append((px, py))
                 state.frames_on_new_side += 1
                 if state.frames_on_new_side >= self.min_post_frames:
-                    self._finalise_crossing(state, line_dir, track.class_id)
+                    ev = self._finalise_crossing(state, line_dir, track, frame_index)
+                    if ev is not None:
+                        events.append(ev)
             elif state.crossing_active and side == state.crossing_prev_side:
                 # Kembali ke original statenya.
                 state.crossing_active = False
@@ -131,6 +134,7 @@ class LineCounter:
         for tid in list(self._tracks.keys()):
             if tid not in current_ids:
                 self._tracks.pop(tid, None)
+        return events
 
     def _start_crossing_candidate(
         self,
@@ -164,15 +168,16 @@ class LineCounter:
         self,
         state: _TrackState,
         line_dir: np.ndarray,
-        class_id: Optional[int],
-    ) -> None:
+        track: Track,
+        frame_index: int,
+    ) -> Optional[CrossingEvent]:
         """
         Menentukan arah lewatnya berdasarkan pergerakan di garis pembatas.
         """
 
         if state.has_counted:
             state.crossing_active = False
-            return
+            return None
 
         if len(state.crossing_pre_points) < self.min_pre_points:
             # Not enough run-up on the entry side; treat as ambiguous.
@@ -180,11 +185,11 @@ class LineCounter:
             state.crossing_pre_points.clear()
             state.crossing_post_points.clear()
             state.frames_on_new_side = 0
-            return
+            return None
 
         if not state.crossing_post_points:
             state.crossing_active = False
-            return
+            return None
 
         pre_avg = np.mean(np.array(state.crossing_pre_points, dtype=np.float32), axis=0)
         post_avg = np.mean(np.array(state.crossing_post_points, dtype=np.float32), axis=0)
@@ -197,20 +202,34 @@ class LineCounter:
             state.crossing_pre_points.clear()
             state.crossing_post_points.clear()
             state.frames_on_new_side = 0
-            return
+            return None
 
+        direction: str
         if along > 0:
             self.count_a_to_b += 1
-            self._bump_class_count("a_to_b", class_id)
+            self._bump_class_count("a_to_b", track.class_id)
+            direction = "A_TO_B"
         else:
             self.count_b_to_a += 1
-            self._bump_class_count("b_to_a", class_id)
+            self._bump_class_count("b_to_a", track.class_id)
+            direction = "B_TO_A"
 
         state.has_counted = True
         state.crossing_active = False
         state.crossing_pre_points.clear()
         state.crossing_post_points.clear()
         state.frames_on_new_side = 0
+        x1, y1, x2, y2 = track.as_xyxy()
+        bbox = (int(x1), int(y1), int(x2), int(y2))
+        return CrossingEvent(
+            track_id=track.track_id,
+            direction=direction,  # type: ignore[arg-type]
+            frame_index=frame_index,
+            class_id=track.class_id,
+            confidence=float(track.score) if track.score is not None else None,
+            bbox_xyxy=bbox,
+            line_mode="line",
+        )
 
     def _point_side(self, px: float, py: float) -> int:
         """
@@ -306,7 +325,8 @@ class TwoLineGateCounter:
             (self.line2_p1, self.line2_p2),
         ]
 
-    def update(self, tracks: Iterable[Track], frame_index: int) -> None:
+    def update(self, tracks: Iterable[Track], frame_index: int) -> List[CrossingEvent]:
+        events: List[CrossingEvent] = []
         current_ids = set()
 
         for track in tracks:
@@ -334,52 +354,73 @@ class TwoLineGateCounter:
             crossed2 = self._debounced_crossed(state.line2, side2)
 
             if crossed1:
-                self._handle_line_event(state, line_index=1, frame_index=frame_index, class_id=track.class_id)
+                ev = self._handle_line_event(state, line_index=1, frame_index=frame_index, track=track)
+                if ev is not None:
+                    events.append(ev)
             if crossed2:
-                self._handle_line_event(state, line_index=2, frame_index=frame_index, class_id=track.class_id)
+                ev = self._handle_line_event(state, line_index=2, frame_index=frame_index, track=track)
+                if ev is not None:
+                    events.append(ev)
 
         for tid in list(self._tracks.keys()):
             if tid not in current_ids:
                 self._tracks.pop(tid, None)
+        return events
 
     def _handle_line_event(
         self,
         state: _GateTrackState,
         line_index: int,
         frame_index: int,
-        class_id: Optional[int],
-    ) -> None:
+        track: Track,
+    ) -> Optional[CrossingEvent]:
         if state.has_counted:
-            return
+            return None
 
         if state.stage == 0:
             state.stage = 1
             state.first_line = line_index
             state.first_frame = frame_index
-            return
+            return None
 
         if state.stage == 1:
             if line_index == state.first_line:
                 #menghindari jitter
                 # avoid counting based on a stale first event.
                 state.first_frame = frame_index
-                return
+                return None
 
             if (frame_index - state.first_frame) > self.max_gap_frames:
                 # Too late; treat as a new sequence.
                 state.first_line = line_index
                 state.first_frame = frame_index
-                return
+                return None
 
             # jika hasil tracking selesai melewati dua buah garis yang telah ditentukan
+            direction: str = ""
             if state.first_line == 1 and line_index == 2:
                 self.count_a_to_b += 1
-                self._bump_class_count("a_to_b", class_id)
+                self._bump_class_count("a_to_b", track.class_id)
+                direction = "A_TO_B"
             elif state.first_line == 2 and line_index == 1:
                 self.count_b_to_a += 1
-                self._bump_class_count("b_to_a", class_id)
+                self._bump_class_count("b_to_a", track.class_id)
+                direction = "B_TO_A"
 
             state.has_counted = True
+            x1, y1, x2, y2 = track.as_xyxy()
+            bbox = (int(x1), int(y1), int(x2), int(y2))
+            if direction:
+                return CrossingEvent(
+                    track_id=track.track_id,
+                    direction=direction,  # type: ignore[arg-type]
+                    frame_index=frame_index,
+                    class_id=track.class_id,
+                    confidence=float(track.score) if track.score is not None else None,
+                    bbox_xyxy=bbox,
+                    line_mode="gate",
+                )
+        return None
 
     def _debounced_crossed(self, state: _DebouncedLineCrossState, side: int) -> bool:
         """

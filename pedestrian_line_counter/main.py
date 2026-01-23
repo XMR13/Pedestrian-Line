@@ -15,6 +15,7 @@ from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
 from .stream_reader import StreamReader
+from .traffic_spool import TrafficSpoolConfig, TrafficSpoolWriter
 from .tracker import Tracker
 from .videoio_utils import open_video_capture
 
@@ -206,6 +207,24 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="VideoCapture read timeout in ms (best-effort; mainly for RTSP).",
     )
+
+    # Filesystem-first traffic spool (for later portal upload).
+    parser.add_argument(
+        "--spool-dir",
+        type=str,
+        default=None,
+        help="Write per-crossing traffic events (events.jsonl) + thumbnails into this directory.",
+    )
+    parser.add_argument("--site-id", type=str, default="default", help="Site ID for traffic spool metadata.")
+    parser.add_argument(
+        "--camera-id",
+        type=str,
+        default=None,
+        help="Camera ID for traffic spool metadata (defaults to --camera if set).",
+    )
+    parser.add_argument("--no-spool-thumbnails", action="store_true", help="Disable writing thumbnails for crossing events.")
+    parser.add_argument("--spool-thumb-pad", type=int, default=20, help="Padding (pixels) around bbox when saving thumbnails.")
+    parser.add_argument("--spool-thumb-max-side", type=int, default=320, help="Max side (pixels) for saved thumbnails.")
     return parser.parse_args()
 
 
@@ -541,6 +560,36 @@ def main() -> None:
     else:
         line_counter = LineCounter(p1=p1, p2=p2)
 
+    spool: Optional[TrafficSpoolWriter] = None
+    if args.spool_dir:
+        cam_id = args.camera_id or (args.camera if args.camera else "camera")
+        model_version = (
+            "motion"
+            if cfg.model.backend.lower() == "motion"
+            else str(Path(cfg.model.model_path).name)
+        )
+        cfg_version = str(args.camera) if args.camera else "default"
+        source = {"type": "rtsp", "value": str(args.rtsp_url)} if is_live else {"type": "video", "value": str(input_path)}
+        spool_cfg = TrafficSpoolConfig(
+            root_dir=Path(args.spool_dir),
+            site_id=str(args.site_id),
+            camera_id=str(cam_id),
+            write_thumbnails=not args.no_spool_thumbnails,
+            thumb_pad=int(args.spool_thumb_pad),
+            thumb_max_side=int(args.spool_thumb_max_side),
+        )
+        spool = TrafficSpoolWriter(
+            spool_cfg,
+            source=source,
+            model_version=model_version,
+            cfg_version=cfg_version,
+            line_mode=("gate" if args.line_mode == "gate" else "line"),
+            line_id=("gate_1" if args.line_mode == "gate" else "line_1"),
+            fps=float(fps),
+            frame_size=(int(width), int(height)),
+            class_names=class_names_map,
+        )
+
     print(
         f"[main] Processing {source_label} -> "
         f"{output_path if not args.no_write else '(no-write)'}"
@@ -632,15 +681,18 @@ def main() -> None:
             if pending_first_frame is not None:
                 frame = pending_first_frame
                 pending_first_frame = None
+                frame_ts = time.time()
             elif reader is not None:
                 item = reader.get(timeout_s=1.0)
                 if item is None:
                     break
                 frame = item.frame
+                frame_ts = float(item.timestamp)
             else:
                 ret, frame = cap.read()
                 if not ret:
                     break
+                frame_ts = time.time()
 
             # Normalize frame size for the pipeline/output.
             if frame.shape[0] != height or frame.shape[1] != width:
@@ -664,12 +716,15 @@ def main() -> None:
             if args.line_mode == "gate":
                 tracks_updated = [t for t in tracks if t.last_seen_frame == frame_index]
                 t0 = time.perf_counter()
-                line_counter.update(tracks_updated, frame_index)
+                events = line_counter.update(tracks_updated, frame_index)
                 t_count += time.perf_counter() - t0
             else:
                 t0 = time.perf_counter()
-                line_counter.update(tracks)
+                events = line_counter.update(tracks, frame_index=frame_index)
                 t_count += time.perf_counter() - t0
+
+            if spool is not None and events:
+                spool.record_events(events, frame_bgr=frame, frame_ts=frame_ts)
 
             # Gambar setiap gambar yang telah diupdate 
             # avoid "stuck" boxes when a track is kept alive across occlusions.
@@ -733,6 +788,8 @@ def main() -> None:
         cap.release()
     if writer is not None:
         writer.release()
+    if spool is not None:
+        spool.close()
     if progress_bar is not None:
         progress_bar.close()
     if args.show:
