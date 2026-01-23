@@ -30,7 +30,7 @@ class ModelConfig:
     input_size: Tuple[int, int] = (640, 640)
 
     # Confidence threshold sebelum model bisa menentukan bahwa objek tersebut patut diteteksi.
-    confidence_threshold: float = 0.5
+    confidence_threshold: float = 0.45
 
     # NMS IoU Threshold (only used by ONNX backend)
     nms_iou_threshold: float = 0.45
