@@ -16,9 +16,8 @@ IOU_THRES  = 0.55
 # Legacy debug helper for COCO-like models.
 # If you are using a custom vehicle-subclass model (truck/trailer/pickup/etc),
 # prefer loading names via a YOLO `data.yaml` and update `ALLOWED_CLASS_IDS` accordingly.
-ALLOWED_CLASS_IDS = {0, 2, 7,3}
+ALLOWED_CLASS_IDS = {0, 2, 7, 3}
 # ========================================================
-
 
 def load_class_names(yaml_path):
     p = Path(yaml_path)
