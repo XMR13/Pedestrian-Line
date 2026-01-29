@@ -4,7 +4,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 import cv2
 
@@ -54,8 +54,13 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Extract candidate frames for annotation using detector + tracker (no line counting)."
     )
-    p.add_argument("--input", type=str, required=True, help="Input video path.")
+    p.add_argument("--input", type=str, required=True, help="Input video path or directory.")
     p.add_argument("--output-dir", type=str, required=True, help="Directory to write extracted frames.")
+    p.add_argument(
+        "--recursive",
+        action="store_true",
+        help="If --input is a directory, scan recursively for video files.",
+    )
     p.add_argument(
         "--backend",
         type=str,
@@ -142,47 +147,45 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main() -> None:
-    args = _parse_args()
+VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".mkv",
+    ".m4v",
+    ".mpeg",
+    ".mpg",
+    ".webm",
+    ".wmv",
+}
 
-    input_path = Path(args.input)
-    if not input_path.exists():
-        raise SystemExit(f"Input not found: {input_path}")
+def _iter_input_files(input_path: Path, recursive: bool) -> Iterable[Path]:
+    if input_path.is_file():
+        return [input_path]
+    if not input_path.is_dir():
+        return []
+    pattern = "**/*" if recursive else "*"
 
-    out_dir = Path(args.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    #do the iteration and for checking
+    files = [
+        path 
+        for path in sorted(input_path.glob(pattern))
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+    ]
+    return files
 
-    cfg = ModelConfig(backend=args.backend)
-    if args.model:
-        cfg.model_path = Path(args.model)
-    if args.allow_all_classes:
-        cfg.allow_all_classes = True
-    if args.class_ids:
-        try:
-            cfg.track_class_ids = _parse_class_ids(args.class_ids)
-        except Exception:
-            raise SystemExit(f"Invalid --class-ids value: '{args.class_ids}'")
-
-    if cfg.backend in {"onnx", "tensorrt", "torch"} and not cfg.track_class_ids and not cfg.allow_all_classes:
-        raise SystemExit(
-            "Model-based backend requires explicit target classes. "
-            "Pass --class-ids or use --allow-all-classes for debugging."
-        )
-
-    class_names_map = None
-    if args.class_names:
-        class_names_map = load_class_names(Path(args.class_names))
-
-    resize_to: Optional[Tuple[int, int]] = None
-    if args.resize_to:
-        try:
-            resize_to = _parse_size(args.resize_to)
-        except ValueError as exc:
-            raise SystemExit(str(exc))
-
+def _process_clip(
+    input_path: Path,
+    out_dir: Path,
+    args: argparse.Namespace,
+    cfg: ModelConfig,
+    class_names_map: Optional[Dict[int, str]],
+    resize_to: Optional[Tuple[int, int]],
+) -> Tuple[int, int]:
     cap = open_video_capture(input_path)
     if not cap.isOpened():
-        raise SystemExit(f"Failed to open: {input_path}")
+        print(f"[extract_candidates] failed to open: {input_path}")
+        return 0, 0
 
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
     if fps <= 0.0:
@@ -223,7 +226,7 @@ def main() -> None:
         progress_bar = tqdm(
             total=progress_total,
             unit="frame",
-            desc="Extracting",
+            desc=f"Extracting {input_path.name}",
             file=sys.stdout,
             leave=False,
         )
@@ -298,6 +301,60 @@ def main() -> None:
         f"[extract_candidates] done clip={input_path.name} frames={frame_index} "
         f"saved={saved_total} min_gap_frames={min_frames_between}"
     )
+    return frame_index, saved_total
+
+
+def main() -> None:
+    args = _parse_args()
+
+    input_path = Path(args.input)
+    input_files = _iter_input_files(input_path, args.recursive)
+    if not input_files:
+        raise SystemExit(f"No input files found under: {input_path}")
+
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = ModelConfig(backend=args.backend)
+    if args.model:
+        cfg.model_path = Path(args.model)
+    if args.allow_all_classes:
+        cfg.allow_all_classes = True
+    if args.class_ids:
+        try:
+            cfg.track_class_ids = _parse_class_ids(args.class_ids)
+        except Exception:
+            raise SystemExit(f"Invalid --class-ids value: '{args.class_ids}'")
+
+    if cfg.backend in {"onnx", "tensorrt", "torch"} and not cfg.track_class_ids and not cfg.allow_all_classes:
+        raise SystemExit(
+            "Model-based backend requires explicit target classes. "
+            "Pass --class-ids or use --allow-all-classes for debugging."
+        )
+
+    class_names_map = None
+    if args.class_names:
+        class_names_map = load_class_names(Path(args.class_names))
+
+    resize_to: Optional[Tuple[int, int]] = None
+    if args.resize_to:
+        try:
+            resize_to = _parse_size(args.resize_to)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+
+    total_frames = 0
+    total_saved = 0
+    for clip in input_files:
+        frames, saved = _process_clip(clip, out_dir, args, cfg, class_names_map, resize_to)
+        total_frames += frames
+        total_saved += saved
+
+    if len(input_files) > 1:
+        print(
+            f"[extract_candidates] all done clips={len(input_files)} "
+            f"frames={total_frames} saved={total_saved}"
+        )
 
 
 if __name__ == "__main__":
