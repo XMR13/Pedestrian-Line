@@ -34,6 +34,7 @@ VIDEO_EXTENSIONS = {
 }
 
 ALLOWED_IMAGE_EXTS = {"png", "bmp", "tif", "tiff"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
 
 def _normalize_ext(value: str) -> str:
@@ -115,18 +116,28 @@ def _pick_onnx_providers() -> List[str]:
     return candidate_providers
 
 
-def _iter_input_files(input_path: Path, recursive: bool) -> Iterable[Path]:
+def _gather_inputs(input_path: Path, recursive: bool) -> Tuple[List[Path], List[Path]]:
+    videos: List[Path] = []
+    images: List[Path] = []
     if input_path.is_file():
-        return [input_path]
+        suffix = input_path.suffix.lower()
+        if suffix in VIDEO_EXTENSIONS:
+            videos.append(input_path)
+        elif suffix in IMAGE_EXTENSIONS:
+            images.append(input_path)
+        return videos, images
     if not input_path.is_dir():
-        return []
+        return videos, images
     pattern = "**/*" if recursive else "*"
-    files = [
-        path
-        for path in sorted(input_path.glob(pattern))
-        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
-    ]
-    return files
+    for path in sorted(input_path.glob(pattern)):
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix in VIDEO_EXTENSIONS:
+            videos.append(path)
+        elif suffix in IMAGE_EXTENSIONS:
+            images.append(path)
+    return videos, images
 
 
 def _build_categories(
@@ -304,9 +315,11 @@ def main() -> None:
     args = _parse_args()
 
     input_path = Path(args.input)
-    input_files = _iter_input_files(input_path, args.recursive)
-    if not input_files:
+    video_files, image_files = _gather_inputs(input_path, args.recursive)
+    if not video_files and not image_files:
         raise SystemExit(f"No input files found under: {input_path}")
+    if args.mode == "candidates" and image_files:
+        raise SystemExit("--mode candidates requires video input.")
 
     try:
         output_ext = _normalize_ext(args.ext)
@@ -372,7 +385,7 @@ def main() -> None:
     total_frames = 0
     total_saved = 0
 
-    for clip in input_files:
+    for clip in video_files:
         cap = open_video_capture(clip)
         if not cap.isOpened():
             print(f"[label_video] failed to open: {clip}")
@@ -616,6 +629,104 @@ def main() -> None:
             f"saved={saved_total} mode={args.mode}"
         )
 
+    if image_files:
+        if args.fps is not None:
+            raise SystemExit("--fps is not supported for image inputs. Use --every-n instead.")
+        if args.start_seconds or args.max_seconds:
+            raise SystemExit("--start-seconds/--max-seconds are not supported for image inputs.")
+
+        if args.mode != "frames" and pipe is None:
+            raise SystemExit("Pipeline not initialized for coco mode.")
+
+        processed_images = 0
+        saved_images = 0
+
+        for idx, image_path in enumerate(image_files):
+            if args.max_frames is not None and processed_images >= int(args.max_frames):
+                break
+            if args.every_n > 1 and (idx % int(args.every_n)) != 0:
+                continue
+
+            frame = cv2.imread(str(image_path))
+            if frame is None:
+                print(f"[label_video] failed to read image: {image_path}")
+                continue
+
+            processed_images += 1
+
+            if resize_to is not None:
+                frame = cv2.resize(frame, resize_to, interpolation=cv2.INTER_AREA)
+
+            h, w = frame.shape[:2]
+            dets: List[object] = []
+            if args.mode == "coco":
+                dets = pipe(frame)
+                dets = _filter_by_min_area(dets, frame_w=w, frame_h=h, min_ratio=args.min_box_area_ratio)
+                if args.skip_empty and not dets:
+                    continue
+
+            safe_stem = _safe_name(image_path.stem)
+            filename = f"{safe_stem}_{idx:06d}.{output_ext}"
+            image_path_out = images_dir / filename
+            if not cv2.imwrite(str(image_path_out), frame):
+                raise SystemExit(f"Failed to write: {image_path_out}")
+
+            try:
+                rel_path = str(image_path_out.relative_to(output_dir))
+            except Exception:
+                rel_path = str(image_path_out)
+
+            if args.mode == "coco":
+                images.append(
+                    {
+                        "id": image_id,
+                        "file_name": rel_path.replace("\\", "/"),
+                        "width": int(w),
+                        "height": int(h),
+                        "frame_index": int(idx),
+                    }
+                )
+
+                for d in dets:
+                    if d.class_id is None:
+                        continue
+                    x1, y1, x2, y2 = d.as_xyxy()
+                    x1 = float(np.clip(x1, 0, w - 1))
+                    y1 = float(np.clip(y1, 0, h - 1))
+                    x2 = float(np.clip(x2, 0, w - 1))
+                    y2 = float(np.clip(y2, 0, h - 1))
+                    bw = max(0.0, x2 - x1)
+                    bh = max(0.0, y2 - y1)
+                    if bw <= 0.0 or bh <= 0.0:
+                        continue
+
+                    ann = {
+                        "id": ann_id,
+                        "image_id": image_id,
+                        "category_id": int(d.class_id),
+                        "bbox": [x1, y1, bw, bh],
+                        "area": float(bw * bh),
+                        "iscrowd": 0,
+                    }
+                    if args.include_score:
+                        ann["score"] = float(d.score)
+
+                    annotations.append(ann)
+                    ann_id += 1
+                    seen_class_ids.append(int(d.class_id))
+
+                image_id += 1
+                total_saved += 1
+                saved_images += 1
+            else:
+                total_saved += 1
+                saved_images += 1
+
+        total_frames += processed_images
+        print(
+            f"[label_video] done images={processed_images} saved={saved_images} mode={args.mode}"
+        )
+
     if args.mode == "coco":
         categories = _build_categories(class_names, class_ids, seen_class_ids)
         coco = {
@@ -633,9 +744,9 @@ def main() -> None:
             f"[label_video] coco saved images={len(images)} annotations={len(annotations)} -> {ann_path}"
         )
 
-    if len(input_files) > 1:
+    if len(video_files) + len(image_files) > 1:
         print(
-            f"[label_video] all done clips={len(input_files)} "
+            f"[label_video] all done inputs={len(video_files) + len(image_files)} "
             f"frames={total_frames} saved={total_saved} mode={args.mode}"
         )
 

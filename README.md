@@ -140,6 +140,19 @@ uv run python scripts/label_video.py \
   --fps 1
 ```
 
+Untuk **auto-label folder gambar** (input = directory berisi images):
+
+```bash
+uv run python scripts/label_video.py \
+  --mode coco \
+  --input data/images_raw \
+  --output-dir data/auto_labels/images_raw \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --class-names Models/metadata.yaml \
+  --every-n 2
+```
+
 Untuk preview tanpa menyimpan file (window saja):
 
 ```bash
