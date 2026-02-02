@@ -101,27 +101,67 @@ Karena target kelas kendaraan (truck/trailer/pickup/dll) adalah **custom**, lang
 - Jika ingin otomatis mengambil kandidat gambar dari video (tanpa line counting), gunakan:
 
 ```bash
-uv run python scripts/extract_candidates.py \
+uv run python scripts/label_video.py \
+  --mode candidates \
   --input media/input.mp4 \
   --output-dir data/candidates/input_mp4 \
-  --backend onnx \
   --model Models/vehicle_subclasses.onnx \
   --class-ids 0,1,2 \
   --max-per-track 3 \
   --warmup-frames 5
 ```
 
-Jika sudah punya model awal dan ingin **auto-label** video lalu koreksi di CVAT (COCO format):
+Jika sudah punya model awal dan ingin **auto-label** video lalu koreksi di CVAT (COCO format),
+script ini akan menyimpan frame **hanya saat kendaraan muncul** (mirip extract_candidates) dan
+sekaligus menulis COCO labels.
 
 ```bash
-uv run python scripts/auto_label_coco.py \
+uv run python scripts/label_video.py \
+  --mode coco \
   --input media/input.mp4 \
   --output-dir data/auto_labels/input_mp4 \
   --model Models/vehicle_subclasses.onnx \
   --class-ids 0,1,2 \
   --class-names Models/metadata.yaml \
-  --fps 1 \
+  --min-seconds-between 1.0 \
+  --max-per-track 3 \
+  --warmup-frames 5
+```
+
+Tip: gunakan `--min-seconds-between` atau `--min-frames-between` untuk skip antar frame yang disimpan.
+
+Untuk **ekstrak frame saja** (tanpa deteksi/label):
+
+```bash
+uv run python scripts/label_video.py \
+  --mode frames \
+  --input media/input.mp4 \
+  --output-dir data/frames/input_mp4 \
+  --fps 1
+```
+
+Untuk preview tanpa menyimpan file (window saja):
+
+```bash
+uv run python scripts/preview_video.py \
+  --input media/input.mp4 \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --max-seconds 10 \
   --show
+```
+
+Untuk simpan **preview beranotasi** (frame + video):
+
+```bash
+uv run python scripts/preview_video.py \
+  --input media/input.mp4 \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --fps 1 \
+  --save-frames \
+  --save-video \
+  --output-dir data/preview_outputs
 ```
 
 

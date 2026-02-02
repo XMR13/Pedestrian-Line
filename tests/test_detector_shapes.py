@@ -1,19 +1,21 @@
 import numpy as np
 
-from pedestrian_line_counter.config import ModelConfig
-from pedestrian_line_counter.detector import Detector
+from yolo_kitv2 import YoloPostConfig, YoloPostprocessor
 
 
-
-def _make_detector() -> Detector:
-    cfg = ModelConfig(backend="motion")
-    cfg.confidence_threshold = 0.0
-    cfg.nms_iou_threshold = 0.99
-    return Detector(cfg)
+def _make_post() -> YoloPostprocessor:
+    return YoloPostprocessor(
+        YoloPostConfig(
+            conf_threshold=0.0,
+            iou_threshold=0.99,
+            apply_nms=False,
+            max_detections=1000,
+        )
+    )
 
 
 def test_postprocess_end2end_decoded_layout() -> None:
-    det = _make_detector()
+    post = _make_post()
 
     preds = np.array(
         [
@@ -25,17 +27,15 @@ def test_postprocess_end2end_decoded_layout() -> None:
         dtype=np.float32,
     )
 
-    boxes, scores, class_ids = det._postprocess_yolo_generic(
-        preds, orig_w=100, orig_h=100, dw=0, dh=0, scale=1.0
-    )
+    dets = post.process(preds, orig_size=(100, 100), pad=(0.0, 0.0), ratio=(1.0, 1.0))
 
-    assert boxes.shape == (2, 4)
-    assert np.allclose(scores, [0.9, 0.8])
-    assert class_ids.tolist() == [2, 3]
+    assert len(dets) == 2
+    assert np.allclose([d.score for d in dets], [0.9, 0.8])
+    assert [d.class_id for d in dets] == [2, 3]
 
 
 def test_postprocess_ultralytics_84xk_layout() -> None:
-    det = _make_detector()
+    post = _make_post()
 
     k = 3
     preds = np.zeros((1, 84, k), dtype=np.float32)
@@ -61,18 +61,15 @@ def test_postprocess_ultralytics_84xk_layout() -> None:
     preds[0, 3, 2] = 8
     preds[0, 4 + 5, 2] = 0.7  # class 5
 
-    boxes, scores, class_ids = det._postprocess_yolo_generic(
-        preds, orig_w=100, orig_h=100, dw=0, dh=0, scale=1.0
-    )
+    dets = post.process(preds, orig_size=(100, 100), pad=(0.0, 0.0), ratio=(1.0, 1.0))
 
-    assert boxes.shape[1] == 4
-    assert boxes.shape[0] == 3
-    assert class_ids.tolist() == [2, 7, 5]
-    assert np.allclose(scores, [0.9, 0.8, 0.7])
+    assert len(dets) == 3
+    assert [d.class_id for d in dets] == [2, 7, 5]
+    assert np.allclose([d.score for d in dets], [0.9, 0.8, 0.7])
 
 
 def test_postprocess_kx84_layout() -> None:
-    det = _make_detector()
+    post = _make_post()
 
     k = 3
     preds = np.zeros((1, k, 84), dtype=np.float32)
@@ -89,18 +86,15 @@ def test_postprocess_kx84_layout() -> None:
     preds[0, 2, 0:4] = [80, 40, 12, 8]
     preds[0, 2, 4 + 5] = 0.7  # class 5
 
-    boxes, scores, class_ids = det._postprocess_yolo_generic(
-        preds, orig_w=100, orig_h=100, dw=0, dh=0, scale=1.0
-    )
+    dets = post.process(preds, orig_size=(100, 100), pad=(0.0, 0.0), ratio=(1.0, 1.0))
 
-    assert boxes.shape[0] == 3
-    assert boxes.shape[1] == 4
-    assert class_ids.tolist() == [2, 7, 5]
-    assert np.allclose(scores, [0.9, 0.8, 0.7])
+    assert len(dets) == 3
+    assert [d.class_id for d in dets] == [2, 7, 5]
+    assert np.allclose([d.score for d in dets], [0.9, 0.8, 0.7])
 
 
 def test_postprocess_generic_5_plus_c_layout() -> None:
-    det = _make_detector()
+    post = _make_post()
 
     # (1, N, 5 + C) with cx, cy, w, h, obj, class_scores...
     preds = np.array(
@@ -113,10 +107,8 @@ def test_postprocess_generic_5_plus_c_layout() -> None:
         dtype=np.float32,
     )
 
-    boxes, scores, class_ids = det._postprocess_yolo_generic(
-        preds, orig_w=100, orig_h=100, dw=0, dh=0, scale=1.0
-    )
+    dets = post.process(preds, orig_size=(100, 100), pad=(0.0, 0.0), ratio=(1.0, 1.0))
 
-    assert boxes.shape == (2, 4)
-    assert class_ids.tolist() == [1, 2]
-    assert np.allclose(scores, [0.8 * 0.9, 0.5 * 1.0])
+    assert len(dets) == 2
+    assert [d.class_id for d in dets] == [1, 2]
+    assert np.allclose([d.score for d in dets], [0.8 * 0.9, 0.5 * 1.0])

@@ -344,6 +344,47 @@ class YoloPostprocessor:
                 boxes_xyxy = self._decode_decoded_boxes_to_xyxy(boxes_raw, input_size=input_size)
                 return boxes_xyxy, scores, class_ids
 
+        if p.ndim == 2:
+            # Explicit handling for common YOLO anchors layouts with 80 classes:
+            # (84, A) or (A, 84) where 84 = 4 box + 80 class scores (no objectness),
+            # or (85, A)/(A, 85) where 85 = 4 box + 1 objectness + 80 class scores.
+            if p.shape[0] in (84, 85):
+                boxes_xywh = p[0:4, :].T  # (A, 4)
+                rest = p[4:, :]
+                if p.shape[0] == 85 or self.cfg.anchors_has_objectness is True:
+                    if rest.shape[0] < 2:
+                        raise ValueError(f"Expected objectness + class scores, got shape {p.shape}.")
+                    objectness = rest[0, :]
+                    class_scores = rest[1:, :]
+                    class_ids = np.argmax(class_scores, axis=0)
+                    class_conf = class_scores[class_ids, np.arange(class_scores.shape[1])]
+                    scores = objectness * class_conf
+                else:
+                    class_scores = rest
+                    class_ids = np.argmax(class_scores, axis=0)
+                    scores = class_scores[class_ids, np.arange(class_scores.shape[1])]
+                boxes_xyxy = self._decode_anchors_boxes_to_xyxy(boxes_xywh, input_size=input_size)
+                return boxes_xyxy, scores, class_ids
+
+            if p.shape[1] in (84, 85):
+                p_t = p.T
+                boxes_xywh = p_t[0:4, :].T  # (A, 4)
+                rest = p_t[4:, :]
+                if p.shape[1] == 85 or self.cfg.anchors_has_objectness is True:
+                    if rest.shape[0] < 2:
+                        raise ValueError(f"Expected objectness + class scores, got shape {p.shape}.")
+                    objectness = rest[0, :]
+                    class_scores = rest[1:, :]
+                    class_ids = np.argmax(class_scores, axis=0)
+                    class_conf = class_scores[class_ids, np.arange(class_scores.shape[1])]
+                    scores = objectness * class_conf
+                else:
+                    class_scores = rest
+                    class_ids = np.argmax(class_scores, axis=0)
+                    scores = class_scores[class_ids, np.arange(class_scores.shape[1])]
+                boxes_xyxy = self._decode_anchors_boxes_to_xyxy(boxes_xywh, input_size=input_size)
+                return boxes_xyxy, scores, class_ids
+
 
         if p.ndim == 2:
             h, w = p.shape

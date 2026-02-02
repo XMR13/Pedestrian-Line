@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import cv2
 import numpy as np
@@ -25,9 +25,9 @@ class Detector:
     config: ModelConfig
     _backend: str = None #deafult value aadalah None, dan akan dilakukan pengecekan terhadap jenis backend yang tersedia
     _motion_subtractor: Optional[cv2.BackgroundSubtractor] = None
-    _onnx_session: Optional[object] = None
     _trt_runner: Optional[object] = None
     _torch_detector: Optional[object] = None
+    _yolo_pipe: Optional[object] = None
 
     def __post_init__(self) -> None:
         backend = (self.config.backend or "motion").lower()
@@ -43,48 +43,16 @@ class Detector:
 
         if backend == "onnx":
             try:
-                import onnxruntime as ort  # type: ignore
+                from yolo_kitv2 import LetterboxConfig, YoloPostConfig, load_pipeline  # type: ignore
 
-                # Memilih provider yang bisa diakses.
-                candidate_providers = [
-                    "CUDAExecutionProvider",
-                    "DmlExecutionProvider",
-                    "CPUExecutionProvider",
-                ]
-
-                #memiliki atribut sebagai berikut:
-                providers = candidate_providers
-                if hasattr(ort, "get_available_providers"):
-                    try:
-                        available = ort.get_available_providers()
-                        providers = [p for p in candidate_providers if p in available]
-                        if not providers:
-                            providers = ["CPUExecutionProvider"]
-                    except Exception:
-                        providers = candidate_providers
-                else:
-                    print(
-                        "[detector] onnxruntime missing get_available_providers(); "
-                        "using best-effort provider list."
-                    )
-
-                try:
-                    self._onnx_session = ort.InferenceSession(
-                        str(self.config.model_path),
-                        providers=providers,
-                    )
-                except TypeError:
-                    # Older ort may not accept providers kwarg.
-                    self._onnx_session = ort.InferenceSession(str(self.config.model_path))
-                except Exception:
-                    # jika gpu provide rtidka tersdia (fail) gunakan nilai CPU only
-                    if providers != ["CPUExecutionProvider"]:
-                        self._onnx_session = ort.InferenceSession(
-                            str(self.config.model_path),
-                            providers=["CPUExecutionProvider"],
-                        )
-                    else:
-                        raise
+                providers = self._pick_onnx_providers()
+                self._yolo_pipe = load_pipeline(
+                    self.config.model_path,
+                    backend="onnxruntime",
+                    letterbox_cfg=LetterboxConfig(new_shape=self.config.input_size),
+                    post_cfg=self._build_yolo_post_cfg(),
+                    onnx_providers=providers,
+                )
                 self._backend = "onnx"
             except Exception as exc:  # pragma: no cover - defensive
                 print(f"[detector] Failed to initialize ONNX backend: {exc}")
@@ -101,6 +69,17 @@ class Detector:
 
             self._trt_runner = TensorRTRunner(self.config.model_path,
                                               input_size=self.config.input_size)
+
+            from yolo_kitv2 import LetterboxConfig, YoloPipeline  # type: ignore
+
+            infer_fn = self._build_trt_infer_fn(self._trt_runner)
+            self._yolo_pipe = YoloPipeline(
+                infer_fn,
+                backend=self._trt_runner,
+                backend_name="tensorrt",
+                letterbox_cfg=LetterboxConfig(new_shape=self._trt_runner.input_hw),
+                post_cfg=self._build_yolo_post_cfg(),
+            )
             self._backend = "tensorrt"
 
         if backend == "torch":
@@ -122,10 +101,8 @@ class Detector:
         Lakukan deteksi pada satu frame dan kembalian list deteksi yagn diperlukan.
         """
 
-        if self._backend == "onnx" and self._onnx_session is not None:
-            return self._detect_onnx(frame_bgr)
-        if self._backend == "tensorrt" and self._trt_runner is not None:
-            return self._detect_tensorrt(frame_bgr)
+        if self._backend in {"onnx", "tensorrt"} and self._yolo_pipe is not None:
+            return self._detect_yolo(frame_bgr)
         if self._backend == "torch" and self._torch_detector is not None:
             return self._torch_detector.detect(frame_bgr)
 
@@ -168,257 +145,45 @@ class Detector:
             )
         return detections
 
-    # --------------------------------------------------------------------- #
-    # ONNX (YOLO-style) detector
-    # --------------------------------------------------------------------- #
-    def _detect_onnx(self, frame_bgr: np.ndarray) -> List[Detection]:
-        """
-        ONNX inference dengan berbasis generic
-        A generic YOLO-style ONNX inference path.
-        
-        Implementasi ini mengasumsikan bahwa output dari prediksi ini 
-        memiliki bentuk tensor sebagai berikut
-        (batch, num_detect, 5 + num_classes)
-        [cx, cy, w, h, objectness, class_scores...].
+    def _detect_yolo(self, frame_bgr: np.ndarray) -> List[Detection]:
+        assert self._yolo_pipe is not None
 
-        Pastikan adaptasi fungsi ini jika menggunakan layout yang berbeda.
-        Pipeline yang lain (tracker, line counter, drawing) akan tetap sama 
-        seperti biasanya.
-        """
-
-        assert self._onnx_session is not None
-        input_width, input_height = self.config.input_size
-
-        img = frame_bgr
-        h, w = img.shape[:2]
-        frame_area = float(w * h)
-
-        # Letterbox resize
-        scale = min(input_width / w, input_height / h)
-        new_w, new_h = int(w * scale), int(h * scale)
-        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        canvas = np.full((input_height, input_width, 3), 114, dtype=np.uint8)
-        dw, dh = (input_width - new_w) // 2, (input_height - new_h) // 2
-        canvas[dh : dh + new_h, dw : dw + new_w] = resized
-
-        blob = canvas[:, :, ::-1].astype(np.float32) / 255.0  # BGR->RGB, normalize
-        blob = np.transpose(blob, (2, 0, 1))  # HWC -> CHW
-        blob = np.expand_dims(blob, 0)
-
-        input_name = self._onnx_session.get_inputs()[0].name
-        outputs = self._onnx_session.run(None, {input_name: blob})
-
-        # post process untuk algoritma yolo 
-        # bisa mebaca backend yang terbaru (Output aneh) serta bisa juga 
-        # and may include duplicate outputs. Handle this explicitly.
-        pred0 = outputs[0]
-
-        boxes_xyxy, scores, class_ids = self._postprocess_yolo_generic(
-            pred0, w, h, dw, dh, scale
-        )
-
-        detections: List[Detection] = []
+        img_h, img_w = frame_bgr.shape[:2]
+        frame_area = float(img_w * img_h)
         min_area = self.config.min_box_area_ratio * frame_area
-        for (x1, y1, x2, y2), score, class_id in zip(boxes_xyxy, scores, class_ids):
+
+        raw_dets = self._yolo_pipe(frame_bgr)
+        detections: List[Detection] = []
+
+        for d in raw_dets:
+            x1, y1, x2, y2 = float(d.x1), float(d.y1), float(d.x2), float(d.y2)
+            score = float(d.score)
+            class_id = None if getattr(d, "class_id", None) is None else int(d.class_id)
+
             if score < self.config.confidence_threshold:
                 continue
-            # filter kotak yang kecil yang berpotensi memunculkan noise
+            if class_id is not None and self.config.track_class_ids and class_id not in self.config.track_class_ids:
+                continue
+
             box_area = (x2 - x1) * (y2 - y1)
             if box_area < min_area:
                 continue
-            #memfilter deteksi yang berada di tengah
-            if self._is_in_ignore_region((x1 + x2) * 0.5, (y1 + y2) * 0.5, w, h):
+
+            if self._is_in_ignore_region((x1 + x2) * 0.5, (y1 + y2) * 0.5, img_w, img_h):
                 continue
-            if (
-                self.config.track_class_ids
-                and class_id not in self.config.track_class_ids
-            ):
-                continue
+
             detections.append(
                 Detection(
-                    x1=float(x1),
-                    y1=float(y1),
-                    x2=float(x2),
-                    y2=float(y2),
-                    score=float(score),
-                    class_id=int(class_id),
+                    x1=x1,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2,
+                    score=score,
+                    class_id=class_id,
                 )
             )
+
         return detections
-
-    # --------------------------------------------------------------------- #
-    # TensorRT (YOLO-style) detector (Menggunakan model ekstensi .engine)
-    # --------------------------------------------------------------------- #
-    def _detect_tensorrt(self, frame_bgr: np.ndarray) -> List[Detection]:
-        """
-        TensorRT infernece backend
-
-        Asumsikan engine mengoutputkan a YOLO-style tensor yang sudah sesuai dengan 
-        _postprocess_yolo_generic'.
-        """
-
-        assert self._trt_runner is not None
-
-        input_width, input_height = self._trt_runner.input_hw
-        img = frame_bgr
-        h, w = img.shape[:2]
-        frame_area = float(w * h)
-
-        # letterbox resize (same dengan onnx, namun input sizenya diturunkan dari .engine model file)
-        scale = min(input_width / w, input_height / h)
-        new_w, new_h = int(w * scale), int(h * scale)
-        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        canvas = np.full((input_height, input_width, 3), 114, dtype=np.uint8)
-        dw, dh = (input_width - new_w) // 2, (input_height - new_h) // 2
-        canvas[dh : dh + new_h, dw : dw + new_w] = resized
-
-        blob = canvas[:, :, ::-1].astype(np.float32) / 255.0  # BGR->RGB, normalize
-        blob = np.transpose(blob, (2, 0, 1))  # HWC -> CHW
-        blob = np.expand_dims(blob, 0)
-
-        outputs = self._trt_runner.infer(blob)
-        if not outputs:
-            return []
-        
-        # pilih most yolo output jika .engine memiliki beberapa output
-        pred0 = outputs[0]
-        for out in outputs:
-            if out.ndim == 3 and out.shape[0] == 1:
-                pred0 = out
-                break
-
-        boxes_xyxy, scores, class_ids = self._postprocess_yolo_generic(
-            pred0, w, h, dw, dh, scale
-        )
-
-        detections: List[Detection] = []
-        min_area = self.config.min_box_area_ratio * frame_area
-        for (x1, y1, x2, y2), score, class_id in zip(boxes_xyxy, scores, class_ids):
-            if score < self.config.confidence_threshold:
-                continue
-            box_area = (x2 - x1) * (y2 - y1)
-            if box_area < min_area:
-                continue
-            if self._is_in_ignore_region((x1 + x2) * 0.5, (y1 + y2) * 0.5, w, h):
-                continue
-            if self.config.track_class_ids and class_id not in self.config.track_class_ids:
-                continue
-            detections.append(
-                Detection(
-                    x1=float(x1),
-                    y1=float(y1),
-                    x2=float(x2),
-                    y2=float(y2),
-                    score=float(score),
-                    class_id=int(class_id),
-                )
-            )
-        return detections
-
-    def _postprocess_yolo_generic(
-        self,
-        preds: np.ndarray,
-        orig_w: int,
-        orig_h: int,
-        dw: int,
-        dh: int,
-        scale: float,
-    ):
-        """
-        Mengkonversi YOLO-style predicitons mejadi seperti ini (xyxy, score, class_id).
-
-        Support layout yang common
-        - (1, N, 5 + C) : [cx, cy, w, h, object, class_scores..]
-        - (1, 84, 8400) : Untuk model yolo yang lebih modern, hanya kelass score saja.
-          Kemudian diambil nilai maksimalnya
-        """
-
-        # Case 0: Some YOLO exports (end2end) return already-decoded boxes:
-        # (1, N, 6) -> [x1, y1, x2, y2, score, class_id]
-        if (
-            preds.ndim == 3
-            and preds.shape[0] == 1
-            and preds.shape[2] == 6
-        ):
-            preds = np.squeeze(preds, axis=0)
-            boxes_xyxy = preds[:, 0:4]
-            scores = preds[:, 4]
-            class_ids = preds[:, 5].astype(int)
-            return boxes_xyxy, scores, class_ids
-        
-        # Handle yolov8/yolov9 (1, 84 8400) output (versi yoolo terbaru)
-        # sebelum generic (1, N, 5 + C) case, selain itu akan direpresentasikan dan tidak bisa diprediksi
-        if preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[1] == 84:
-            # agar matching the py script
-            # - output [0] memiliki shape (84, 8400)
-            # - transpose menjadi (8400, 84)
-            # - empat value pertama dalah [cx, cy, w, h] di space
-            # - remaining values adalah skor per kelasnya (logits atau probs)
-            preds = np.squeeze(preds, axis=0)  # (84, 8400)
-            preds = preds.T  # (8400, 84)
-            boxes = preds[:, :4]
-            class_scores = preds[:, 4:]
-
-            #ambil best clas per anchor dan ambil valuenya sebagai skkor tersebut
-            class_ids = np.argmax(class_scores, axis=1)
-            scores = class_scores[np.arange(class_scores.shape[0]), class_ids]
-
-        # Layout alternatif lagi yang terkadang dihasilkan ketika mengotuptukan hal ini  (1, K, 84)
-        # dimana 84 = 4 Box parameter (x, y , w, h) ditambah dengan 80 class score (tidak ada objectness)
-        elif preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[2] == 84:
-            preds = np.squeeze(preds, axis=0)  # (K, 84)
-            boxes = preds[:, :4]
-            class_scores = preds[:, 4:]
-            class_ids = np.argmax(class_scores, axis=1)
-            scores = class_scores[np.arange(class_scores.shape[0]), class_ids]
-
-        # Generic yolo yang lain dengan lain sebagai berikut (1, N, 5 + C)
-        elif preds.ndim == 3 and preds.shape[0] == 1 and preds.shape[2] >= 5:
-            preds = np.squeeze(preds, axis=0)
-            boxes = preds[:, 0:4]
-            objectness = preds[:, 4:5]
-            class_scores = preds[:, 5:]
-
-            class_ids = np.argmax(class_scores, axis=1)
-            class_conf = class_scores[np.arange(class_scores.shape[0]), class_ids]
-            scores = objectness.squeeze(-1) * class_conf
-
-        else:
-            raise ValueError(f"Unsupported YOLO output shape: {preds.shape}")
-
-        # Filter by confidence
-        mask = scores >= self.config.confidence_threshold
-        boxes = boxes[mask]
-        scores = scores[mask]
-        class_ids = class_ids[mask]
-
-        if boxes.size == 0:
-            return np.empty((0, 4)), np.empty((0,)), np.empty((0,), dtype=int)
-
-        # cx, cy, w, h -> x1, y1, x2, y2 (in letterboxed space)
-        cx, cy, w_box, h_box = boxes.T
-        x1 = cx - w_box / 2
-        y1 = cy - h_box / 2
-        x2 = cx + w_box / 2
-        y2 = cy + h_box / 2
-
-        # Undo letterbox to map back to original image coordinates
-        x1 = (x1 - dw) / scale
-        x2 = (x2 - dw) / scale
-        y1 = (y1 - dh) / scale
-        y2 = (y2 - dh) / scale
-
-        x1 = np.clip(x1, 0, orig_w - 1)
-        y1 = np.clip(y1, 0, orig_h - 1)
-        x2 = np.clip(x2, 0, orig_w - 1)
-        y2 = np.clip(y2, 0, orig_h - 1)
-
-        boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1)
-
-        # Non-maximum suppression
-        indices = self._nms(boxes_xyxy, scores, self.config.nms_iou_threshold)
-
-        return boxes_xyxy[indices], scores[indices], class_ids[indices]
 
     def _is_in_ignore_region(self, cx: float, cy: float, width: int, height: int) -> bool:
         """
@@ -435,38 +200,61 @@ class Detector:
                 return True
         return False
 
+    def _build_yolo_post_cfg(self) -> "object":
+        from yolo_kitv2 import YoloPostConfig  # type: ignore
+
+        class_ids = None
+        if self.config.track_class_ids and not getattr(self.config, "allow_all_classes", False):
+            class_ids = list(self.config.track_class_ids)
+
+        return YoloPostConfig(
+            conf_threshold=float(self.config.confidence_threshold),
+            iou_threshold=float(self.config.nms_iou_threshold),
+            class_ids=class_ids,
+        )
+
     @staticmethod
-    def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndarray:
+    def _pick_onnx_providers() -> List[str]:
         """
-        Simple NMS implementation.
+        Best-effort provider selection for ONNX Runtime.
+
+        Uses CUDA if available, then DirectML (Windows), then CPU.
         """
 
-        x1 = boxes[:, 0]
-        y1 = boxes[:, 1]
-        x2 = boxes[:, 2]
-        y2 = boxes[:, 3]
+        try:
+            import onnxruntime as ort  # type: ignore
+        except Exception:
+            return ["CPUExecutionProvider"]
 
-        # Standard area computation; no +1 so IoU matches common YOLO post-processing
-        areas = (x2 - x1) * (y2 - y1)
-        order = scores.argsort()[::-1]
+        candidate_providers = [
+            "CUDAExecutionProvider",
+            "DmlExecutionProvider",
+            "CPUExecutionProvider",
+        ]
 
-        keep = []
-        while order.size > 0:
-            i = order[0]
-            keep.append(i)
+        if hasattr(ort, "get_available_providers"):
+            try:
+                available = set(ort.get_available_providers())
+                providers = [p for p in candidate_providers if p in available]
+                return providers or ["CPUExecutionProvider"]
+            except Exception:
+                return candidate_providers
 
-            xx1 = np.maximum(x1[i], x1[order[1:]])
-            yy1 = np.maximum(y1[i], y1[order[1:]])
-            xx2 = np.minimum(x2[i], x2[order[1:]])
-            yy2 = np.minimum(y2[i], y2[order[1:]])
+        return candidate_providers
 
-            w = np.maximum(0.0, xx2 - xx1 + 1)
-            h = np.maximum(0.0, yy2 - yy1 + 1)
-            inter = w * h
-            union = areas[i] + areas[order[1:]] - inter
-            iou = inter / np.maximum(union, 1e-6)
+    @staticmethod
+    def _build_trt_infer_fn(trt_runner: object) -> Callable[[np.ndarray], np.ndarray]:
+        def infer(blob: np.ndarray) -> np.ndarray:
+            outputs = trt_runner.infer(blob)
+            if not outputs:
+                raise RuntimeError("TensorRT backend returned no outputs.")
 
-            inds = np.where(iou <= iou_threshold)[0]
-            order = order[inds + 1]
+            # Prefer YOLO-like output (1, ..., ...) when multiple outputs exist.
+            best = outputs[0]
+            for out in outputs:
+                if getattr(out, "ndim", 0) == 3 and out.shape[0] == 1:
+                    best = out
+                    break
+            return np.asarray(best)
 
-        return np.array(keep, dtype=np.int32)
+        return infer
