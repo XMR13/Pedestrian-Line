@@ -153,6 +153,22 @@ uv run python scripts/label_video.py \
   --every-n 2
 ```
 
+Untuk **gabung beberapa hasil auto-label** jadi satu folder COCO (siap CVAT):
+
+```bash
+uv run python scripts/merge_coco.py \
+  --inputs data/auto_labels/set_a data/auto_labels/set_b \
+  --output-dir data/auto_labels/merged
+```
+
+Jika kamu **hapus gambar** secara manual, perbaiki COCO JSON:
+
+```bash
+uv run python scripts/prune_coco.py \
+  --dataset-dir data/auto_labels/merged \
+  --in-place
+```
+
 Untuk preview tanpa menyimpan file (window saja):
 
 ```bash
