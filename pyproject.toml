@@ -20,4 +20,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["pedestrian_line_counter*"]
+include = ["pedestrian_line_counter*", "yolo_kitv2*"]

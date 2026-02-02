@@ -34,7 +34,7 @@ Aplikasi inti dari project ini berada di package `pedestrian_line_counter/`
 package:
 
 - `pedestrian_line_counter/config.py` – Konfigurasi aplikasi.
-- `pedestrian_line_counter/detector.py` – ONNXruntime detector yang menggunakan backbone yolo sebagai algoritmanya, jika tidak berhasil akan *fallback* untuk menggunakan native *motion-based* detektor.
+- `pedestrian_line_counter/detector.py` – Detector wrapper; untuk backend YOLO (.onnx / .engine) menggunakan `yolo_kitv2` untuk letterbox + postprocess (NMS, decode output), fallback ke *motion-based* detector jika diperlukan.
 - `pedestrian_line_counter/tracker.py` – Greedy multi object tracker.
 - `pedestrian_line_counter/line_counter.py` –  Logika garis vritual + logika untuk menentukan arah kendaraan tersebut (A→B and B→A).
 - `pedestrian_line_counter/draw_utils.py` – Helper untuk menggambar/menambah visual pada output program.
@@ -109,6 +109,19 @@ uv run python scripts/extract_candidates.py \
   --class-ids 0,1,2 \
   --max-per-track 3 \
   --warmup-frames 5
+```
+
+Jika sudah punya model awal dan ingin **auto-label** video lalu koreksi di CVAT (COCO format):
+
+```bash
+uv run python scripts/auto_label_coco.py \
+  --input media/input.mp4 \
+  --output-dir data/auto_labels/input_mp4 \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --class-names Models/metadata.yaml \
+  --fps 1 \
+  --show
 ```
 
 
