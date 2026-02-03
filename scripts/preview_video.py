@@ -7,9 +7,9 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import cv2
 
-from pedestrian_line_counter.config import load_class_names
 from pedestrian_line_counter.videoio_utils import open_video_capture
 from yolo_kitv2 import LetterboxConfig, YoloPostConfig, draw_detections, load_pipeline
+from yolo_kitv2.metadata import load_class_names
 
 try:  # pragma: no cover - optional dependency
     from tqdm import tqdm
@@ -159,6 +159,15 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--class-ids", type=str, default=None, help="Comma-separated class IDs to keep.")
     p.add_argument("--class-names", type=str, default=None, help="Class names YAML/JSON for overlays.")
     p.add_argument(
+        "--class-names-id-offset",
+        type=int,
+        default=0,
+        help=(
+            "Offset applied to IDs loaded from --class-names before lookup. "
+            "Example: if your file is 1-based (CVAT-style) but your model outputs 0-based IDs, use -1."
+        ),
+    )
+    p.add_argument(
         "--allow-all-classes",
         action="store_true",
         help="Do not restrict classes even if --class-ids is empty.",
@@ -234,7 +243,16 @@ def main() -> None:
     class_ids = _parse_class_ids(args.class_ids)
     class_names: Optional[Dict[int, str]] = None
     if args.class_names:
-        class_names = load_class_names(Path(args.class_names))
+        class_names = load_class_names(args.class_names)
+        offset = int(args.class_names_id_offset)
+        if offset:
+            class_names = {int(k) + offset: v for k, v in class_names.items()}
+        if not class_names:
+            print(
+                "[preview_video] warning: class names loaded as empty. "
+                "Check file format (YAML/JSON) or install PyYAML if using YAML."
+            )
+            class_names = None
 
     try:
         input_size = _parse_size(args.input_size)

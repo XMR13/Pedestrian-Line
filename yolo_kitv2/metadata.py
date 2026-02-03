@@ -56,16 +56,29 @@ def _load_minimal_names_yaml(path: Path) -> Dict[int, str]:
           1: class_b
     """
     names: Dict[int, str] = {}
+    list_items: list[str] = []
     in_names = False
 
     for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if line == "names:":
+        if line.startswith("names:"):
+            rest = line[len("names:") :].strip()
+            if rest.startswith("[") and rest.endswith("]"):
+                inner = rest[1:-1].strip()
+                if inner:
+                    items = [part.strip().strip("'").strip('"') for part in inner.split(",")]
+                    list_items.extend([item for item in items if item])
+                    break
             in_names = True
             continue
         if not in_names:
+            continue
+        if line.startswith("-"):
+            item = line.lstrip("-").strip().strip("'").strip('"')
+            if item:
+                list_items.append(item)
             continue
         if ":" not in line:
             continue
@@ -76,6 +89,8 @@ def _load_minimal_names_yaml(path: Path) -> Dict[int, str]:
             continue
         names[int(left)] = right
 
+    if list_items:
+        return {idx: name for idx, name in enumerate(list_items)}
     return names
 
 

@@ -44,6 +44,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ("dataset", "qa"): _dataset_qa,
         ("coco", "prune"): _coco_prune,
         ("coco", "merge"): _coco_merge,
+        ("coco", "cvat-fix"): _coco_cvat_fix,
         ("label", "run"): _label_run,
     }
 
@@ -73,9 +74,13 @@ def _coco_merge(argv: List[str]) -> int:
 
     return tool_main(argv)
 
+def _coco_cvat_fix(argv: List[str]) -> int:
+    from .datasets.coco_cvat_fix import main as tool_main
+
+    return tool_main(argv)
+
 
 def _label_run(argv: List[str]) -> int:
     from .datasets.label import main as tool_main
 
     return tool_main(argv)
-
