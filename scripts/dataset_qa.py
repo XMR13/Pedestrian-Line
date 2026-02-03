@@ -254,6 +254,33 @@ def _load_coco_json(labels_dir: Path) -> Dict[str, object]:
         raise SystemExit(f"No COCO JSON found in: {labels_dir}")
     raise SystemExit(f"Multiple COCO JSON files found in: {labels_dir}")
 
+def _resolve_coco_image_path(images_dir: Path, file_name: str) -> Path:
+    """
+    Resolve COCO `file_name` to an on-disk path.
+
+    Common layouts in this repo:
+    - `file_name="images/foo.png"` and images live under `<dataset>/images/foo.png`
+    - `file_name="foo.png"` and images live under `<dataset>/images/foo.png`
+    """
+    raw = Path(str(file_name))
+    if raw.is_absolute():
+        return raw
+
+    # Default: treat `file_name` as relative to the provided images_dir.
+    candidate = images_dir / raw
+    if candidate.exists():
+        return candidate
+
+    # If images_dir is `<dataset>/images` and file_name already includes `images/...`,
+    # try resolving from the dataset root.
+    if images_dir.name.lower() == "images":
+        candidate = images_dir.parent / raw
+        if candidate.exists():
+            return candidate
+
+    # Fallback: treat file_name as a basename.
+    return images_dir / raw.name
+
 
 def _parse_coco(
     coco: Dict[str, object],
@@ -282,7 +309,7 @@ def _parse_coco(
             "boxes": 0,
         }
         if file_name:
-            path = images_dir / file_name
+            path = _resolve_coco_image_path(images_dir, str(file_name))
             if not path.exists() and len(image_issues) < max_issue_items:
                 image_issues.append(ImageIssue(str(path), "Image file missing."))
 
@@ -439,6 +466,11 @@ def _write_csv(path: Path, rows: List[Dict[str, object]]) -> None:
         lines.append(",".join(values))
     path.write_text("\n".join(lines), encoding="utf-8")
 
+def _dataset_root_from_images_dir(images_dir: Path) -> Path:
+    # Convention: many datasets use `<root>/images`. If users point images_dir at that folder,
+    # treat `<root>` as the dataset root for relative-path comparisons.
+    return images_dir.parent if images_dir.name.lower() == "images" else images_dir
+
 
 def main() -> None:
     args = _parse_args()
@@ -567,6 +599,13 @@ def main() -> None:
         image_issues.extend(img_issues)
         unknown_class_ids.extend(unknown_ids)
 
+        # Also scan the image directory so we can detect "images on disk but not referenced in COCO".
+        dataset_root = _dataset_root_from_images_dir(images_dir)
+        disk_images = list(_iter_files(images_dir, args.recursive, image_exts))
+        disk_rel = {path.relative_to(dataset_root).as_posix() for path in disk_images}
+        coco_rel = {str(entry.get("file_name", "")).replace("\\", "/") for entry in per_image.values() if entry.get("file_name")}
+        orphan_images = sorted(rel for rel in disk_rel if rel not in coco_rel)
+
         for key, entry in per_image.items():
             per_image_rows.append(
                 {
@@ -581,6 +620,8 @@ def main() -> None:
 
         summary = {
             "images_total": len(per_image),
+            "image_files_total": len(disk_images),
+            "orphan_images": len(orphan_images),
             "labels_total": 1,
             "missing_labels": 0,
             "orphan_labels": 0,
@@ -595,6 +636,7 @@ def main() -> None:
 
         report = {
             "summary": summary,
+            "orphan_images": orphan_images[: args.max_issue_items],
             "images_without_annotations": images_without_annotations[: args.max_issue_items],
             "label_issues": [issue.__dict__ for issue in label_issues[: args.max_issue_items]],
             "image_issues": [issue.__dict__ for issue in image_issues[: args.max_issue_items]],

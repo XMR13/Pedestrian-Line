@@ -168,6 +168,14 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--input", type=str, required=True, help="Input video path or directory.")
     p.add_argument("--output-dir", type=str, required=True, help="Output directory.")
     p.add_argument(
+        "--reuse-images",
+        action="store_true",
+        help=(
+            "For image inputs in --mode coco: do not write/copy images; reference the existing image files "
+            "and only (re)write annotations.json. Requires image files to live under --output-dir."
+        ),
+    )
+    p.add_argument(
         "--mode",
         type=str,
         default="coco",
@@ -357,6 +365,12 @@ def main() -> None:
             resize_to = _parse_size(args.resize_to)
         except ValueError as exc:
             raise SystemExit(str(exc))
+    if args.reuse_images and resize_to is not None:
+        raise SystemExit("--reuse-images cannot be combined with --resize-to (would invalidate labels).")
+    if args.reuse_images and args.mode != "coco":
+        raise SystemExit("--reuse-images is only supported with --mode coco.")
+    if args.reuse_images and video_files:
+        raise SystemExit("--reuse-images is only supported for image inputs (not videos).")
 
     pipe = None
     if args.mode != "frames":
@@ -638,18 +652,37 @@ def main() -> None:
         if args.mode != "frames" and pipe is None:
             raise SystemExit("Pipeline not initialized for coco mode.")
 
+        # For image inputs, pre-select files so we can show a deterministic progress bar.
+        selected_images: List[Path] = []
+        for idx, image_path in enumerate(image_files):
+            if args.every_n > 1 and (idx % int(args.every_n)) != 0:
+                continue
+            selected_images.append(image_path)
+            if args.max_frames is not None and len(selected_images) >= int(args.max_frames):
+                break
+
         processed_images = 0
         saved_images = 0
 
-        for idx, image_path in enumerate(image_files):
-            if args.max_frames is not None and processed_images >= int(args.max_frames):
-                break
-            if args.every_n > 1 and (idx % int(args.every_n)) != 0:
-                continue
+        progress_bar = None
+        if not args.no_progress and tqdm is not None:
+            progress_bar = tqdm(
+                total=len(selected_images),
+                unit="img",
+                desc="Processing images",
+                file=sys.stdout,
+                leave=False,
+            )
+        elif not args.no_progress and tqdm is None:
+            print("[label_video] tqdm is not installed; run `uv run pip install tqdm` to enable a progress bar.")
+
+        for idx, image_path in enumerate(selected_images):
 
             frame = cv2.imread(str(image_path))
             if frame is None:
                 print(f"[label_video] failed to read image: {image_path}")
+                if progress_bar is not None:
+                    progress_bar.update(1)
                 continue
 
             processed_images += 1
@@ -663,24 +696,36 @@ def main() -> None:
                 dets = pipe(frame)
                 dets = _filter_by_min_area(dets, frame_w=w, frame_h=h, min_ratio=args.min_box_area_ratio)
                 if args.skip_empty and not dets:
+                    if progress_bar is not None:
+                        progress_bar.update(1)
                     continue
 
-            safe_stem = _safe_name(image_path.stem)
-            filename = f"{safe_stem}_{idx:06d}.{output_ext}"
-            image_path_out = images_dir / filename
-            if not cv2.imwrite(str(image_path_out), frame):
-                raise SystemExit(f"Failed to write: {image_path_out}")
+            if args.reuse_images:
+                try:
+                    rel_path = str(image_path.relative_to(output_dir))
+                except Exception:
+                    raise SystemExit(
+                        f"--reuse-images requires images under --output-dir. image={image_path} output_dir={output_dir}"
+                    )
+                rel_path = rel_path.replace("\\", "/")
+            else:
+                safe_stem = _safe_name(image_path.stem)
+                filename = f"{safe_stem}_{idx:06d}.{output_ext}"
+                image_path_out = images_dir / filename
+                if not cv2.imwrite(str(image_path_out), frame):
+                    raise SystemExit(f"Failed to write: {image_path_out}")
 
-            try:
-                rel_path = str(image_path_out.relative_to(output_dir))
-            except Exception:
-                rel_path = str(image_path_out)
+                try:
+                    rel_path = str(image_path_out.relative_to(output_dir))
+                except Exception:
+                    rel_path = str(image_path_out)
+                rel_path = rel_path.replace("\\", "/")
 
             if args.mode == "coco":
                 images.append(
                     {
                         "id": image_id,
-                        "file_name": rel_path.replace("\\", "/"),
+                        "file_name": rel_path,
                         "width": int(w),
                         "height": int(h),
                         "frame_index": int(idx),
@@ -716,15 +761,22 @@ def main() -> None:
                     seen_class_ids.append(int(d.class_id))
 
                 image_id += 1
-                total_saved += 1
-                saved_images += 1
-            else:
-                total_saved += 1
-                saved_images += 1
+            total_saved += 1
+            saved_images += 1
+            if progress_bar is not None:
+                progress_bar.update(1)
+            elif not args.no_progress and ((idx + 1) % 50 == 0 or (idx + 1) == len(selected_images)):
+                print(
+                    f"[label_video] progress {idx + 1}/{len(selected_images)} included={saved_images}",
+                    file=sys.stdout,
+                )
 
         total_frames += processed_images
+        if progress_bar is not None:
+            progress_bar.close()
         print(
-            f"[label_video] done images={processed_images} saved={saved_images} mode={args.mode}"
+            f"[label_video] done images={processed_images} included={saved_images} mode={args.mode} "
+            f"reuse_images={bool(args.reuse_images)}"
         )
 
     if args.mode == "coco":

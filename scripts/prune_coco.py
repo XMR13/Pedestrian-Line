@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import time
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
@@ -42,14 +44,57 @@ def _parse_args() -> argparse.Namespace:
         help="Output JSON path (default: <annotations>_pruned.json).",
     )
     p.add_argument("--in-place", action="store_true", help="Overwrite the input annotations file.")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow pruning that would remove all images/annotations (dangerous; keep backups!).",
+    )
+    p.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="Disable automatic .bak backup when using --in-place.",
+    )
     p.add_argument("--dry-run", action="store_true", help="Report only, do not write output.")
     return p.parse_args()
 
 def _image_path(images_dir: Path, file_name:str) -> Path:
-    path = Path(file_name)
-    if path.is_absolute():
-        return path
-    return images_dir/path
+    """
+    Resolve COCO `file_name` to an on-disk path.
+
+    In this repo we commonly write COCO `file_name` as a path relative to the
+    dataset root, e.g. `images/foo.png`. When users pass `--dataset-dir`, this
+    script defaults `images_dir` to `<dataset>/images`, so a naive join would
+    incorrectly look under `<dataset>/images/images/foo.png`.
+    """
+    # COCO exports sometimes contain backslashes (Windows) even though COCO paths are typically POSIX-like.
+    normalized = str(file_name).replace("\\", "/").lstrip("./")
+    raw = Path(normalized)
+    if raw.is_absolute():
+        return raw
+
+    # Most common: `images_dir` points to `<dataset>/images`.
+    candidate = images_dir / raw
+    if candidate.exists():
+        return candidate
+
+    # If `file_name` already includes `images/...`, try resolving from the dataset root.
+    if images_dir.name.lower() == "images":
+        candidate = images_dir.parent / raw
+        if candidate.exists():
+            return candidate
+
+    # Fallback: treat file_name as a bare basename.
+    candidate = images_dir / raw.name
+    return candidate
+
+
+def _backup_path_for(ann_path: Path) -> Path:
+    # Default backup next to the file (easy to find). Avoid overwriting an existing backup.
+    base = ann_path.with_suffix(ann_path.suffix + ".bak")
+    if not base.exists():
+        return base
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    return ann_path.with_suffix(ann_path.suffix + f".bak_{stamp}")
 
 def main() -> None:
     args = _parse_args()
@@ -81,6 +126,20 @@ def main() -> None:
         ann for ann in annotations_list if int(ann.get("image_id", -1)) in kept_image_ids
     ]
 
+    # Safety: if we are about to wipe everything, it's usually a path-resolution/config mistake.
+    if not args.force:
+        if images and not kept_images:
+            raise SystemExit(
+                "[prune_coco] Refusing to prune: would remove ALL images from COCO JSON. "
+                "This is usually a path mismatch (e.g. file_name includes 'images/...' while you also set images_dir). "
+                "Re-run with --dry-run, or pass --images-dir correctly, or use --force if you really intend this."
+            )
+        if annotations_list and not kept_annotations:
+            raise SystemExit(
+                "[prune_coco] Refusing to prune: would remove ALL annotations from COCO JSON. "
+                "This is usually a path mismatch or bad image_id references. Use --force if intended."
+            )
+
     pruned = dict(coco)
     pruned["images"] = kept_images
     pruned["annotations"] = kept_annotations
@@ -90,6 +149,10 @@ def main() -> None:
     )
 
     if not args.dry_run:
+        if args.in_place and not args.no_backup:
+            backup_path = _backup_path_for(ann_path)
+            shutil.copy2(ann_path, backup_path)
+            print(f"[prune_coco] wrote backup: {backup_path}")
         output_path.write_text(json.dumps(pruned, indent=2), encoding="utf-8")
 
     print(
