@@ -101,7 +101,7 @@ Karena target kelas kendaraan (truck/trailer/pickup/dll) adalah **custom**, lang
 - Jika ingin otomatis mengambil kandidat gambar dari video (tanpa line counting), gunakan:
 
 ```bash
-uv run python scripts/label_video.py \
+uv run python -m yolo_kitv2 label run \
   --mode candidates \
   --input media/input.mp4 \
   --output-dir data/candidates/input_mp4 \
@@ -116,7 +116,7 @@ script ini akan menyimpan frame **hanya saat kendaraan muncul** (mirip extract_c
 sekaligus menulis COCO labels.
 
 ```bash
-uv run python scripts/label_video.py \
+uv run python -m yolo_kitv2 label run \
   --mode coco \
   --input media/input.mp4 \
   --output-dir data/auto_labels/input_mp4 \
@@ -133,7 +133,7 @@ Tip: gunakan `--min-seconds-between` atau `--min-frames-between` untuk skip anta
 Untuk **ekstrak frame saja** (tanpa deteksi/label):
 
 ```bash
-uv run python scripts/label_video.py \
+uv run python -m yolo_kitv2 label run \
   --mode frames \
   --input media/input.mp4 \
   --output-dir data/frames/input_mp4 \
@@ -143,7 +143,7 @@ uv run python scripts/label_video.py \
 Untuk **auto-label folder gambar** (input = directory berisi images):
 
 ```bash
-uv run python scripts/label_video.py \
+uv run python -m yolo_kitv2 label run \
   --mode coco \
   --input data/images_raw \
   --output-dir data/auto_labels/images_raw \
@@ -156,7 +156,7 @@ uv run python scripts/label_video.py \
 Untuk **gabung beberapa hasil auto-label** jadi satu folder COCO (siap CVAT):
 
 ```bash
-uv run python scripts/merge_coco.py \
+uv run python -m yolo_kitv2 coco merge \
   --inputs data/auto_labels/set_a data/auto_labels/set_b \
   --output-dir data/auto_labels/merged
 ```
@@ -164,7 +164,7 @@ uv run python scripts/merge_coco.py \
 Jika kamu **hapus gambar** secara manual, perbaiki COCO JSON:
 
 ```bash
-uv run python scripts/prune_coco.py \
+uv run python -m yolo_kitv2 coco prune \
   --dataset-dir data/auto_labels/merged \
   --in-place
 ```
