@@ -24,7 +24,7 @@ Pipeline inti dari project ini adalah sebagai berikut::
 >
 
 Ilustrasi cara program ini digunakan adalah sebagai berikut
-![gambar arsitektur](media/readme/cara_kerja.png)
+![gambar cara kerja](docs/readme_png/cara_kerja.png)
 
 
 Architecture (High Level)
@@ -49,8 +49,8 @@ package:
   so `python main.py` keeps working.
 - `scripts/` –  Debug script (tidak memiliki pengaruh terhadap jalannya program).
 
-Untuk arsitekturnya bisa dirujuk dari gambar berikut ini
-![gambar arsitektur](media/readme/arch_new.png)
+Untuk arsitekturnya bisa dirujuk dari gambar berikut ini:
+![gambar arsitektur](docs/readme_png/arch_new.png)
 
 
 Dependencies & Setup
