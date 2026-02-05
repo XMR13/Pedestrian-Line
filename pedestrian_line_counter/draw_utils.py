@@ -52,13 +52,13 @@ def draw_tracks(
 
         #  Label yang tertate rapi : "<class>  #<track_id>" (atau hanya "#<track_id>")
         cid = track.class_id
-        disp_ud = None
+        disp_id = None
         if cid is not None:
             cls_key = int(cid)
             disp_id = track.display_ids_by_class.get(cls_key)
         if disp_id is None and track.display_id is not None and track.display_class_id == cid:
             disp_id = track.display_id
-        if disp_id == None:
+        if disp_id is None:
             disp_id = track.track_id
 
         if cid is not None:

@@ -113,6 +113,23 @@ def load_class_names(path: Path) -> Dict[int, str]:
     raise ValueError(f"Invalid class names file contents: {path}")
 
 
+def infer_track_class_ids_from_class_names(class_names: Dict[int, str]) -> List[int]:
+    """
+    Infer a default class-id allowlist from a class-name mapping.
+
+    This enables a simple workflow where users provide only --class-names, and the
+    program counts all classes defined in that mapping.
+    """
+
+    ids: List[int] = []
+    for k in class_names.keys():
+        try:
+            ids.append(int(k))
+        except Exception:
+            continue
+    return sorted(set(ids))
+
+
 @dataclass
 class TrackerConfig:
     """

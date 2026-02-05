@@ -50,7 +50,7 @@ package:
 - `scripts/` –  Debug script (tidak memiliki pengaruh terhadap jalannya program).
 
 Untuk arsitekturnya bisa dirujuk dari gambar berikut ini
-![gambar arsitektur](media/readme/arch.png)
+![gambar arsitektur](media/readme/arch_new.png)
 
 
 Dependencies & Setup
@@ -161,12 +161,43 @@ uv run python -m yolo_kitv2 coco merge \
   --output-dir data/auto_labels/merged
 ```
 
+Jika CVAT **gagal menemukan images** saat import COCO (biasanya karena `images[].file_name` masih `images/<nama>.jpg`
+tapi kamu upload gambar dalam folder yang flat), jalankan CVAT fix untuk membasename `file_name` dan memastikan
+`category_id` mulai dari 1:
+
+```bash
+uv run python -m yolo_kitv2 coco cvat-fix \
+  --dataset-dir data/auto_labels/merged \
+  --in-place \
+  --basename-file-names
+```
+
 Jika kamu **hapus gambar** secara manual, perbaiki COCO JSON:
 
 ```bash
 uv run python -m yolo_kitv2 coco prune \
   --dataset-dir data/auto_labels/merged \
   --in-place
+```
+
+Untuk visualisasi label mirip dashboard (distribusi class, histogram box, dan sample overlay berlabel):
+
+```bash
+uv run python -m yolo_kitv2 dataset viz \
+  --dataset-dir data/auto_labels/merged \
+  --format coco \
+  --output-dir data/auto_labels/merged_viz
+```
+
+Hasilnya ada di folder output: `summary.json`, `report.md`, chart PNG, dan folder `samples/`.
+
+Kalau hanya punya `annotations.json` (tanpa struktur dataset lengkap) dan ingin **distribusi label saja**:
+
+```bash
+uv run python -m yolo_kitv2 dataset viz \
+  --annotations data/auto_labels/merged/annotations.json \
+  --distribution-only \
+  --output-dir data/auto_labels/merged_viz_dist
 ```
 
 Untuk preview tanpa menyimpan file (window saja):

@@ -15,14 +15,19 @@ def _help() -> None:
                 "",
                 "Groups/commands:",
                 "  dataset qa            Validate datasets (COCO/YOLO/VOC).",
+                "  dataset viz           Generate dataset label visualization report (charts + samples).",
                 "  coco prune            Remove COCO entries for missing images (safe by default).",
                 "  coco merge            Merge multiple COCO datasets into one output directory.",
+                "  coco cvat-fix         Fix COCO JSON for CVAT import (category ids, optional file_name basename).",
                 "  label run             Auto-label video/images into COCO, or extract frames/candidates.",
                 "",
                 "Examples:",
                 "  python -m yolo_kitv2 dataset qa --dataset-dir data/ds --format coco --strict",
+                "  python -m yolo_kitv2 dataset viz --dataset-dir data/ds --format coco --output-dir data/viz",
+                "  python -m yolo_kitv2 dataset viz --annotations data/ds/annotations.json --distribution-only --output-dir data/viz",
                 "  python -m yolo_kitv2 coco prune --dataset-dir data/ds --dry-run",
                 "  python -m yolo_kitv2 coco merge --inputs ds_a ds_b --output-dir merged",
+                "  python -m yolo_kitv2 coco cvat-fix --dataset-dir data/ds --in-place --basename-file-names",
                 "  python -m yolo_kitv2 label run --mode coco --input images/ --output-dir ds --reuse-images --model model.onnx",
                 "",
                 "Tip: append -h after any command to see full help.",
@@ -42,6 +47,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Dispatch by prefix tokens, and let each tool handle its own argparse and `-h`.
     dispatch: Dict[Tuple[str, ...], Callable[[List[str]], int]] = {
         ("dataset", "qa"): _dataset_qa,
+        ("dataset", "viz"): _dataset_viz,
         ("coco", "prune"): _coco_prune,
         ("coco", "merge"): _coco_merge,
         ("coco", "cvat-fix"): _coco_cvat_fix,
@@ -59,6 +65,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _dataset_qa(argv: List[str]) -> int:
     from .datasets.qa import main as tool_main
+
+    return tool_main(argv)
+
+
+def _dataset_viz(argv: List[str]) -> int:
+    from .datasets.visualize import main as tool_main
 
     return tool_main(argv)
 

@@ -10,7 +10,7 @@ import cv2
 import json
 import sys
 
-from .config import AppConfig, ROOT_DIR, get_default_config, load_class_names
+from .config import AppConfig, ROOT_DIR, get_default_config, infer_track_class_ids_from_class_names, load_class_names
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
@@ -526,18 +526,28 @@ def main() -> None:
     if not args.no_write:
         writer = cv2.VideoWriter(str(output_path), fourcc, writer_fps, (width, height))
 
-    if cfg.model.backend.lower() in {"onnx", "tensorrt", "torch"} and not cfg.model.track_class_ids and not cfg.model.allow_all_classes:
-        raise SystemExit(
-            "Model-based backend selected but no target classes configured. "
-            "Pass --class-ids (comma-separated) to specify which vehicle subclasses to count, "
-            "or use --allow-all-classes for debugging."
-        )
-
     class_names_map = None
     if cfg.model.class_names_path is not None:
         if not cfg.model.class_names_path.exists():
             raise SystemExit(f"Class names file not found: {cfg.model.class_names_path}")
         class_names_map = load_class_names(cfg.model.class_names_path)
+        if (
+            cfg.model.backend.lower() in {"onnx", "tensorrt", "torch"}
+            and not cfg.model.track_class_ids
+            and not cfg.model.allow_all_classes
+        ):
+            inferred = infer_track_class_ids_from_class_names(class_names_map)
+            if inferred:
+                cfg.model.track_class_ids = inferred
+                print(f"[main] Inferred target class IDs from --class-names: {cfg.model.track_class_ids}")
+
+    if cfg.model.backend.lower() in {"onnx", "tensorrt", "torch"} and not cfg.model.track_class_ids and not cfg.model.allow_all_classes:
+        raise SystemExit(
+            "Model-based backend selected but no target classes configured. "
+            "Pass --class-ids (comma-separated) to specify which vehicle subclasses to count, "
+            "or provide --class-names so class IDs can be inferred, "
+            "or use --allow-all-classes for debugging."
+        )
 
     detector = Detector(cfg.model)
     tracker = Tracker(cfg.tracker)
