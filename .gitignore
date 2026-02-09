@@ -14,5 +14,12 @@ Models/
 media/
 data/
 
+# Local config overrides (experiments; not committed)
+config/local/
+config/experiments/
+config/*.local.json
+config/*.local.yaml
+config/*.local.yml
+
 # Virtual environments
 .venv

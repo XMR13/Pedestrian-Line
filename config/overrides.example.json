@@ -1,0 +1,40 @@
+{
+  "app": {
+    "model": {
+      "backend": "onnx",
+      "model_path": "Models/vehicle_subclasses.onnx",
+      "input_size": [640, 640],
+      "confidence_threshold": 0.5,
+      "nms_iou_threshold": 0.45,
+      "pre_nms_topk": 1000,
+      "min_box_area_ratio": 0.0002,
+      "track_class_ids": [0, 1, 2],
+      "class_names_path": "config/class_names.yaml",
+      "allow_all_classes": false
+    },
+    "tracker": {
+      "max_distance": 80.0,
+      "max_lost": 45,
+      "max_distance_scale_cap": 5
+    },
+    "line": {
+      "line_json_path": "config/line.json",
+      "camera_name": null,
+      "start_norm": [0.35, 0.45],
+      "end_norm": [0.85, 0.75]
+    },
+    "io": {
+      "rtsp_url": "env:PLC_RTSP_URL",
+      "input_path": "media/input.mp4",
+      "output_path": "output.mp4"
+    },
+    "spool": {
+      "root_dir": "media/spool",
+      "site_id": "default",
+      "camera_id": "camera_subang",
+      "write_thumbnails": true,
+      "thumb_pad": 20,
+      "thumb_max_side": 320
+    }
+  }
+}

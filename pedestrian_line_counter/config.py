@@ -163,6 +163,13 @@ class LineConfig:
 .
     """
 
+    # Optional line source:
+    # - line_json_path: path to line JSON produced by line_picker.py
+    # - camera_name: resolves to config/cameras/<name>.json then config/<name>.json
+    # If both are None, fallback to start_norm/end_norm below.
+    line_json_path: Optional[Path] = None
+    camera_name: Optional[str] = None
+
     # (x, y) in [0, 1] x [0, 1]
     start_norm: Tuple[float, float] = (0.35, 0.45)
     end_norm: Tuple[float, float] = (0.85, 0.75)
@@ -174,9 +181,28 @@ class IOConfig:
     Konfigurasi untuk input dan output dari video atau media yang ingin digunakan
     """
 
+    # Optional RTSP URL for live mode (alternative to input_path).
+    # Keep credentials in a local-only config (e.g. config/local/*.local.json).
+    rtsp_url: Optional[str] = None
+
     # Dapat di ovveride dengan menggunakan Command Line Interfae.
     input_path: Path = ROOT_DIR / "media" / "input.mp4"
     output_path: Path = ROOT_DIR / "output.mp4"
+
+@dataclass
+class SpoolConfig:
+    """
+    Konfigurasi untuk filesystem-first traffic spool (events.jsonl + thumbnails).
+
+    Spool is disabled when `root_dir` is None.
+    """
+
+    root_dir: Optional[Path] = None
+    site_id: str = "default"
+    camera_id: Optional[str] = None
+    write_thumbnails: bool = True
+    thumb_pad: int = 20
+    thumb_max_side: int = 320
 
 
 @dataclass
@@ -190,6 +216,7 @@ class AppConfig:
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     line: LineConfig = field(default_factory=LineConfig)
     io: IOConfig = field(default_factory=IOConfig)
+    spool: SpoolConfig = field(default_factory=SpoolConfig)
 
 
 def get_default_config() -> AppConfig:

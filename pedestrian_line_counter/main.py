@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 from pathlib import Path
 from typing import Optional, Tuple
 import time
@@ -11,6 +12,7 @@ import json
 import sys
 
 from .config import AppConfig, ROOT_DIR, get_default_config, infer_track_class_ids_from_class_names, load_class_names
+from .config_io import apply_config_overrides, load_config_overrides, split_overrides, write_app_config_json
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
@@ -42,9 +44,33 @@ def _parse_args() -> argparse.Namespace:
         help="RTSP URL for live mode. If set, --input is not used.",
     )
     parser.add_argument(
+        "--rtsp-url-env",
+        type=str,
+        default=None,
+        help=(
+            "Environment variable name that stores RTSP URL (e.g. PLC_RTSP_URL). "
+            "Used when --rtsp-url is not set."
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=str,
         help="Path ke output yang ingin disimpan (jika kosong default ke I/O setting).",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help=(
+            "Path to a JSON config override file (for local experimentation). "
+            "Overrides are applied on top of defaults; CLI flags still take precedence."
+        ),
+    )
+    parser.add_argument(
+        "--dump-config",
+        type=str,
+        default=None,
+        help="Write the resolved config (after defaults/--config/CLI overrides) to this JSON path and exit.",
     )
     parser.add_argument(
         "--backend",
@@ -260,16 +286,22 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Write per-crossing traffic events (events.jsonl) + thumbnails into this directory.",
     )
-    parser.add_argument("--site-id", type=str, default="default", help="Site ID for traffic spool metadata.")
+    parser.add_argument("--site-id", type=str, default=None, help="Site ID for traffic spool metadata.")
     parser.add_argument(
         "--camera-id",
         type=str,
         default=None,
         help="Camera ID for traffic spool metadata (defaults to --camera if set).",
     )
-    parser.add_argument("--no-spool-thumbnails", action="store_true", help="Disable writing thumbnails for crossing events.")
-    parser.add_argument("--spool-thumb-pad", type=int, default=20, help="Padding (pixels) around bbox when saving thumbnails.")
-    parser.add_argument("--spool-thumb-max-side", type=int, default=320, help="Max side (pixels) for saved thumbnails.")
+    parser.add_argument(
+        "--spool-thumbnails",
+        dest="spool_thumbnails",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable writing thumbnails for crossing events (default: enabled).",
+    )
+    parser.add_argument("--spool-thumb-pad", type=int, default=None, help="Padding (pixels) around bbox when saving thumbnails.")
+    parser.add_argument("--spool-thumb-max-side", type=int, default=None, help="Max side (pixels) for saved thumbnails.")
     return parser.parse_args()
 
 
@@ -366,6 +398,23 @@ def _load_lines_from_json(path: Path) -> list[tuple[tuple[float, float], tuple[f
     return []
 
 
+def _resolve_camera_line_path(camera_value: str) -> Path:
+    cam_arg = Path(camera_value)
+    if cam_arg.exists():
+        return cam_arg
+
+    candidate1 = ROOT_DIR / "config" / "cameras" / f"{camera_value}.json"
+    candidate2 = ROOT_DIR / "config" / f"{camera_value}.json"
+    if candidate1.exists():
+        return candidate1
+    if candidate2.exists():
+        return candidate2
+    raise SystemExit(
+        f"Camera line JSON not found for '{camera_value}'. "
+        f"Tried: {candidate1} and {candidate2}"
+    )
+
+
 def _select_line_interactively(
     video_path: Path,
 ) -> Optional[Tuple[Tuple[int, int], Tuple[int, int], Tuple[float, float], Tuple[float, float]]]:
@@ -435,9 +484,6 @@ def main() -> None:
     args = _parse_args()
     cfg = get_default_config()
 
-    is_live = args.rtsp_url is not None
-    if is_live and args.input:
-        raise SystemExit("Use only one source: either --input (file) or --rtsp-url (live).")
     if args.queue_size <= 0:
         raise SystemExit("--queue-size must be > 0")
     if args.frame_stride <= 0:
@@ -446,6 +492,34 @@ def main() -> None:
         raise SystemExit("--target-fps must be > 0")
     if args.log_every_seconds is not None and args.log_every_seconds <= 0:
         raise SystemExit("--log-every-seconds must be > 0")
+
+    if args.config:
+        cfg_path = Path(args.config)
+        if not cfg_path.is_absolute():
+            cfg_path = ROOT_DIR / cfg_path
+        if not cfg_path.exists():
+            raise SystemExit(f"Config override JSON not found: {cfg_path}")
+        overrides_all = load_config_overrides(cfg_path)
+        overrides_app, _overrides_extra = split_overrides(overrides_all)
+        # Resolve relative paths in overrides against repo root by default.
+        apply_config_overrides(cfg, overrides_app, path_base_dir=ROOT_DIR)
+
+    rtsp_url: Optional[str] = None
+    if args.rtsp_url is not None:
+        rtsp_url = args.rtsp_url
+    elif args.rtsp_url_env is not None:
+        env_name = str(args.rtsp_url_env).strip()
+        if env_name == "":
+            raise SystemExit("--rtsp-url-env must be a non-empty environment variable name.")
+        env_val = os.environ.get(env_name)
+        if env_val is None or str(env_val).strip() == "":
+            raise SystemExit(f"Environment variable '{env_name}' is not set or empty.")
+        rtsp_url = str(env_val).strip()
+    else:
+        rtsp_url = cfg.io.rtsp_url
+    is_live = rtsp_url is not None
+    if is_live and args.input:
+        raise SystemExit("Use only one source: either --input (file) or --rtsp-url (live).")
 
     # Allow CLI overrides
     if args.input:
@@ -476,21 +550,11 @@ def main() -> None:
     if args.line_json:
         line_path = Path(args.line_json)
     elif args.camera:
-        cam_arg = Path(args.camera)
-        if cam_arg.exists():
-            line_path = cam_arg
-        else:
-            candidate1 = ROOT_DIR / "config" / "cameras" / f"{args.camera}.json"
-            candidate2 = ROOT_DIR / "config" / f"{args.camera}.json"
-            if candidate1.exists():
-                line_path = candidate1
-            elif candidate2.exists():
-                line_path = candidate2
-            else:
-                raise SystemExit(
-                    f"Camera line JSON not found for '{args.camera}'. "
-                    f"Tried: {candidate1} and {candidate2}"
-                )
+        line_path = _resolve_camera_line_path(args.camera)
+    elif cfg.line.line_json_path is not None:
+        line_path = Path(cfg.line.line_json_path)
+    elif cfg.line.camera_name:
+        line_path = _resolve_camera_line_path(str(cfg.line.camera_name))
 
     lines_norm: list[tuple[tuple[float, float], tuple[float, float]]] = []
     if line_path is not None:
@@ -507,6 +571,14 @@ def main() -> None:
     input_path = cfg.io.input_path
     output_path = cfg.io.output_path
 
+    if args.dump_config:
+        dump_path = Path(args.dump_config)
+        if not dump_path.is_absolute():
+            dump_path = ROOT_DIR / dump_path
+        write_app_config_json(dump_path, cfg)
+        print(f"[main] Wrote resolved config JSON: {dump_path}")
+        return
+
     if not is_live and not input_path.exists():
         raise SystemExit(f"Input video not found: {input_path}")
 
@@ -517,9 +589,9 @@ def main() -> None:
     if args.resize_to and args.select_line:
         raise SystemExit("--select-line is not supported together with --resize-to. Use line_picker.py to save the line JSON.")
 
-    source_label = args.rtsp_url if is_live else str(input_path)
+    source_label = rtsp_url if is_live else str(input_path)
     cap = open_video_capture(
-        args.rtsp_url if is_live else input_path,
+        rtsp_url if is_live else input_path,
         open_timeout_ms=args.open_timeout_ms,
         read_timeout_ms=args.read_timeout_ms,
     )
@@ -655,22 +727,28 @@ def main() -> None:
         line_counter = LineCounter(p1=p1, p2=p2)
 
     spool: Optional[TrafficSpoolWriter] = None
-    if args.spool_dir:
-        cam_id = args.camera_id or (args.camera if args.camera else "camera")
+    spool_dir = Path(args.spool_dir) if args.spool_dir else cfg.spool.root_dir
+    if spool_dir is not None:
+        cam_id = args.camera_id or cfg.spool.camera_id or (args.camera if args.camera else "camera")
+        site_id = str(args.site_id) if args.site_id is not None else str(cfg.spool.site_id)
+        write_thumbs = cfg.spool.write_thumbnails if args.spool_thumbnails is None else bool(args.spool_thumbnails)
+        thumb_pad = int(cfg.spool.thumb_pad) if args.spool_thumb_pad is None else int(args.spool_thumb_pad)
+        thumb_max_side = int(cfg.spool.thumb_max_side) if args.spool_thumb_max_side is None else int(args.spool_thumb_max_side)
+
         model_version = (
             "motion"
             if cfg.model.backend.lower() == "motion"
             else str(Path(cfg.model.model_path).name)
         )
         cfg_version = str(args.camera) if args.camera else "default"
-        source = {"type": "rtsp", "value": str(args.rtsp_url)} if is_live else {"type": "video", "value": str(input_path)}
+        source = {"type": "rtsp", "value": str(rtsp_url)} if is_live else {"type": "video", "value": str(input_path)}
         spool_cfg = TrafficSpoolConfig(
-            root_dir=Path(args.spool_dir),
-            site_id=str(args.site_id),
+            root_dir=Path(spool_dir),
+            site_id=str(site_id),
             camera_id=str(cam_id),
-            write_thumbnails=not args.no_spool_thumbnails,
-            thumb_pad=int(args.spool_thumb_pad),
-            thumb_max_side=int(args.spool_thumb_max_side),
+            write_thumbnails=bool(write_thumbs),
+            thumb_pad=int(thumb_pad),
+            thumb_max_side=int(thumb_max_side),
         )
         spool = TrafficSpoolWriter(
             spool_cfg,
