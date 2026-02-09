@@ -47,6 +47,11 @@ class OnnxRuntimeBackend:
             raise FileNotFoundError(str(self.model_path))
 
         sess_opts = ort.SessionOptions()
+        # Safe default optimizations; often helps YOLO exports.
+        try:  # pragma: no cover - depends on ORT build
+            sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        except Exception:
+            pass
         providers = list(cfg.providers) if cfg.providers is not None else None
         self.session = ort.InferenceSession(str(self.model_path), sess_options=sess_opts, providers=providers)
 

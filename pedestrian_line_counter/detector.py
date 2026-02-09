@@ -53,6 +53,21 @@ class Detector:
                     post_cfg=self._build_yolo_post_cfg(),
                     onnx_providers=providers,
                 )
+                # Print providers actually in use so it's obvious whether CUDA is active.
+                try:
+                    ort_backend = getattr(self._yolo_pipe, "backend", None)
+                    providers_in_use = list(getattr(ort_backend, "providers_in_use", []) or [])
+                    if providers_in_use:
+                        using_cuda = "CUDAExecutionProvider" in providers_in_use
+                        print(
+                            "[detector] ONNXRuntime providers in use: "
+                            f"{providers_in_use} (cuda={'yes' if using_cuda else 'no'})"
+                        )
+                    else:
+                        # Fallback: still show what we requested.
+                        print(f"[detector] ONNXRuntime providers requested: {list(providers)}")
+                except Exception:
+                    print(f"[detector] ONNXRuntime providers requested: {list(providers)}")
                 self._backend = "onnx"
             except Exception as exc:  # pragma: no cover - defensive
                 print(f"[detector] Failed to initialize ONNX backend: {exc}")
@@ -210,6 +225,7 @@ class Detector:
         return YoloPostConfig(
             conf_threshold=float(self.config.confidence_threshold),
             iou_threshold=float(self.config.nms_iou_threshold),
+            pre_nms_topk=self.config.pre_nms_topk,
             class_ids=class_ids,
         )
 

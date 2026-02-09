@@ -58,6 +58,24 @@ def _parse_args() -> argparse.Namespace:
         help="Model path override (.onnx for onnx, .engine for tensorrt, .pt/.pth for torch).",
     )
     parser.add_argument(
+        "--confidence",
+        type=float,
+        default=None,
+        help="Override detector confidence threshold (e.g. 0.5).",
+    )
+    parser.add_argument(
+        "--nms-iou",
+        type=float,
+        default=None,
+        help="Override NMS IoU threshold (e.g. 0.45).",
+    )
+    parser.add_argument(
+        "--pre-nms-topk",
+        type=int,
+        default=None,
+        help="Cap candidates before NMS (performance). Typical values: 300..2000. 0 disables.",
+    )
+    parser.add_argument(
         "--class-ids",
         type=str,
         default=None,
@@ -117,6 +135,15 @@ def _parse_args() -> argparse.Namespace:
         help="Menentukan berapa detik dari input yang diinginkan untuk diproses ",
     )
     parser.add_argument(
+        "--frame-stride",
+        type=int,
+        default=1,
+        help=(
+            "Process only every Nth frame for detect/track/count (1 = every frame). "
+            "Higher values speed up inference but may reduce counting accuracy."
+        ),
+    )
+    parser.add_argument(
         "--select-line",
         action="store_true",
         help="Interactively pick the counting line on the first frame.",
@@ -167,6 +194,19 @@ def _parse_args() -> argparse.Namespace:
         help="Disable writing output video (useful for benchmarking).",
     )
     parser.add_argument(
+        "--write-processed-only",
+        action="store_true",
+        help="When using --frame-stride > 1, write only processed frames to output (reduces encoder cost).",
+    )
+    parser.add_argument(
+        "--fast-skip",
+        action="store_true",
+        help=(
+            "File mode only: when combined with --frame-stride > 1 and --write-processed-only, "
+            "skip decoding intermediate frames using VideoCapture.grab() for higher throughput."
+        ),
+    )
+    parser.add_argument(
         "--benchmark",
         action="store_true",
         help="Print simple per-stage timing stats while processing.",
@@ -176,6 +216,11 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=250,
         help="How often (in frames) to print benchmark stats when --benchmark is set.",
+    )
+    parser.add_argument(
+        "--show-fps",
+        action="store_true",
+        help="Draw runtime FPS counters on output frames (loop FPS, processed FPS, and live source FPS).",
     )
     parser.add_argument(
         "--queue-size",
@@ -258,6 +303,34 @@ def _parse_size(spec: str) -> Tuple[int, int]:
     if w <= 0 or h <= 0:
         raise ValueError(f"Invalid size '{spec}': width/height must be > 0.")
     return w, h
+
+def _draw_fps_overlay(
+    frame,
+    *,
+    fps_loop: float,
+    fps_processed: float,
+    fps_source: float = 0.0,
+    is_live: bool = False,
+) -> None:
+    text = f"FPS loop:{fps_loop:.1f} proc:{fps_processed:.1f}"
+    if is_live and fps_source > 0.0:
+        text += f" src:{fps_source:.1f}"
+
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.62, thickness=2)
+    fw = int(frame.shape[1])
+    x = max(fw - tw - 14, 12)
+    y = max(th + 12, 28)
+    cv2.rectangle(frame, (x - 6, y - th - 8), (x + tw + 6, y + 6), (0, 0, 0), -1)
+    cv2.putText(
+        frame,
+        text,
+        (x, y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.62,
+        (0, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
 
 
 def _load_lines_from_json(path: Path) -> list[tuple[tuple[float, float], tuple[float, float]]]:
@@ -367,6 +440,8 @@ def main() -> None:
         raise SystemExit("Use only one source: either --input (file) or --rtsp-url (live).")
     if args.queue_size <= 0:
         raise SystemExit("--queue-size must be > 0")
+    if args.frame_stride <= 0:
+        raise SystemExit("--frame-stride must be > 0")
     if args.target_fps is not None and args.target_fps <= 0:
         raise SystemExit("--target-fps must be > 0")
     if args.log_every_seconds is not None and args.log_every_seconds <= 0:
@@ -381,6 +456,12 @@ def main() -> None:
         cfg.model.backend = args.backend
     if args.model:
         cfg.model.model_path = Path(args.model)
+    if args.confidence is not None:
+        cfg.model.confidence_threshold = float(args.confidence)
+    if args.nms_iou is not None:
+        cfg.model.nms_iou_threshold = float(args.nms_iou)
+    if args.pre_nms_topk is not None:
+        cfg.model.pre_nms_topk = None if int(args.pre_nms_topk) <= 0 else int(args.pre_nms_topk)
     if args.allow_all_classes:
         cfg.model.allow_all_classes = True
     if args.class_ids:
@@ -454,6 +535,9 @@ def main() -> None:
         # honor --target-fps. If we write the output with the source-reported FPS,
         # playback becomes sped up. Clamp to the effective processing rate.
         writer_fps = min(float(args.target_fps), fps) if fps > 0.0 else float(args.target_fps)
+    if args.write_processed_only and args.frame_stride > 1:
+        # Keep playback speed sensible when writing only a subset of frames.
+        writer_fps = max(float(writer_fps) / float(args.frame_stride), 1e-3)
     reported_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
     reported_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
     backend_name = None
@@ -631,6 +715,31 @@ def main() -> None:
         print(f"[main] Line: {p1} -> {p2}")
     if max_frames is not None:
         print(f"[main] Frame limit: {max_frames} (via --max-frames/--max-seconds)")
+    if args.frame_stride > 1:
+        print(
+            f"[main] Frame stride: {args.frame_stride} "
+            f"(running detect/track/count on every {args.frame_stride}th frame)"
+        )
+    if args.write_processed_only:
+        print(f"[main] Output write mode: processed-only (fps={writer_fps:.3f})")
+    fast_skip_enabled = (
+        (not is_live)
+        and bool(args.fast_skip)
+        and int(args.frame_stride) > 1
+        and bool(args.write_processed_only)
+        and (not args.show)
+    )
+    if args.fast_skip and not fast_skip_enabled:
+        print(
+            "[main] fast-skip requested but not enabled. "
+            "Requirements: file input (no --rtsp-url), --frame-stride > 1, --write-processed-only, and no --show."
+        )
+    if fast_skip_enabled:
+        print("[main] fast-skip: enabled (using VideoCapture.grab() for skipped frames)")
+    if cfg.model.backend.lower() in {"onnx", "tensorrt", "torch"}:
+        print(f"[main] Thresholds: conf={cfg.model.confidence_threshold} nms_iou={cfg.model.nms_iou_threshold} pre_nms_topk={cfg.model.pre_nms_topk}")
+    if args.show_fps:
+        print("[main] FPS overlay: enabled")
 
     # Prepare progress bar
     progress_total = None
@@ -654,6 +763,7 @@ def main() -> None:
         print("[main] tqdm is not installed; run `uv run pip install tqdm` to enable a progress bar.")
 
     frame_index = 0
+    process_index = 0
     warned_size_mismatch = False
     t_read = 0.0
     t_detect = 0.0
@@ -663,16 +773,65 @@ def main() -> None:
     t_write = 0.0
     t_total = 0.0
     t_frames = 0
+    t_processed = 0
+    run_started_perf_s = time.perf_counter()
+    fps_loop_rt = 0.0
+    fps_processed_rt = 0.0
+    fps_source_rt = 0.0
+    fps_prev_time_s = run_started_perf_s
+    fps_prev_frames = 0
+    fps_prev_processed = 0
+    fps_prev_source = 0
+    fps_update_interval_s = 0.5
     last_log_time_s = time.time()
     next_due_time_s: Optional[float] = None
 
     pending_first_frame = frame0 if is_live else None
+    latest_tracks = []
     reader: Optional[StreamReader] = None
     if is_live:
         reader = StreamReader(cap, queue_size=args.queue_size)
         reader.start()
 
     try:
+        def refresh_realtime_fps(
+            *,
+            frame_total: int,
+            processed_total: int,
+            force: bool = False,
+        ) -> None:
+            nonlocal fps_loop_rt
+            nonlocal fps_processed_rt
+            nonlocal fps_source_rt
+            nonlocal fps_prev_time_s
+            nonlocal fps_prev_frames
+            nonlocal fps_prev_processed
+            nonlocal fps_prev_source
+
+            now_perf = time.perf_counter()
+            dt = now_perf - fps_prev_time_s
+            if dt <= 0:
+                return
+            if (not force) and dt < fps_update_interval_s:
+                return
+
+            loop_delta = max(frame_total - fps_prev_frames, 0)
+            processed_delta = max(processed_total - fps_prev_processed, 0)
+            fps_loop_rt = float(loop_delta) / dt
+            fps_processed_rt = float(processed_delta) / dt
+
+            if is_live and reader is not None:
+                source_total = int(reader.read_frames)
+                source_delta = max(source_total - fps_prev_source, 0)
+                fps_source_rt = float(source_delta) / dt
+                fps_prev_source = source_total
+            else:
+                fps_source_rt = 0.0
+
+            fps_prev_time_s = now_perf
+            fps_prev_frames = frame_total
+            fps_prev_processed = processed_total
+
         while True:
             t0_total = time.perf_counter()
             if max_frames is not None and frame_index >= max_frames:
@@ -715,42 +874,73 @@ def main() -> None:
                 frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
             t_read += time.perf_counter() - t0
 
-            t0 = time.perf_counter()
-            detections = detector.detect(frame)
-            t_detect += time.perf_counter() - t0
-
-            t0 = time.perf_counter()
-            tracks = tracker.update(detections, frame_index)
-            t_track += time.perf_counter() - t0
-
-            if args.line_mode == "gate":
-                tracks_updated = [t for t in tracks if t.last_seen_frame == frame_index]
+            process_this_frame = (frame_index % args.frame_stride) == 0
+            if process_this_frame:
                 t0 = time.perf_counter()
-                events = line_counter.update(tracks_updated, frame_index)
-                t_count += time.perf_counter() - t0
-            else:
-                t0 = time.perf_counter()
-                events = line_counter.update(tracks, frame_index=frame_index)
-                t_count += time.perf_counter() - t0
+                detections = detector.detect(frame)
+                t_detect += time.perf_counter() - t0
 
-            if spool is not None and events:
-                spool.record_events(events, frame_bgr=frame, frame_ts=frame_ts)
-
-            # Gambar setiap gambar yang telah diupdate 
-            # avoid "stuck" boxes when a track is kept alive across occlusions.
-            if not args.no_draw:
                 t0 = time.perf_counter()
-                draw_tracks(
-                    frame,
-                    tracks,
-                    frame_index=frame_index,
-                    stale_max_age=args.stale_frames,
-                    class_names=class_names_map,
-                )
+                tracks = tracker.update(detections, process_index)
+                t_track += time.perf_counter() - t0
+                latest_tracks = tracks
+
+                if args.line_mode == "gate":
+                    tracks_updated = [t for t in tracks if t.last_seen_frame == process_index]
+                    t0 = time.perf_counter()
+                    events = line_counter.update(tracks_updated, process_index)
+                    t_count += time.perf_counter() - t0
+                else:
+                    t0 = time.perf_counter()
+                    events = line_counter.update(tracks, frame_index=process_index)
+                    t_count += time.perf_counter() - t0
+
+                if spool is not None and events:
+                    spool.record_events(events, frame_bgr=frame, frame_ts=frame_ts)
+
+                # Gambar setiap gambar yang telah diupdate
+                # avoid "stuck" boxes when a track is kept alive across occlusions.
+                if not args.no_draw:
+                    t0 = time.perf_counter()
+                    draw_tracks(
+                        frame,
+                        tracks,
+                        frame_index=process_index,
+                        stale_max_age=args.stale_frames,
+                        class_names=class_names_map,
+                    )
+                    draw_line_and_counts(frame, line_counter, class_names=class_names_map)
+                    t_draw += time.perf_counter() - t0
+                process_index += 1
+                t_processed += 1
+            elif not args.no_draw:
+                # For skipped frames, keep drawing latest tracks so overlays stay stable.
+                t0 = time.perf_counter()
+                if latest_tracks:
+                    draw_tracks(
+                        frame,
+                        latest_tracks,
+                        frame_index=max(process_index - 1, 0),
+                        stale_max_age=args.stale_frames,
+                        class_names=class_names_map,
+                    )
                 draw_line_and_counts(frame, line_counter, class_names=class_names_map)
                 t_draw += time.perf_counter() - t0
 
-            if writer is not None:
+            if args.show_fps:
+                refresh_realtime_fps(
+                    frame_total=(t_frames + 1),
+                    processed_total=t_processed,
+                )
+                _draw_fps_overlay(
+                    frame,
+                    fps_loop=fps_loop_rt,
+                    fps_processed=fps_processed_rt,
+                    fps_source=fps_source_rt,
+                    is_live=is_live,
+                )
+
+            if writer is not None and (not args.write_processed_only or process_this_frame):
                 t0 = time.perf_counter()
                 writer.write(frame)
                 t_write += time.perf_counter() - t0
@@ -760,32 +950,68 @@ def main() -> None:
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
-            frame_index += 1
-            if progress_bar is not None:
-                progress_bar.update(1)
+            if fast_skip_enabled:
+                # We already processed the current frame. Now skip decoding the next (stride-1) frames.
+                stride = int(args.frame_stride)
+                to_skip = stride - 1
+                if max_frames is not None:
+                    remaining = int(max_frames - (frame_index + 1))
+                    to_skip = max(min(to_skip, max(remaining, 0)), 0)
 
-            t_total += time.perf_counter() - t0_total
-            t_frames += 1
+                t0_skip = time.perf_counter()
+                skipped = 0
+                for _ in range(to_skip):
+                    ok = cap.grab()
+                    if not ok:
+                        break
+                    skipped += 1
+                t_read += time.perf_counter() - t0_skip
+
+                frame_index += 1 + skipped
+                if progress_bar is not None:
+                    progress_bar.update(1 + skipped)
+                t_total += time.perf_counter() - t0_total
+                t_frames += 1 + skipped
+            else:
+                frame_index += 1
+                if progress_bar is not None:
+                    progress_bar.update(1)
+                t_total += time.perf_counter() - t0_total
+                t_frames += 1
+
+            if progress_bar is not None:
+                # updated above
+                pass
             if args.target_fps:
                 next_due_time_s = time.time() + (1.0 / max(float(args.target_fps), 1e-9))
 
             if args.log_every_seconds:
                 now = time.time()
                 if (now - last_log_time_s) >= float(args.log_every_seconds):
+                    refresh_realtime_fps(
+                        frame_total=t_frames,
+                        processed_total=t_processed,
+                        force=True,
+                    )
                     print(
-                        f"[live] frames={t_frames} A->B={line_counter.count_a_to_b} "
-                        f"B->A={line_counter.count_b_to_a}"
+                        f"[main] frames={t_frames} processed={t_processed} "
+                        f"fps_loop_rt={fps_loop_rt:.2f} fps_proc_rt={fps_processed_rt:.2f} "
+                        f"{f'fps_src_rt={fps_source_rt:.2f} ' if is_live and fps_source_rt > 0.0 else ''}"
+                        f"A->B={line_counter.count_a_to_b} B->A={line_counter.count_b_to_a}"
                     )
                     last_log_time_s = now
 
             if args.benchmark and t_frames > 0 and (t_frames % max(args.benchmark_every, 1) == 0):
                 fps_eff = float(t_frames) / max(t_total, 1e-9)
+                det_avg = (1000 * t_detect / t_processed) if t_processed > 0 else 0.0
+                track_avg = (1000 * t_track / t_processed) if t_processed > 0 else 0.0
+                count_avg = (1000 * t_count / t_processed) if t_processed > 0 else 0.0
                 print(
-                    f"[bench] frames={t_frames} fps={fps_eff:.2f} "
+                    f"[bench] frames={t_frames} processed={t_processed} fps={fps_eff:.2f} "
                     f"read={1000*t_read/t_frames:.1f}ms "
-                    f"det={1000*t_detect/t_frames:.1f}ms "
-                    f"track={1000*t_track/t_frames:.1f}ms "
-                    f"count={1000*t_count/t_frames:.1f}ms "
+                    f"det={det_avg:.1f}ms "
+                    f"track={track_avg:.1f}ms "
+                    f"count={count_avg:.1f}ms "
                     f"draw={1000*t_draw/t_frames:.1f}ms "
                     f"write={1000*t_write/t_frames:.1f}ms"
                 )
@@ -807,12 +1033,15 @@ def main() -> None:
 
     if args.benchmark and t_frames > 0:
         fps_eff = float(t_frames) / max(t_total, 1e-9)
+        det_avg = (1000 * t_detect / t_processed) if t_processed > 0 else 0.0
+        track_avg = (1000 * t_track / t_processed) if t_processed > 0 else 0.0
+        count_avg = (1000 * t_count / t_processed) if t_processed > 0 else 0.0
         print(
-            f"[bench] done frames={t_frames} fps={fps_eff:.2f} "
+            f"[bench] done frames={t_frames} processed={t_processed} fps={fps_eff:.2f} "
             f"read={1000*t_read/t_frames:.1f}ms "
-            f"det={1000*t_detect/t_frames:.1f}ms "
-            f"track={1000*t_track/t_frames:.1f}ms "
-            f"count={1000*t_count/t_frames:.1f}ms "
+            f"det={det_avg:.1f}ms "
+            f"track={track_avg:.1f}ms "
+            f"count={count_avg:.1f}ms "
             f"draw={1000*t_draw/t_frames:.1f}ms "
             f"write={1000*t_write/t_frames:.1f}ms"
         )

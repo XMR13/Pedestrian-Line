@@ -14,6 +14,9 @@ class YoloPostConfig:
     """
     conf_threshold: float = 0.25
     iou_threshold: float = 0.4
+    # Cap candidate boxes before NMS to reduce CPU time when many anchors pass the threshold.
+    # If None, no cap is applied.
+    pre_nms_topk: Optional[int] = None
     max_detections: int = 50
     # If False, skip NMS and only keep top `max_detections` by score.
     apply_nms: bool = True
@@ -91,6 +94,7 @@ class YoloPostprocessor:
 
         # NMS (optional) / Top-K
         if self.cfg.apply_nms:
+            boxes_xyxy, scores, class_ids = self._pre_nms_topk(boxes_xyxy, scores, class_ids)
             boxes_xyxy, scores, class_ids = self._apply_nms(boxes_xyxy, scores, class_ids)
         else:
             boxes_xyxy, scores, class_ids = self._select_topk(boxes_xyxy, scores, class_ids)
@@ -109,6 +113,22 @@ class YoloPostprocessor:
             )
             for (x1, y1, x2, y2), score, cls_id in zip(boxes_xyxy, scores, class_ids)
         ]
+
+    def _pre_nms_topk(self, boxes: np.ndarray, scores: np.ndarray, class_ids: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        topk = self.cfg.pre_nms_topk
+        if topk is None:
+            return boxes, scores, class_ids
+        try:
+            k = int(topk)
+        except Exception:
+            return boxes, scores, class_ids
+        if k <= 0 or scores.size <= k:
+            return boxes, scores, class_ids
+
+        # Use argpartition for O(N) selection, then sort the selected subset.
+        idx = np.argpartition(scores, -k)[-k:]
+        idx = idx[np.argsort(scores[idx])[::-1]]
+        return boxes[idx], scores[idx], class_ids[idx]
 
     # ------------------------------------------------------------------ #
     # Helper internal

@@ -30,10 +30,14 @@ class ModelConfig:
     input_size: Tuple[int, int] = (640, 640)
 
     # Confidence threshold sebelum model bisa menentukan bahwa objek tersebut patut diteteksi.
-    confidence_threshold: float = 0.45
+    confidence_threshold: float = 0.5
 
     # NMS IoU Threshold (only used by ONNX backend)
     nms_iou_threshold: float = 0.45
+
+    # Performance knob: cap candidates before NMS (YOLO anchors can be large).
+    # Typical values: 300..2000. None disables.
+    pre_nms_topk: Optional[int] = 1000
 
     # Minimum box area dibandingkan dengan bagian area yang lain.
     # Lowered so distant vehicles are not filtered out too aggressively.

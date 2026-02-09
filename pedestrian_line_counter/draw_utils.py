@@ -52,6 +52,7 @@ def draw_tracks(
 
         #  Label yang tertate rapi : "<class>  #<track_id>" (atau hanya "#<track_id>")
         cid = track.class_id
+        score = track.score
         disp_id = None
         if cid is not None:
             cls_key = int(cid)
@@ -63,7 +64,7 @@ def draw_tracks(
 
         if cid is not None:
             cls = _class_name(int(cid), class_names=class_names)
-            text = f"{cls}-{disp_id}"
+            text = f"{cls} | acc : {score:.2f}"
         else:
             text = f"#{disp_id}"
 
