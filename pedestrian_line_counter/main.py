@@ -10,6 +10,7 @@ import time
 import cv2
 import json
 import sys
+import numpy as np
 
 from .config import AppConfig, ROOT_DIR, get_default_config, infer_track_class_ids_from_class_names, load_class_names
 from .config_io import apply_config_overrides, load_config_overrides, split_overrides, write_app_config_json
@@ -373,6 +374,56 @@ def _parse_size(spec: str) -> Tuple[int, int]:
         raise ValueError(f"Invalid size '{spec}': width/height must be > 0.")
     return w, h
 
+
+def _open_source_with_first_frame(
+    source: str | Path,
+    *,
+    open_timeout_ms: Optional[int] = None,
+    read_timeout_ms: Optional[int] = None,
+    source_label: Optional[str] = None,
+) -> Tuple[cv2.VideoCapture, np.ndarray, float, int, int, Optional[str]]:
+    cap = open_video_capture(
+        source,
+        open_timeout_ms=open_timeout_ms,
+        read_timeout_ms=read_timeout_ms,
+    )
+    label = source_label if source_label is not None else str(source)
+    if not cap.isOpened():
+        raise RuntimeError(f"Failed to open video source: {label}")
+
+    # get the parameters of the rtsp stream
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    reported_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    reported_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+
+    backend_name = None
+    if hasattr(cap, "getBackendName"):
+        try:
+            backend_name = cap.getBackendName()
+        except Exception:
+            backend_name = None
+
+    ok, frame0 = cap.read()
+    if not ok or frame0 is None:
+        cap.release()
+        raise RuntimeError(f"Could not read any frame from source: {label}")
+
+    return cap, frame0, fps, reported_w, reported_h, backend_name
+
+
+def _reconnect_delay_s(
+    attempt_no: int,
+    *,
+    initial_delay_s: float,
+    max_delay_s: float,
+    backoff_factor: float,
+) -> float:
+    if attempt_no <= 1:
+        return min(initial_delay_s, max_delay_s)
+    delay = initial_delay_s * (backoff_factor ** float(attempt_no - 1))
+    return min(delay, max_delay_s)
+
+
 def _draw_fps_overlay(
     frame,
     *,
@@ -670,15 +721,16 @@ def main() -> None:
         raise SystemExit("--select-line is not supported together with --resize-to. Use line_picker.py to save the line JSON.")
 
     source_label = rtsp_url if is_live else str(input_path)
-    cap = open_video_capture(
-        rtsp_url if is_live else input_path,
-        open_timeout_ms=args.open_timeout_ms,
-        read_timeout_ms=args.read_timeout_ms,
-    )
-    if not cap.isOpened():
-        raise SystemExit(f"Failed to open video source: {source_label}")
+    try:
+        cap, frame0, fps, reported_w, reported_h, backend_name = _open_source_with_first_frame(
+            rtsp_url if is_live else input_path,
+            open_timeout_ms=args.open_timeout_ms,
+            read_timeout_ms=args.read_timeout_ms,
+            source_label=source_label,
+        )
+    except RuntimeError as exc:
+        raise SystemExit(str(exc))
 
-    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
     if fps <= 0.0:
         fps = float(args.target_fps) if (is_live and args.target_fps) else 30.0
     writer_fps = fps
@@ -690,21 +742,9 @@ def main() -> None:
     if args.write_processed_only and args.frame_stride > 1:
         # Keep playback speed sensible when writing only a subset of frames.
         writer_fps = max(float(writer_fps) / float(args.frame_stride), 1e-3)
-    reported_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-    reported_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
-    backend_name = None
-    if hasattr(cap, "getBackendName"):
-        try:
-            backend_name = cap.getBackendName()
-        except Exception:
-            backend_name = None
-
     # Always infer the actual frame size from the first frame so that
     # normalized coordinates from line_picker.py map back exactly, even if
     # the container metadata reports a slightly different height/width.
-    ret, frame0 = cap.read()
-    if not ret:
-        raise SystemExit("Could not read any frame from input video.")
     input_height, input_width = frame0.shape[:2]
     height, width = input_height, input_width
     if args.resize_to:
@@ -909,6 +949,18 @@ def main() -> None:
         print(f"[main] Thresholds: conf={cfg.model.confidence_threshold} nms_iou={cfg.model.nms_iou_threshold} pre_nms_topk={cfg.model.pre_nms_topk}")
     if args.show_fps:
         print("[main] FPS overlay: enabled")
+    if is_live:
+        attempts_txt = (
+            "unlimited"
+            if int(cfg.io.rtsp_reconnect_max_attempts) == 0
+            else str(int(cfg.io.rtsp_reconnect_max_attempts))
+        )
+        print(
+            f"[main] RTSP reconnect: {'enabled' if cfg.io.rtsp_reconnect_enabled else 'disabled'} "
+            f"(max_attempts={attempts_txt}, initial_delay={cfg.io.rtsp_reconnect_initial_delay_s:.2f}s, "
+            f"max_delay={cfg.io.rtsp_reconnect_max_delay_s:.2f}s, backoff={cfg.io.rtsp_reconnect_backoff_factor:.2f}, "
+            f"stall_timeout={cfg.io.rtsp_stall_timeout_s:.2f}s)"
+        )
 
     # Prepare progress bar
     progress_total = None
@@ -958,6 +1010,11 @@ def main() -> None:
     pending_first_frame = frame0 if is_live else None
     latest_tracks = []
     reader: Optional[StreamReader] = None
+    reconnect_enabled = bool(is_live and cfg.io.rtsp_reconnect_enabled)
+    live_poll_timeout_s = max(min(float(cfg.io.rtsp_stall_timeout_s), 1.0), 0.1)
+    last_live_frame_time_s = time.time()
+    reconnect_cycle_count = 0
+    reconnect_attempt_total = 0
     if is_live:
         reader = StreamReader(cap, queue_size=args.queue_size)
         reader.start()
@@ -1001,6 +1058,108 @@ def main() -> None:
             fps_prev_frames = frame_total
             fps_prev_processed = processed_total
 
+        def _sleep_interruptible(total_s: float) -> bool:
+            end_s = time.time() + max(float(total_s), 0.0)
+            while True:
+                now_s = time.time()
+                if max_end_time_s is not None and now_s >= max_end_time_s:
+                    return False
+                remaining = end_s - now_s
+                if remaining <= 0:
+                    return True
+                time.sleep(min(remaining, 0.25))
+
+        def _reconnect_live(trigger_reason: str) -> bool:
+            nonlocal reader
+            nonlocal cap
+            nonlocal pending_first_frame
+            nonlocal warned_size_mismatch
+            nonlocal last_live_frame_time_s
+            nonlocal next_due_time_s
+            nonlocal fps_prev_source
+            nonlocal reconnect_cycle_count
+            nonlocal reconnect_attempt_total
+
+            if (not is_live) or (not reconnect_enabled) or (rtsp_url is None):
+                return False
+
+            reconnect_cycle_count += 1
+            cycle_no = reconnect_cycle_count
+            max_attempts = int(cfg.io.rtsp_reconnect_max_attempts)
+            max_attempts_txt = "unlimited" if max_attempts == 0 else str(max_attempts)
+            print(
+                f"[main] Live stream interrupted (reason={trigger_reason}). "
+                f"Starting reconnect cycle #{cycle_no} (max_attempts={max_attempts_txt})."
+            )
+
+            if reader is not None:
+                reader.stop(reason=f"reconnect:{trigger_reason}")
+                reader = None
+
+            attempt_no = 0
+            while True:
+                if max_end_time_s is not None and time.time() >= max_end_time_s:
+                    print("[main] Reconnect aborted: --max-seconds limit reached.")
+                    return False
+
+                if max_attempts > 0 and attempt_no >= max_attempts:
+                    print(
+                        f"[main] Reconnect cycle #{cycle_no} failed after {attempt_no} attempts."
+                    )
+                    return False
+                
+                attempt_no += 1
+                reconnect_attempt_total +=1
+                delay_s = _reconnect_delay_s(
+                    attempt_no,
+                    initial_delay_s=float(cfg.io.rtsp_reconnect_initial_delay_s),
+                    max_delay_s=float(cfg.io.rtsp_reconnect_max_delay_s),
+                    backoff_factor=float(cfg.io.rtsp_reconnect_backoff_factor),
+                )
+
+                total_txt = max_attempts_txt if max_attempts > 0 else "inf"
+                print(
+                    f"[main] Reconnect attempt {attempt_no}/{total_txt}"
+                    f"(cycle #{cycle_no}, global_attempt={reconnect_attempt_total})."
+                )
+
+                try:
+                    new_cap, new_frame0, _new_fps, _new_w, _new_h, _new_backend = _open_source_with_first_frame(
+                        rtsp_url,
+                        open_timeout_ms=args.open_timeout_ms,
+                        read_timeout_ms=args.read_timeout_ms,
+                        source_label=source_label
+                    )
+                except RuntimeError as exc:
+                    print(f"[main] Reconnect attempt {attempt_no} failed: {exc}")
+                    if max_attempts > 0 and attempt_no >= max_attempts:
+                        print(
+                            f"[main] Reconnect cycle {cycle_no} exhausted attempts; stopping."
+                        )
+                        return False
+                    print(f"[main] Backoff sleep {delay_s:.2f}s before next reconnect attempt:")
+                    if not _sleep_interruptible(delay_s):
+                        print(f"[main] Reconnect aborted while waiting for next attempt.")
+                        return False
+                    continue
+
+                new_reader = StreamReader(new_cap, queue_size=args.queue_size)
+                new_reader.start()
+
+                cap  = new_cap
+                raeder = new_reader
+                pending_first_time = new_frame0
+                warned_size_mismatch = False
+                last_live_frame_time_s = time.time()
+                next_due_time_s = None
+                fps_prev_source = 0
+
+                print(
+                    f"[main] Reconnected successfully on attempt {attempt_no}"
+                    f"(cycle {cycle_no})"
+                )
+                return True
+
         while True:
             t0_total = time.perf_counter()
             if max_frames is not None and frame_index >= max_frames:
@@ -1020,12 +1179,24 @@ def main() -> None:
                 frame = pending_first_frame
                 pending_first_frame = None
                 frame_ts = time.time()
+                last_live_frame_time_s = frame_ts
             elif reader is not None:
-                item = reader.get(timeout_s=1.0)
-                if item is None:
-                    break
-                frame = item.frame
-                frame_ts = float(item.timestamp)
+                poll = reader.get_with_status(timeout_s=live_poll_timeout_s)
+                if poll.status == "frame" and poll.item is not None:
+                    frame = poll.item.frame
+                    frame_ts = float(poll.item.timestamp)
+                    last_live_frame_time_s = time.time()
+                elif poll.status == "timeout":
+                    if (time.time() - last_live_frame_time_s) < float(cfg.io.rtsp_stall_timeout_s):
+                        continue
+                    if not _reconnect_live("stall_timeout"):
+                        break
+                    continue
+                else:
+                    stop_reason = poll.reason if poll.reason else "reader_stopped"
+                    if not _reconnect_live(stop_reason):
+                        break
+                    continue
             else:
                 ret, frame = cap.read()
                 if not ret:
