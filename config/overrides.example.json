@@ -35,6 +35,20 @@
       "write_thumbnails": true,
       "thumb_pad": 20,
       "thumb_max_side": 320
+    },
+    "visual": {
+      "track_color_by": "class",
+      "track_default_color": [46, 204, 113],
+      "track_palette": [
+        [46, 204, 113],
+        [52, 152, 219],
+        [0, 159, 255],
+        [231, 76, 60]
+      ],
+      "class_colors": {
+        "0": [0, 255, 0],
+        "1": [0, 0, 255]
+      }
     }
   }
 }

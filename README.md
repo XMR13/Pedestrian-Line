@@ -50,7 +50,7 @@ package:
 - `scripts/` –  Debug script (tidak memiliki pengaruh terhadap jalannya program).
 
 Untuk arsitekturnya bisa dirujuk dari gambar berikut ini:
-![gambar arsitektur](docs/readme_png/arch_new.png)
+![gambar arsitektur](docs/readme_png/arch_new_modified.png)
 
 
 Dependencies & Setup
