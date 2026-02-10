@@ -148,6 +148,10 @@ class Tracker:
 
     #update track
     def _update_track(self, track_id: int, det: Detection, frame_index: int) -> None:
+        """
+        Update tracking of an object, track the object by the center of the box itelsf
+        and then subtract them by the previous tracking state
+        """
         track = self._tracks[track_id]
         track.x1 = det.x1
         track.y1 = det.y1
@@ -156,6 +160,7 @@ class Tracker:
         track.score = det.score
         track.class_id = det.class_id
         track.last_seen_frame = frame_index
+
         if det.class_id is not None:
             cls_key = int(det.class_id)
             if cls_key not in track.display_ids_by_class:
