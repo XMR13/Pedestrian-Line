@@ -1,6 +1,6 @@
 import pytest
 
-from pedestrian_line_counter.line_counter import LineCounter
+from pedestrian_line_counter.line_counter import LineCounter, TwoLineGateCounter
 from pedestrian_line_counter.structures import Track
 
 
@@ -75,3 +75,46 @@ def test_counts_b_to_a_once_with_class() -> None:
     assert len(events) == 1
     assert events[0].direction == "B_TO_A"
     assert events[0].class_id == 7
+
+
+def test_clear_runtime_state_preserves_line_totals() -> None:
+    lc = LineCounter(p1=(50, 0), p2=(50, 100))
+    _ = lc.update([_make_track(10, 60, 10, class_id=2, frame_index=0)], frame_index=0)
+    assert lc._tracks
+
+    lc.count_a_to_b = 4
+    lc.count_b_to_a = 3
+    lc.count_by_class_dir["a_to_b"][2] = 4
+    lc.count_by_class_dir["b_to_a"][7] = 3
+
+    lc.clear_runtime_state()
+
+    assert not lc._tracks
+    assert lc.count_a_to_b == 4
+    assert lc.count_b_to_a == 3
+    assert lc.count_by_class_dir["a_to_b"][2] == 4
+    assert lc.count_by_class_dir["b_to_a"][7] == 3
+
+
+def test_clear_runtime_state_preserves_gate_totals() -> None:
+    gc = TwoLineGateCounter(
+        line1_p1=(50, 0),
+        line1_p2=(50, 100),
+        line2_p1=(70, 0),
+        line2_p2=(70, 100),
+    )
+    _ = gc.update([_make_track(11, 60, 10, class_id=2, frame_index=0)], frame_index=0)
+    assert gc._tracks
+
+    gc.count_a_to_b = 2
+    gc.count_b_to_a = 1
+    gc.count_by_class_dir["a_to_b"][2] = 2
+    gc.count_by_class_dir["b_to_a"][7] = 1
+
+    gc.clear_runtime_state()
+
+    assert not gc._tracks
+    assert gc.count_a_to_b == 2
+    assert gc.count_b_to_a == 1
+    assert gc.count_by_class_dir["a_to_b"][2] == 2
+    assert gc.count_by_class_dir["b_to_a"][7] == 1

@@ -136,6 +136,18 @@ class LineCounter:
                 self._tracks.pop(tid, None)
         return events
 
+    def clear_runtime_state(self) -> None:
+        """
+        Clear per-track transient state only.
+
+        This is used after live reconnect so stale track history does not leak
+        across source sessions. Direction totals stay preserved:
+        - count_a_to_b
+        - count_b_to_a
+        - count_by_class_dir
+        """
+        self._tracks.clear()
+
     def _start_crossing_candidate(
         self,
         state: _TrackState,
@@ -366,6 +378,18 @@ class TwoLineGateCounter:
             if tid not in current_ids:
                 self._tracks.pop(tid, None)
         return events
+
+    def clear_runtime_state(self) -> None:
+        """
+        Clear per-track transient gate state only.
+
+        This is used after live reconnect so stale crossing stage state does not
+        leak across source sessions. Direction totals stay preserved:
+        - count_a_to_b
+        - count_b_to_a
+        - count_by_class_dir
+        """
+        self._tracks.clear()
 
     def _handle_line_event(
         self,

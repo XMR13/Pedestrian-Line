@@ -181,3 +181,15 @@ class Tracker:
             del self._tracks[track_id]
             self._last_center_by_id.pop(track_id, None)
             self._velocity_by_id.pop(track_id, None)
+
+    def clear_runtime_state(self) -> None:
+        """
+        Clear transient tracking buffers after reconnect.
+
+        Intentionally keeps `_next_id` monotonic so track IDs are not reused
+        within the same process/session.
+        """
+        self._tracks.clear()
+        self._last_center_by_id.clear()
+        self._velocity_by_id.clear()
+        self._next_display_id_by_class.clear()

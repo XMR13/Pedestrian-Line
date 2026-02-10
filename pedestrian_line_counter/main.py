@@ -1069,6 +1069,17 @@ def main() -> None:
                     return True
                 time.sleep(min(remaining, 0.25))
 
+        def _reset_transient_runtime_state() -> None:
+            """
+            Reset only reconnect-sensitive runtime state.
+
+            Keeps cumulative line totals in `line_counter` unchanged.
+            """
+            nonlocal latest_tracks
+            tracker.clear_runtime_state()
+            line_counter.clear_runtime_state()
+            latest_tracks = []
+
         def _reconnect_live(trigger_reason: str) -> bool:
             nonlocal reader
             nonlocal cap
@@ -1109,7 +1120,7 @@ def main() -> None:
                     return False
                 
                 attempt_no += 1
-                reconnect_attempt_total +=1
+                reconnect_attempt_total += 1
                 delay_s = _reconnect_delay_s(
                     attempt_no,
                     initial_delay_s=float(cfg.io.rtsp_reconnect_initial_delay_s),
@@ -1146,13 +1157,15 @@ def main() -> None:
                 new_reader = StreamReader(new_cap, queue_size=args.queue_size)
                 new_reader.start()
 
-                cap  = new_cap
-                raeder = new_reader
-                pending_first_time = new_frame0
+                cap = new_cap
+                reader = new_reader
+                pending_first_frame = new_frame0
                 warned_size_mismatch = False
                 last_live_frame_time_s = time.time()
                 next_due_time_s = None
                 fps_prev_source = 0
+                _reset_transient_runtime_state()
+                print("[main] Reconnect state reset: transient tracker/counter state cleared; totals preserved.")
 
                 print(
                     f"[main] Reconnected successfully on attempt {attempt_no}"
