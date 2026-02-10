@@ -278,6 +278,43 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="VideoCapture read timeout in ms (best-effort; mainly for RTSP).",
     )
+    parser.add_argument(
+        "--rtsp-reconnect",
+        dest="rtsp_reconnect",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable RTSP reconnect policy in live mode.",
+    )
+    parser.add_argument(
+        "--rtsp-reconnect-max-attempts",
+        type=int,
+        default=None,
+        help="Max RTSP reconnect attempts (0 means unlimited).",
+    )
+    parser.add_argument(
+        "--rtsp-reconnect-initial-delay",
+        type=float,
+        default=None,
+        help="Initial RTSP reconnect delay in seconds.",
+    )
+    parser.add_argument(
+        "--rtsp-reconnect-max-delay",
+        type=float,
+        default=None,
+        help="Maximum RTSP reconnect delay in seconds.",
+    )
+    parser.add_argument(
+        "--rtsp-reconnect-backoff",
+        type=float,
+        default=None,
+        help="RTSP reconnect exponential backoff factor (>= 1.0).",
+    )
+    parser.add_argument(
+        "--rtsp-stall-timeout",
+        type=float,
+        default=None,
+        help="Live read stall timeout in seconds before considering stream unhealthy.",
+    )
 
     # Filesystem-first traffic spool (for later portal upload).
     parser.add_argument(
@@ -484,14 +521,31 @@ def main() -> None:
     args = _parse_args()
     cfg = get_default_config()
 
-    if args.queue_size <= 0:
-        raise SystemExit("--queue-size must be > 0")
-    if args.frame_stride <= 0:
-        raise SystemExit("--frame-stride must be > 0")
-    if args.target_fps is not None and args.target_fps <= 0:
-        raise SystemExit("--target-fps must be > 0")
-    if args.log_every_seconds is not None and args.log_every_seconds <= 0:
-        raise SystemExit("--log-every-seconds must be > 0")
+    for flag, value in (
+        ("--queue-size", args.queue_size),
+        ("--frame-stride", args.frame_stride),
+    ):
+        if value <= 0:
+            raise SystemExit(f"{flag} must be > 0")
+    for flag, value in (
+        ("--target-fps", args.target_fps),
+        ("--log-every-seconds", args.log_every_seconds),
+        ("--rtsp-reconnect-initial-delay", args.rtsp_reconnect_initial_delay),
+        ("--rtsp-reconnect-max-delay", args.rtsp_reconnect_max_delay),
+        ("--rtsp-stall-timeout", args.rtsp_stall_timeout),
+    ):
+        if value is not None and value <= 0:
+            raise SystemExit(f"{flag} must be > 0")
+    for flag, value in (
+        ("--rtsp-reconnect-max-attempts", args.rtsp_reconnect_max_attempts),
+    ):
+        if value is not None and value < 0:
+            raise SystemExit(f"{flag} must be >= 0")
+    for flag, value in (
+        ("--rtsp-reconnect-backoff", args.rtsp_reconnect_backoff),
+    ):
+        if value is not None and value < 1.0:
+            raise SystemExit(f"{flag} must be >= 1.0")
 
     if args.config:
         cfg_path = Path(args.config)
@@ -545,6 +599,32 @@ def main() -> None:
             raise SystemExit(f"Invalid --class-ids value: '{args.class_ids}'. Expected comma-separated integers.")
     if args.class_names:
         cfg.model.class_names_path = Path(args.class_names)
+    if args.rtsp_reconnect is not None:
+        cfg.io.rtsp_reconnect_enabled = bool(args.rtsp_reconnect)
+    if args.rtsp_reconnect_max_attempts is not None:
+        cfg.io.rtsp_reconnect_max_attempts = int(args.rtsp_reconnect_max_attempts)
+    if args.rtsp_reconnect_initial_delay is not None:
+        cfg.io.rtsp_reconnect_initial_delay_s = float(args.rtsp_reconnect_initial_delay)
+    if args.rtsp_reconnect_max_delay is not None:
+        cfg.io.rtsp_reconnect_max_delay_s = float(args.rtsp_reconnect_max_delay)
+    if args.rtsp_reconnect_backoff is not None:
+        cfg.io.rtsp_reconnect_backoff_factor = float(args.rtsp_reconnect_backoff)
+    if args.rtsp_stall_timeout is not None:
+        cfg.io.rtsp_stall_timeout_s = float(args.rtsp_stall_timeout)
+
+    if cfg.io.rtsp_reconnect_max_attempts < 0:
+        raise SystemExit("config io.rtsp_reconnect_max_attempts must be >= 0")
+    for key, value in (
+        ("io.rtsp_reconnect_initial_delay_s", cfg.io.rtsp_reconnect_initial_delay_s),
+        ("io.rtsp_reconnect_max_delay_s", cfg.io.rtsp_reconnect_max_delay_s),
+        ("io.rtsp_stall_timeout_s", cfg.io.rtsp_stall_timeout_s),
+    ):
+        if value <= 0:
+            raise SystemExit(f"config {key} must be > 0")
+    if cfg.io.rtsp_reconnect_max_delay_s < cfg.io.rtsp_reconnect_initial_delay_s:
+        raise SystemExit("config io.rtsp_reconnect_max_delay_s must be >= io.rtsp_reconnect_initial_delay_s")
+    if cfg.io.rtsp_reconnect_backoff_factor < 1.0:
+        raise SystemExit("config io.rtsp_reconnect_backoff_factor must be >= 1.0")
 
     line_path: Optional[Path] = None
     if args.line_json:

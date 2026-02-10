@@ -185,6 +185,14 @@ class IOConfig:
     # Keep credentials in a local-only config (e.g. config/local/*.local.json).
     rtsp_url: Optional[str] = None
 
+    # RTSP reconnect policy (used in live mode).
+    rtsp_reconnect_enabled: bool = True
+    rtsp_reconnect_max_attempts: int = 0  # 0 = unlimited
+    rtsp_reconnect_initial_delay_s: float = 1.0
+    rtsp_reconnect_max_delay_s: float = 30.0
+    rtsp_reconnect_backoff_factor: float = 2.0
+    rtsp_stall_timeout_s: float = 5.0
+
     # Dapat di ovveride dengan menggunakan Command Line Interfae.
     input_path: Path = ROOT_DIR / "media" / "input.mp4"
     output_path: Path = ROOT_DIR / "output.mp4"
