@@ -206,6 +206,41 @@ class SpoolConfig:
 
 
 @dataclass
+class VisualConfig:
+    """
+    Konfigurasi visual untuk overlay box/label.
+    Semua warna menggunakan format BGR (OpenCV).
+    """
+
+    # "class" -> warna stabil per class_id
+    # "track" -> warna stabil per track_id
+    track_color_by: str = "class"
+
+    # Fallback color jika palette kosong.
+    track_default_color: Tuple[int, int, int] = (46, 204, 113)
+
+    # Palette default untuk box 
+    # use opencv BGR default order (NOT RGB)
+    track_palette: List[Tuple[int, int, int]] = field(
+        default_factory=lambda: [
+            (46, 204, 113),
+            (52, 152, 219),
+            (0, 159, 255),
+            (231, 76, 60),
+            (155, 89, 182),
+            (241, 196, 15),
+            (26, 188, 156),
+            (230, 126, 34),
+        ]
+    )
+
+    # Override warna per class_id, contoh:
+    # {"0": [0, 255, 0], "1": [0, 0, 255]}
+    # Key string dipakai agar mudah ditulis di JSON.
+    class_colors: Dict[str, List[int]] = field(default_factory=dict)
+
+
+@dataclass
 class AppConfig:
     """
     Menjadikan konfigurasi ini dalam 1 kelas agar mudah digunakan dan diimplementasikan ke bagian project yang lain
@@ -217,6 +252,7 @@ class AppConfig:
     line: LineConfig = field(default_factory=LineConfig)
     io: IOConfig = field(default_factory=IOConfig)
     spool: SpoolConfig = field(default_factory=SpoolConfig)
+    visual: VisualConfig = field(default_factory=VisualConfig)
 
 
 def get_default_config() -> AppConfig:

@@ -8,6 +8,17 @@ Recommended workflow:
 - Put production-ready, shareable configs under `config/` (tracked in Git).
 - Put experimental configs under `config/local/` (ignored by Git).
 
+**NOTES** : all the configurable config and what they for can be seen at `pedestrian_line_counter/config.py`. 
+
+## Types of config
+There's 6 types of config:
+1. **Model Config**. This is the configuration of all the things that relate to the model (path, confidence score, iou, etc, etc). This configuration also correlates to the class itself (class_id).
+2. **Track Config**. Configuration for trackig based on a simple greedy algorithm
+3. **Line Config**. Configuration for line dividing the 2 sides. Things that can be changed : position, singular/multiplelines.
+4. **I/O config**: Configuration for input and output processing
+5. **Spool config**: Configuration for traffic event spool output.
+6. **Visual config**: Configuration for drawing style and per-class box colors.
+
 ## Local Experiments (Ignored By Git)
 
 Create a local override file like `config/local/exp.json` and run:
@@ -57,35 +68,14 @@ Top-level structure for `--config`:
 - `app.line`
 - `app.io`
 - `app.spool`
+- `app.visual`
 
-Main keys you can override:
+Main visual keys:
 
-- `app.io.input_path`
-- `app.io.output_path`
-- `app.io.rtsp_url` (recommended as `env:...`)
-- `app.model.backend`
-- `app.model.model_path`
-- `app.model.class_names_path`
-- `app.model.track_class_ids`
-- `app.model.confidence_threshold`
-- `app.model.nms_iou_threshold`
-- `app.model.pre_nms_topk`
-- `app.model.min_box_area_ratio`
-- `app.model.ignore_regions`
-- `app.model.allow_all_classes`
-- `app.tracker.max_distance`
-- `app.tracker.max_lost`
-- `app.tracker.max_distance_scale_cap`
-- `app.line.line_json_path` (use a line JSON file directly)
-- `app.line.camera_name` (resolve by name from `config/cameras/<name>.json` or `config/<name>.json`)
-- `app.line.start_norm`
-- `app.line.end_norm`
-- `app.spool.root_dir`
-- `app.spool.site_id`
-- `app.spool.camera_id`
-- `app.spool.write_thumbnails`
-- `app.spool.thumb_pad`
-- `app.spool.thumb_max_side`
+- `app.visual.track_color_by` (`"class"` or `"track"`)
+- `app.visual.track_default_color` (BGR list, example: `[46, 204, 113]`)
+- `app.visual.track_palette` (list of BGR colors)
+- `app.visual.class_colors` (mapping: class_id string -> BGR color list)
 
 Line source precedence:
 

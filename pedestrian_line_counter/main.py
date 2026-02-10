@@ -705,6 +705,17 @@ def main() -> None:
             "or use --allow-all-classes for debugging."
         )
 
+    track_color_by = str(cfg.visual.track_color_by).strip().lower()
+    if track_color_by not in {"class", "track"}:
+        print(
+            f"[main] Warning: invalid app.visual.track_color_by='{cfg.visual.track_color_by}'. "
+            "Using 'class'."
+        )
+        track_color_by = "class"
+    track_class_colors = cfg.visual.class_colors if cfg.visual.class_colors else None
+    track_palette = cfg.visual.track_palette if cfg.visual.track_palette else None
+    track_default_color = tuple(cfg.visual.track_default_color)
+
     detector = Detector(cfg.model)
     tracker = Tracker(cfg.tracker)
 
@@ -986,6 +997,10 @@ def main() -> None:
                         frame_index=process_index,
                         stale_max_age=args.stale_frames,
                         class_names=class_names_map,
+                        color=track_default_color,
+                        class_colors=track_class_colors,
+                        palette=track_palette,
+                        color_by=track_color_by,
                     )
                     draw_line_and_counts(frame, line_counter, class_names=class_names_map)
                     t_draw += time.perf_counter() - t0
@@ -1001,6 +1016,10 @@ def main() -> None:
                         frame_index=max(process_index - 1, 0),
                         stale_max_age=args.stale_frames,
                         class_names=class_names_map,
+                        color=track_default_color,
+                        class_colors=track_class_colors,
+                        palette=track_palette,
+                        color_by=track_color_by,
                     )
                 draw_line_and_counts(frame, line_counter, class_names=class_names_map)
                 t_draw += time.perf_counter() - t0

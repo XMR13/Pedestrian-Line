@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -9,6 +9,60 @@ from .structures import Track
 
 
 Color = Tuple[int, int, int]
+PALETTE = Tuple[Color, ...]
+
+# Default BGR palette used to color updated tracks.
+DEFAULT_TRACK_PALETTE: PALETTE = (
+    (46, 204, 113),   # green
+    (52, 152, 219),   # blue
+    (0, 159, 255),    # orange-ish
+    (231, 76, 60),    # red
+    (155, 89, 182),   # purple
+    (241, 196, 15),   # yellow
+    (26, 188, 156),   # turquoise
+    (230, 126, 34),   # orange
+)
+
+def _to_color(value: Sequence[int] | Color) -> Color:
+    if len(value) < 3:
+        return (0, 255, 0)
+    b = int(max(0, min(255, value[0])))
+    g = int(max(0, min(255, value[1])))
+    r = int(max(0, min(255, value[2])))
+    return (b, g, r)
+
+def _pick_box_color(
+    track: Track,
+    *,
+    default_color: Color,
+    class_colors: Optional[Mapping[int, Sequence[int] | Color]],
+    palette: Optional[Sequence[Sequence[int] | Color]],
+    color_by: str,
+) -> Color:
+    """
+    Resolve a stable color for a track.
+
+    Priority:
+    1) Explicit `class_colors[class_id]` override.
+    2) Palette color indexed by class_id or track_id.
+    3) `default_color`.
+    """
+
+    cid = None if track.class_id is None else int(track.class_id)
+    if cid is not None and class_colors:
+        explicit = class_colors.get(cid)
+        if explicit is not None:
+            return _to_color(explicit)
+
+    color_key = int(track.track_id)
+    if color_by == "class" and cid is not None:
+        color_key = cid
+
+    palette_src = palette if palette else DEFAULT_TRACK_PALETTE
+    if palette_src:
+        return _to_color(palette_src[color_key % len(palette_src)])
+
+    return _to_color(default_color)
 
 def _class_name(class_id: int, class_names: Optional[Mapping[int, str]] = None) -> str:
     if class_names and int(class_id) in class_names:
@@ -20,9 +74,12 @@ def draw_tracks(
     frame: np.ndarray,
     tracks: Iterable[Track],
     frame_index: int | None = None,
-    color: Color = (0, 255, 0),
+    color: Color = (46, 204, 113),
     stale_max_age: int = 2,
     class_names: Optional[Mapping[int, str]] = None,
+    class_colors: Optional[Mapping[int, Sequence[int] | Color]] = None,
+    palette: Optional[Sequence[Sequence[int] | Color]] = None,
+    color_by: str = "class",
 ) -> None:
     """
     Menggambar bounding box di track on per frame jika objek tersebut terdeteksi
@@ -40,8 +97,14 @@ def draw_tracks(
 
         x1, y1, x2, y2 = map(int, track.as_xyxy())
         if is_updated:
-            box_color = color
-            thickness = 2
+            box_color = _pick_box_color(
+                track,
+                default_color=color,
+                class_colors=class_colors,
+                palette=palette,
+                color_by=color_by,
+            )
+            thickness = 3
             text_color = (255, 255, 255)
         else:
             box_color = (140, 140, 140)
@@ -70,13 +133,13 @@ def draw_tracks(
 
         if text:
             (tw, th), _ = cv2.getTextSize(
-                text, cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, thickness=1
+                text, cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, thickness=2
             )
             # Background box for readability
             cv2.rectangle(
                 frame,
                 (x1, y1 - th - 6),
-                (x1 + tw + 4, y1),
+                (x1 + tw + 10, y1 + 10),
                 (0, 0, 0),
                 thickness=-1,
             )
@@ -88,7 +151,7 @@ def draw_tracks(
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 text_color,
-                1,
+                2,
                 cv2.LINE_AA,
             )
 
