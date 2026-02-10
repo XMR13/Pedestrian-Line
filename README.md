@@ -30,25 +30,6 @@ Ilustrasi cara program ini digunakan adalah sebagai berikut
 Architecture (High Level)
 -------------------------
 
-Aplikasi inti dari project ini berada di package `pedestrian_line_counter/`
-package:
-
-- `pedestrian_line_counter/config.py` – Konfigurasi aplikasi.
-- `pedestrian_line_counter/detector.py` – Detector wrapper; untuk backend YOLO (.onnx / .engine) menggunakan `yolo_kitv2` untuk letterbox + postprocess (NMS, decode output), fallback ke *motion-based* detector jika diperlukan.
-- `pedestrian_line_counter/tracker.py` – Greedy multi object tracker.
-- `pedestrian_line_counter/line_counter.py` –  Logika garis vritual + logika untuk menentukan arah kendaraan tersebut (A→B and B→A).
-- `pedestrian_line_counter/draw_utils.py` – Helper untuk menggambar/menambah visual pada output program.
-- Optional ignore regions and noise filtering are built into the detector:
-  - `ModelConfig.ignore_regions` (normalized rectangles) drops detections whose
-    center lies in configured occlusion zones (default: none).
-  - `ModelConfig.min_box_area_ratio` filters out tiny boxes.
-- `pedestrian_line_counter/line_picker.py` – Helper script untuk menentukan garis berdasarkan gambar/kamera, kemudian disimpan kedalam format JSON.
-- `pedestrian_line_counter/structures.py` – Data class untuk objek for `Detection` and `Track`.
-- `pedestrian_line_counter/main.py` – Implementasi inti CLI.
-- `main.py` – Wrapper untuk menjalani main. `pedestrian_line_counter.main`
-  so `python main.py` keeps working.
-- `scripts/` –  Debug script (tidak memiliki pengaruh terhadap jalannya program).
-
 Untuk arsitekturnya bisa dirujuk dari gambar berikut ini:
 ![gambar arsitektur](docs/readme_png/arch_new_modified.png)
 
@@ -72,7 +53,7 @@ Key runtime dependencies (from `pyproject.toml`):
 - `opencv-python`
 - `numpy`
 - `onnxruntime` / `onnxruntime-gpu` (ONNX backend, default)
-- (optional) `torch` Jika ingin menggunakan backend model `pytorch.`
+- (optional) `torch` Jika ingin menggunakan backend model `pytorch.` (already supported)
 
 
 Model & Data Layout
@@ -85,7 +66,7 @@ Repo ini tidak menyimpan model atau file biner yang besar, agra bisa menggunakan
   - You can change the path via `--model` or by editing `ModelConfig.model_path` in `pedestrian_line_counter/config.py`.
   - Penting: untuk backend berbasis model (`onnx`/`tensorrt`/`torch`) kamu **wajib** mengatur filter kelas target (`--class-ids`) supaya tidak menghitung kelas yang tidak relevan.
 - Input videos:
-  - Default: a sample file under `media/` (see `IOConfig` in `config.py`).
+  - Default: a sample file provided by yourself (see `IOConfig` in `config.py`).
   - You can override via `--input`.
 - Output videos:
   - Default: `output.mp4` in the project root (see `IOConfig`).
@@ -97,7 +78,7 @@ Dataset & Annotasi (Priority)
 Karena target kelas kendaraan (truck/trailer/pickup/dll) adalah **custom**, langkah pertama adalah menyiapkan dataset dan melakukan annotasi bounding box.
 
 - Panduan detail: lihat `docs/annotation_workflow.md`.
-- Output yang direkomendasikan untuk training: format YOLO (images + labels + `data.yaml` berisi `names:`).
+- Output yang direkomendasikan untuk training: format YOLO (images + labels + `data.yaml` berisi `names:`). Proses training bisa menggunakan model mana saja (tapi pada project ini harus sesuai dengan inference yang telah dibuat)
 - Jika ingin otomatis mengambil kandidat gambar dari video (tanpa line counting), gunakan:
 
 ```bash
@@ -121,7 +102,6 @@ uv run python -m yolo_kitv2 label run \
   --input media/input.mp4 \
   --output-dir data/auto_labels/input_mp4 \
   --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
   --class-names Models/metadata.yaml \
   --min-seconds-between 1.0 \
   --max-per-track 3 \
@@ -129,16 +109,6 @@ uv run python -m yolo_kitv2 label run \
 ```
 
 Tip: gunakan `--min-seconds-between` atau `--min-frames-between` untuk skip antar frame yang disimpan.
-
-Untuk **ekstrak frame saja** (tanpa deteksi/label):
-
-```bash
-uv run python -m yolo_kitv2 label run \
-  --mode frames \
-  --input media/input.mp4 \
-  --output-dir data/frames/input_mp4 \
-  --fps 1
-```
 
 Untuk **auto-label folder gambar** (input = directory berisi images):
 
@@ -199,31 +169,6 @@ uv run python -m yolo_kitv2 dataset viz \
   --distribution-only \
   --output-dir data/auto_labels/merged_viz_dist
 ```
-
-Untuk preview tanpa menyimpan file (window saja):
-
-```bash
-uv run python scripts/preview_video.py \
-  --input media/input.mp4 \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --max-seconds 10 \
-  --show
-```
-
-Untuk simpan **preview beranotasi** (frame + video):
-
-```bash
-uv run python scripts/preview_video.py \
-  --input media/input.mp4 \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --fps 1 \
-  --save-frames \
-  --save-video \
-  --output-dir data/preview_outputs
-```
-
 
 Penggunaan sederhana
 -----------
@@ -326,48 +271,11 @@ uv run python main.py \
 ```
 
 
-Backend pytorch (opsional)
-----------------------
-
-Jika lebih memiliih untuk menjalankan program ini dengan pytorch dibandingkan dengan onnx maka bisa harus memenuhi hal seperti ni
-
-- Menginstall library pytorch
-- Letakkan model dengan ekstensi pytorch `.pt` di dalam folder `Models/`.
-- Jalankan aplikasi dengan arguman `--backend torch` dan pilih model dengan ekstensi `.pt` tersebut sebagai model utamanya.
-
-
-```bash
-uv run python main.py \
-  --backend torch \
-  --model Models/your_model.pt \
-  --class-ids 0,1,2 \
-  --input media/input.mp4 \
-  --output media/output_torch.mp4 \
-  --line-json config/line.json \
-  --show
-```
-
 Backend dari pytorch ini mengininkan model dengan dimensi `(1, 3, H, W)` float tensor dengan range nilai berada di `[0,1]` dan akan mengembalikan output dengan shape `(N, 6)`. dengan `[x1, y1, x2, y2, score, class_id]`.
 
 Jika model yang digunakan memiliki format yang berbeda, maka bisa diadaptasi dengan memodifikasi `pedestrian_line_counter/torch_detector.py`.
 
-needed.
 
-
-Motion‑Only Backend (No Model)
-------------------------------
-
-Untuk debugging secara cepat jika tidak memiliki model ONNX maupun torch, motion-only ini juga menjadi default backup jika kedua model dengan ekstensi tersebut tidak tersedia:
-
-```bash
-uv run python main.py \
-  --backend motion \
-  --input media/input.mp4 \
-  --output media/output_motion.mp4 \
-  --show
-```
-
-Metode yang digunakana adalah *background subtraction*, bukan detektor yang belajar dari data yang ada, jadi metode ini tidak bisa mengklasifikasikan objek. Namun, bisa dijadikan alternatif cepat untuk mentrack berapa banyak kendaraan yang melewati area tersebut.
 
 Live RTSP Mode (Experimental)
 -----------------------------
@@ -375,30 +283,33 @@ Live RTSP Mode (Experimental)
 Next step dari project ini adalah menjalankan semua ini dengan RTSP live feed, terutama dengan menggunakan `--rtsp-url`. Direkomendasikan untuk menjalankannya seperti ini (tidak ada file output, periodic logging, serta pmebatasan fps)
 
 
-```bash
-uv run python main.py \
-  --backend onnx \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
-  --camera road_a \
-  --no-write \
-  --target-fps 10 \
-  --log-every-seconds 5
-```
-
-Jika ingin menambahan sedikit clip, bisa dengan argumen tambahan `--output`.
-
-```bash
-uv run python main.py \
-  --backend onnx \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
-  --camera road_a \
-  --output media/live_60s.mp4 \
-  --max-seconds 60
-```
-
 Note: in live mode, writing is disabled by default unless you set `--output`
 or a duration/frame limit, to avoid unbounded file growth.
+
+RTSP Reconnect Behavior
+-----------------------
+
+Reconnect policy is enabled by default in live mode and can be tuned from CLI:
+
+```bash
+uv run python main.py \
+  --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
+  --camera road_a \
+  --backend onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --rtsp-reconnect \
+  --rtsp-reconnect-max-attempts 0 \
+  --rtsp-reconnect-initial-delay 1.0 \
+  --rtsp-reconnect-max-delay 30.0 \
+  --rtsp-reconnect-backoff 2.0 \
+  --rtsp-stall-timeout 5.0 \
+  --no-write
+```
+
+Notes:
+
+- `--rtsp-reconnect-max-attempts 0` means unlimited retries.
+- Reconnect triggers when the reader stops or when no frame arrives for `--rtsp-stall-timeout`.
+- On successful reconnect, the app clears transient tracker/counter per-track state to avoid stale IDs.
+- Direction totals (`A->B`, `B->A`, and per-class direction totals) are preserved while the process keeps running.

@@ -77,6 +77,15 @@ Main visual keys:
 - `app.visual.track_palette` (list of BGR colors)
 - `app.visual.class_colors` (mapping: class_id string -> BGR color list)
 
+Main RTSP reconnect keys (`app.io`):
+
+- `app.io.rtsp_reconnect_enabled` (bool)
+- `app.io.rtsp_reconnect_max_attempts` (int; `0` means unlimited)
+- `app.io.rtsp_reconnect_initial_delay_s` (float > 0)
+- `app.io.rtsp_reconnect_max_delay_s` (float >= initial delay)
+- `app.io.rtsp_reconnect_backoff_factor` (float >= 1.0)
+- `app.io.rtsp_stall_timeout_s` (float > 0)
+
 Line source precedence:
 
 1. CLI `--line-json` / `--camera`
