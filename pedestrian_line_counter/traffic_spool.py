@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import time
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 import uuid
 
 import cv2
@@ -106,7 +106,9 @@ class TrafficSpoolWriter:
             "fps": self._fps,
             "frame_size": {"width": int(frame_size[0]), "height": int(frame_size[1])},
         }
-        (self.run_dir / "run.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
+        self._run_meta_path = self.run_dir / "run.json"
+        self._run_meta: Dict[str, Any] = dict(run_meta)
+        self._write_run_meta()
 
     def close(self) -> None:
         try:
@@ -114,6 +116,12 @@ class TrafficSpoolWriter:
             self._events_f.close()
         except Exception:
             pass
+
+    def update_run_metadata(self, updates: Mapping[str, Any]) -> None:
+        if not isinstance(updates, Mapping):
+            raise TypeError("updates must be a mapping")
+        self._run_meta.update(dict(updates))
+        self._write_run_meta()
 
     def record_events(
         self,
@@ -173,3 +181,5 @@ class TrafficSpoolWriter:
             self._events_f.flush()
         return written
 
+    def _write_run_meta(self) -> None:
+        self._run_meta_path.write_text(json.dumps(self._run_meta, indent=2), encoding="utf-8")

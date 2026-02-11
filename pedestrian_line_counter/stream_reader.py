@@ -26,6 +26,7 @@ class FrameItem:
 
 
 ReaderPollStatus = Literal["frame", "timeout", "stopped"]
+QueueOverflowPolicy = Literal["drop_oldest", "block"]
 
 # Terminal reasons for live reader shutdown.
 STOP_REASON_STOPPED_BY_CALLER = "stopped_by_caller"
@@ -48,11 +49,20 @@ class StreamReader:
     processing loop close to real-time.
     """
 
-    def __init__(self, cap: _CaptureLike, *, queue_size: int = 3) -> None:
+    def __init__(
+        self,
+        cap: _CaptureLike,
+        *,
+        queue_size: int = 3,
+        overflow_policy: QueueOverflowPolicy = "drop_oldest",
+    ) -> None:
         if queue_size <= 0:
             raise ValueError("queue_size must be > 0")
+        if overflow_policy not in {"drop_oldest", "block"}:
+            raise ValueError("overflow_policy must be 'drop_oldest' or 'block'")
         self._cap = cap
         self._queue: queue.Queue[FrameItem] = queue.Queue(maxsize=queue_size)
+        self._overflow_policy: QueueOverflowPolicy = overflow_policy
         self._stop = threading.Event()
         self._terminal_reason_lock = threading.Lock()
         self._terminal_reason: Optional[str] = None
@@ -131,14 +141,22 @@ class StreamReader:
             source_index += 1
             self.read_frames += 1
 
-            if self._queue.full():
+            if self._overflow_policy == "drop_oldest":
+                if self._queue.full():
+                    try:
+                        _ = self._queue.get_nowait()
+                        self.dropped += 1
+                    except queue.Empty:
+                        pass
                 try:
-                    _ = self._queue.get_nowait()
+                    self._queue.put_nowait(item)
+                except queue.Full:
                     self.dropped += 1
-                except queue.Empty:
-                    pass
-            try:
-                self._queue.put_nowait(item)
-            except queue.Full:
-                self.dropped += 1
-                continue
+                    continue
+            else:
+                while not self._stop.is_set():
+                    try:
+                        self._queue.put(item, timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue

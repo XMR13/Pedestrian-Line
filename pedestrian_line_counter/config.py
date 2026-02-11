@@ -8,6 +8,15 @@ from typing import Dict, List, Optional, Tuple
 # Project root (one level above the package directory)
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
+"""
+There's 5 Config (represented by a dataclass)
+1. Model Config for all things related to the model (class, changes, iou, confidence score, path, etc)
+2. Track Config : Config for tracking behaviour 
+3. IO config : COnfig for Input/Output 
+4. Line Configuration : Configuration for line separated by the 
+5. Visual config : for changing visual configuration (colour box, font colors, etc)
+"""
+
 
 @dataclass
 class ModelConfig:
@@ -192,6 +201,20 @@ class IOConfig:
     rtsp_reconnect_max_delay_s: float = 30.0
     rtsp_reconnect_backoff_factor: float = 2.0
     rtsp_stall_timeout_s: float = 5.0
+
+    # RTSP capture backend configuration.
+    # - "opencv": default OpenCV/FFmpeg path (portable).
+    # - "gstreamer": OpenCV CAP_GSTREAMER pipeline (Jetson-friendly, NVDEC).
+    rtsp_capture_backend: str = "opencv"
+    rtsp_transport: str = "tcp"  # "tcp" | "udp"
+    rtsp_latency_ms: int = 200
+    rtsp_codec: str = "h264"  # "h264" | "h265"
+    rtsp_gst_pipeline: Optional[str] = None
+
+    # Live reader queue behaviour.
+    # - "drop_oldest": keep latency bounded by dropping stale frames.
+    # - "block": keep frames when possible (may increase end-to-end delay).
+    live_queue_policy: str = "drop_oldest"
 
     # Dapat di ovveride dengan menggunakan Command Line Interfae.
     input_path: Path = ROOT_DIR / "media" / "input.mp4"

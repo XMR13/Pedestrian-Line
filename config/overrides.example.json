@@ -31,6 +31,12 @@
       "rtsp_reconnect_max_delay_s": 30.0,
       "rtsp_reconnect_backoff_factor": 2.0,
       "rtsp_stall_timeout_s": 5.0,
+      "rtsp_capture_backend": "opencv",
+      "rtsp_transport": "tcp",
+      "rtsp_latency_ms": 200,
+      "rtsp_codec": "h264",
+      "rtsp_gst_pipeline": null,
+      "live_queue_policy": "drop_oldest",
       "input_path": "media/input.mp4",
       "output_path": "output.mp4"
     },

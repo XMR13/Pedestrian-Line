@@ -86,6 +86,15 @@ Main RTSP reconnect keys (`app.io`):
 - `app.io.rtsp_reconnect_backoff_factor` (float >= 1.0)
 - `app.io.rtsp_stall_timeout_s` (float > 0)
 
+Main RTSP capture/backend keys (`app.io`):
+
+- `app.io.rtsp_capture_backend` (`"opencv"` or `"gstreamer"`)
+- `app.io.rtsp_transport` (`"tcp"` or `"udp"`)
+- `app.io.rtsp_latency_ms` (int >= 0; GStreamer path)
+- `app.io.rtsp_codec` (`"h264"` or `"h265"`)
+- `app.io.rtsp_gst_pipeline` (string or null; custom OpenCV+GStreamer pipeline override)
+- `app.io.live_queue_policy` (`"drop_oldest"` or `"block"`)
+
 Line source precedence:
 
 1. CLI `--line-json` / `--camera`

@@ -222,6 +222,9 @@ Output (contoh):
 - `data/traffic_runs/YYYY-MM-DD/<run_uid>/events.jsonl`
 - `data/traffic_runs/YYYY-MM-DD/<run_uid>/thumbs/<event_uid>.jpg`
 
+`run.json` now also includes `health_summary` at the end of a run (reconnect cycles/attempts,
+stall counts, reader dropped frames, reader read failures, and effective FPS) for daily report aggregation.
+
 
 Menentukan garis virtual untuk setiap kamera yang ada
 ---------------------------------------
@@ -285,6 +288,36 @@ Next step dari project ini adalah menjalankan semua ini dengan RTSP live feed, t
 
 Note: in live mode, writing is disabled by default unless you set `--output`
 or a duration/frame limit, to avoid unbounded file growth.
+
+Jetson Optimized RTSP Path (JetPack 5/6)
+----------------------------------------
+
+For Jetson devices, you can use OpenCV + GStreamer with NVDEC:
+
+```bash
+uv run python main.py \
+  --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
+  --camera road_a \
+  --backend onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --rtsp-capture-backend gstreamer \
+  --rtsp-transport tcp \
+  --rtsp-codec h264 \
+  --rtsp-latency-ms 200 \
+  --queue-policy drop_oldest \
+  --target-fps 12 \
+  --log-every-seconds 10 \
+  --spool-dir data/traffic_runs \
+  --no-write
+```
+
+Notes:
+
+- `--queue-policy drop_oldest` keeps latency bounded for portal updates.
+- `--queue-policy block` prioritizes completeness but can increase delay over time.
+- `--rtsp-gst-pipeline` can override the generated pipeline (advanced tuning/debug).
+- If GStreamer open fails, the app automatically falls back to OpenCV RTSP capture.
 
 RTSP Reconnect Behavior
 -----------------------

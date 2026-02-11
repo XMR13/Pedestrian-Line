@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import math
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 import time
 
 import cv2
@@ -253,7 +254,17 @@ def _parse_args() -> argparse.Namespace:
         "--queue-size",
         type=int,
         default=3,
-        help="Live mode only: bounded reader queue size (drops oldest when full).",
+        help="Live mode only: bounded reader queue size.",
+    )
+    parser.add_argument(
+        "--queue-policy",
+        type=str,
+        choices=["drop_oldest", "block"],
+        default=None,
+        help=(
+            "Live mode queue overflow policy: "
+            "'drop_oldest' keeps latency lower, 'block' favors frame completeness."
+        ),
     )
     parser.add_argument(
         "--target-fps",
@@ -278,6 +289,39 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="VideoCapture read timeout in ms (best-effort; mainly for RTSP).",
+    )
+    parser.add_argument(
+        "--rtsp-capture-backend",
+        type=str,
+        choices=["opencv", "gstreamer"],
+        default=None,
+        help="Live mode only: capture backend for RTSP open/reconnect.",
+    )
+    parser.add_argument(
+        "--rtsp-transport",
+        type=str,
+        choices=["tcp", "udp"],
+        default=None,
+        help="Live mode only: RTSP transport preference for GStreamer backend.",
+    )
+    parser.add_argument(
+        "--rtsp-latency-ms",
+        type=int,
+        default=None,
+        help="Live mode only: RTSP latency (ms) for GStreamer backend.",
+    )
+    parser.add_argument(
+        "--rtsp-codec",
+        type=str,
+        choices=["h264", "h265"],
+        default=None,
+        help="Live mode only: codec hint for GStreamer depay/parser selection.",
+    )
+    parser.add_argument(
+        "--rtsp-gst-pipeline",
+        type=str,
+        default=None,
+        help="Live mode only: full custom GStreamer pipeline string (advanced override).",
     )
     parser.add_argument(
         "--rtsp-reconnect",
@@ -381,11 +425,27 @@ def _open_source_with_first_frame(
     open_timeout_ms: Optional[int] = None,
     read_timeout_ms: Optional[int] = None,
     source_label: Optional[str] = None,
+    is_live: bool = False,
+    rtsp_capture_backend: str = "opencv",
+    rtsp_transport: str = "tcp",
+    rtsp_latency_ms: int = 200,
+    rtsp_codec: str = "h264",
+    rtsp_gst_pipeline: Optional[str] = None,
+    queue_policy: str = "drop_oldest",
 ) -> Tuple[cv2.VideoCapture, np.ndarray, float, int, int, Optional[str]]:
+    appsink_drop = str(queue_policy).strip().lower() == "drop_oldest"
+    appsink_max_buffers = 1 if appsink_drop else 8
     cap = open_video_capture(
         source,
         open_timeout_ms=open_timeout_ms,
         read_timeout_ms=read_timeout_ms,
+        rtsp_capture_backend=(rtsp_capture_backend if is_live else "opencv"),
+        rtsp_transport=rtsp_transport,
+        rtsp_latency_ms=int(rtsp_latency_ms),
+        rtsp_codec=rtsp_codec,
+        rtsp_gst_pipeline=rtsp_gst_pipeline,
+        rtsp_appsink_drop=appsink_drop,
+        rtsp_appsink_max_buffers=appsink_max_buffers,
     )
     label = source_label if source_label is not None else str(source)
     if not cap.isOpened():
@@ -587,6 +647,8 @@ def main() -> None:
     ):
         if value is not None and value <= 0:
             raise SystemExit(f"{flag} must be > 0")
+    if args.rtsp_latency_ms is not None and args.rtsp_latency_ms < 0:
+        raise SystemExit("--rtsp-latency-ms must be >= 0")
     for flag, value in (
         ("--rtsp-reconnect-max-attempts", args.rtsp_reconnect_max_attempts),
     ):
@@ -662,6 +724,18 @@ def main() -> None:
         cfg.io.rtsp_reconnect_backoff_factor = float(args.rtsp_reconnect_backoff)
     if args.rtsp_stall_timeout is not None:
         cfg.io.rtsp_stall_timeout_s = float(args.rtsp_stall_timeout)
+    if args.rtsp_capture_backend is not None:
+        cfg.io.rtsp_capture_backend = str(args.rtsp_capture_backend)
+    if args.rtsp_transport is not None:
+        cfg.io.rtsp_transport = str(args.rtsp_transport)
+    if args.rtsp_latency_ms is not None:
+        cfg.io.rtsp_latency_ms = int(args.rtsp_latency_ms)
+    if args.rtsp_codec is not None:
+        cfg.io.rtsp_codec = str(args.rtsp_codec)
+    if args.rtsp_gst_pipeline is not None:
+        cfg.io.rtsp_gst_pipeline = str(args.rtsp_gst_pipeline)
+    if args.queue_policy is not None:
+        cfg.io.live_queue_policy = str(args.queue_policy)
 
     if cfg.io.rtsp_reconnect_max_attempts < 0:
         raise SystemExit("config io.rtsp_reconnect_max_attempts must be >= 0")
@@ -676,6 +750,24 @@ def main() -> None:
         raise SystemExit("config io.rtsp_reconnect_max_delay_s must be >= io.rtsp_reconnect_initial_delay_s")
     if cfg.io.rtsp_reconnect_backoff_factor < 1.0:
         raise SystemExit("config io.rtsp_reconnect_backoff_factor must be >= 1.0")
+    if int(cfg.io.rtsp_latency_ms) < 0:
+        raise SystemExit("config io.rtsp_latency_ms must be >= 0")
+
+    rtsp_capture_backend = str(cfg.io.rtsp_capture_backend).strip().lower()
+    if rtsp_capture_backend not in {"opencv", "gstreamer"}:
+        raise SystemExit("config io.rtsp_capture_backend must be 'opencv' or 'gstreamer'")
+    rtsp_transport = str(cfg.io.rtsp_transport).strip().lower()
+    if rtsp_transport not in {"tcp", "udp"}:
+        raise SystemExit("config io.rtsp_transport must be 'tcp' or 'udp'")
+    rtsp_codec = str(cfg.io.rtsp_codec).strip().lower()
+    if rtsp_codec not in {"h264", "h265"}:
+        raise SystemExit("config io.rtsp_codec must be 'h264' or 'h265'")
+    queue_policy = str(cfg.io.live_queue_policy).strip().lower()
+    if queue_policy not in {"drop_oldest", "block"}:
+        raise SystemExit("config io.live_queue_policy must be 'drop_oldest' or 'block'")
+    rtsp_gst_pipeline = None
+    if cfg.io.rtsp_gst_pipeline is not None:
+        rtsp_gst_pipeline = str(cfg.io.rtsp_gst_pipeline).strip() or None
 
     line_path: Optional[Path] = None
     if args.line_json:
@@ -727,6 +819,13 @@ def main() -> None:
             open_timeout_ms=args.open_timeout_ms,
             read_timeout_ms=args.read_timeout_ms,
             source_label=source_label,
+            is_live=is_live,
+            rtsp_capture_backend=rtsp_capture_backend,
+            rtsp_transport=rtsp_transport,
+            rtsp_latency_ms=int(cfg.io.rtsp_latency_ms),
+            rtsp_codec=rtsp_codec,
+            rtsp_gst_pipeline=rtsp_gst_pipeline,
+            queue_policy=queue_policy,
         )
     except RuntimeError as exc:
         raise SystemExit(str(exc))
@@ -956,6 +1055,17 @@ def main() -> None:
             else str(int(cfg.io.rtsp_reconnect_max_attempts))
         )
         print(
+            f"[main] RTSP capture: backend={rtsp_capture_backend} transport={rtsp_transport} "
+            f"codec={rtsp_codec} latency_ms={int(cfg.io.rtsp_latency_ms)} queue_policy={queue_policy}"
+        )
+        if rtsp_capture_backend == "gstreamer":
+            backend_upper = str(backend_name).upper() if backend_name else ""
+            if "GSTREAMER" not in backend_upper:
+                print(
+                    "[main] Warning: requested GStreamer RTSP capture, "
+                    "but OpenCV did not open with the GSTREAMER backend. Using fallback backend."
+                )
+        print(
             f"[main] RTSP reconnect: {'enabled' if cfg.io.rtsp_reconnect_enabled else 'disabled'} "
             f"(max_attempts={attempts_txt}, initial_delay={cfg.io.rtsp_reconnect_initial_delay_s:.2f}s, "
             f"max_delay={cfg.io.rtsp_reconnect_max_delay_s:.2f}s, backoff={cfg.io.rtsp_reconnect_backoff_factor:.2f}, "
@@ -1015,8 +1125,17 @@ def main() -> None:
     last_live_frame_time_s = time.time()
     reconnect_cycle_count = 0
     reconnect_attempt_total = 0
+    reconnect_reason_counts: Dict[str, int] = {}
+    stall_timeout_count = 0
+    live_reader_read_frames_total = 0
+    live_reader_dropped_total = 0
+    live_reader_read_failures_total = 0
     if is_live:
-        reader = StreamReader(cap, queue_size=args.queue_size)
+        reader = StreamReader(
+            cap,
+            queue_size=args.queue_size,
+            overflow_policy=queue_policy,
+        )
         reader.start()
 
     try:
@@ -1080,6 +1199,16 @@ def main() -> None:
             line_counter.clear_runtime_state()
             latest_tracks = []
 
+        def _accumulate_reader_stats(reader_obj: Optional[StreamReader]) -> None:
+            nonlocal live_reader_read_frames_total
+            nonlocal live_reader_dropped_total
+            nonlocal live_reader_read_failures_total
+            if reader_obj is None:
+                return
+            live_reader_read_frames_total += int(getattr(reader_obj, "read_frames", 0))
+            live_reader_dropped_total += int(getattr(reader_obj, "dropped", 0))
+            live_reader_read_failures_total += int(getattr(reader_obj, "read_failures", 0))
+
         def _reconnect_live(trigger_reason: str) -> bool:
             nonlocal reader
             nonlocal cap
@@ -1090,9 +1219,13 @@ def main() -> None:
             nonlocal fps_prev_source
             nonlocal reconnect_cycle_count
             nonlocal reconnect_attempt_total
+            nonlocal stall_timeout_count
 
             if (not is_live) or (not reconnect_enabled) or (rtsp_url is None):
                 return False
+            reconnect_reason_counts[trigger_reason] = reconnect_reason_counts.get(trigger_reason, 0) + 1
+            if trigger_reason == "stall_timeout":
+                stall_timeout_count += 1
 
             reconnect_cycle_count += 1
             cycle_no = reconnect_cycle_count
@@ -1104,6 +1237,7 @@ def main() -> None:
             )
 
             if reader is not None:
+                _accumulate_reader_stats(reader)
                 reader.stop(reason=f"reconnect:{trigger_reason}")
                 reader = None
 
@@ -1139,7 +1273,14 @@ def main() -> None:
                         rtsp_url,
                         open_timeout_ms=args.open_timeout_ms,
                         read_timeout_ms=args.read_timeout_ms,
-                        source_label=source_label
+                        source_label=source_label,
+                        is_live=True,
+                        rtsp_capture_backend=rtsp_capture_backend,
+                        rtsp_transport=rtsp_transport,
+                        rtsp_latency_ms=int(cfg.io.rtsp_latency_ms),
+                        rtsp_codec=rtsp_codec,
+                        rtsp_gst_pipeline=rtsp_gst_pipeline,
+                        queue_policy=queue_policy,
                     )
                 except RuntimeError as exc:
                     print(f"[main] Reconnect attempt {attempt_no} failed: {exc}")
@@ -1154,7 +1295,11 @@ def main() -> None:
                         return False
                     continue
 
-                new_reader = StreamReader(new_cap, queue_size=args.queue_size)
+                new_reader = StreamReader(
+                    new_cap,
+                    queue_size=args.queue_size,
+                    overflow_policy=queue_policy,
+                )
                 new_reader.start()
 
                 cap = new_cap
@@ -1380,12 +1525,36 @@ def main() -> None:
         print("[main] Interrupted (Ctrl-C). Shutting down...")
 
     if reader is not None:
+        live_reader_read_frames_total += int(getattr(reader, "read_frames", 0))
+        live_reader_dropped_total += int(getattr(reader, "dropped", 0))
+        live_reader_read_failures_total += int(getattr(reader, "read_failures", 0))
         reader.stop()
     else:
         cap.release()
     if writer is not None:
         writer.release()
     if spool is not None:
+        elapsed_s = max(time.perf_counter() - run_started_perf_s, 1e-9)
+        health_summary = {
+            "ended_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "frames_total": int(t_frames),
+            "frames_processed": int(t_processed),
+            "effective_fps": float(t_frames) / elapsed_s if t_frames > 0 else 0.0,
+            "processed_fps": float(t_processed) / elapsed_s if t_processed > 0 else 0.0,
+            "reconnect_cycles": int(reconnect_cycle_count),
+            "reconnect_attempts_total": int(reconnect_attempt_total),
+            "reconnect_reason_counts": reconnect_reason_counts,
+            "stall_timeout_count": int(stall_timeout_count),
+            "reader_read_frames": int(live_reader_read_frames_total),
+            "reader_dropped_frames": int(live_reader_dropped_total),
+            "reader_read_failures": int(live_reader_read_failures_total),
+            "queue_policy": queue_policy,
+            "queue_size": int(args.queue_size),
+            "rtsp_capture_backend": rtsp_capture_backend if is_live else None,
+            "rtsp_transport": rtsp_transport if is_live else None,
+            "rtsp_codec": rtsp_codec if is_live else None,
+        }
+        spool.update_run_metadata({"health_summary": health_summary})
         spool.close()
     if progress_bar is not None:
         progress_bar.close()

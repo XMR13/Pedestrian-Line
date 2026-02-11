@@ -78,8 +78,9 @@ def _install_live_fakes(
     class _FakeStreamReader:
         instances: List["_FakeStreamReader"] = []
 
-        def __init__(self, cap, *, queue_size: int = 3) -> None:
+        def __init__(self, cap, *, queue_size: int = 3, overflow_policy: str = "drop_oldest") -> None:
             _ = queue_size
+            _ = overflow_policy
             self._cap = cap
             self.stop_reasons: List[str] = []
             self.read_frames = 0

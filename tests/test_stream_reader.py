@@ -55,3 +55,25 @@ def test_stream_reader_drops_oldest_when_full() -> None:
     assert len(items) == 2
     assert [it.source_index for it in items] == [4, 5]
     assert reader.dropped == 4
+
+
+def test_stream_reader_block_policy_preserves_order_without_drops() -> None:
+    cap = _FakeCapture(frames=5, delay_s=0.0005)
+    reader = StreamReader(cap, queue_size=1, overflow_policy="block")
+    reader.start()
+
+    items = []
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        poll = reader.get_with_status(timeout_s=0.05)
+        if poll.status == "frame" and poll.item is not None:
+            items.append(poll.item)
+            continue
+        if poll.status == "stopped":
+            break
+
+    reader.stop()
+
+    assert [it.source_index for it in items] == [0, 1, 2, 3, 4]
+    assert reader.read_frames == 5
+    assert reader.dropped == 0
