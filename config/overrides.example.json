@@ -25,6 +25,12 @@
     },
     "io": {
       "rtsp_url": "env:PLC_RTSP_URL",
+      "rtsp_reconnect_enabled": true,
+      "rtsp_reconnect_max_attempts": 0,
+      "rtsp_reconnect_initial_delay_s": 1.0,
+      "rtsp_reconnect_max_delay_s": 30.0,
+      "rtsp_reconnect_backoff_factor": 2.0,
+      "rtsp_stall_timeout_s": 5.0,
       "input_path": "media/input.mp4",
       "output_path": "output.mp4"
     },
