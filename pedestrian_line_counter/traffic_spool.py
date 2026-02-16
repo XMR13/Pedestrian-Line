@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import time
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 import uuid
 
 import cv2
@@ -129,6 +129,7 @@ class TrafficSpoolWriter:
         *,
         frame_bgr: np.ndarray,
         frame_ts: float,
+        capture_records: Optional[List[Dict[str, Any]]] = None,
     ) -> int:
         """
         Append events to events.jsonl and optionally write 1 thumbnail per event.
@@ -175,6 +176,8 @@ class TrafficSpoolWriter:
                 "thumb_relpath": thumb_rel,
             }
             self._events_f.write(json.dumps(rec, ensure_ascii=True) + "\n")
+            if capture_records is not None:
+                capture_records.append(rec)
             written += 1
 
         if written:

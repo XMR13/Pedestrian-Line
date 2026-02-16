@@ -18,6 +18,7 @@ from .config_io import apply_config_overrides, load_config_overrides, split_over
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
+from .report_writer import ReportWriter, ReportWriterConfig
 from .stream_reader import StreamReader
 from .traffic_spool import TrafficSpoolConfig, TrafficSpoolWriter
 from .tracker import Tracker
@@ -384,6 +385,26 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--spool-thumb-pad", type=int, default=None, help="Padding (pixels) around bbox when saving thumbnails.")
     parser.add_argument("--spool-thumb-max-side", type=int, default=None, help="Max side (pixels) for saved thumbnails.")
+    
+    parser.add_argument(
+        "--report-csv",
+        dest="report_csv",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable per-run report csv output (default: enabled when spool is enabled)."
+    )
+    parser.add_argument(
+        "--report-name",
+        type=str,
+        default=None,
+        help="Report CSV Filename inside each run directory (default: report.csv)"
+    )
+    parser.add_argument(
+        "--report-include-extra-cols",
+        dest="report_include_extra_cols",
+        default=None,
+        help="Include technical columns (track_id), frame_index, class_id, confidence, thumb path)."
+    )
     return parser.parse_args()
 
 
@@ -957,6 +978,7 @@ def main() -> None:
         line_counter = LineCounter(p1=p1, p2=p2)
 
     spool: Optional[TrafficSpoolWriter] = None
+    report_writer: Optional[ReportWriter] = None
     spool_dir = Path(args.spool_dir) if args.spool_dir else cfg.spool.root_dir
     if spool_dir is not None:
         cam_id = args.camera_id or cfg.spool.camera_id or (args.camera if args.camera else "camera")
@@ -992,6 +1014,38 @@ def main() -> None:
             class_names=class_names_map,
         )
 
+    report_enabled = (
+        (cfg.report.enabled and spool is not None)
+        if args.report_csv is None
+        else bool(args.report_csv)
+    )
+    report_name = cfg.report.filename if args.report_name is None else str(args.report_name)
+    report_include_extra_cols = (
+        cfg.report.include_extra_cols
+        if args.report_include_extra_cols is None
+        else bool(args.report_include_extra_cols)
+    )
+    report_name = str(report_name or "").strip()
+    if report_enabled:
+        if spool is None:
+            raise SystemExit(
+                "Report CSV is enabled but spool output is disabled. "
+                "Set --spool-dir (or app.spool.root_dir) to enable run report output."
+            )
+        if report_name == "":
+            raise SystemExit("Report CSV is enabled but --report-name is empty.")
+        report_path = spool.run_dir / report_name
+        report_writer = ReportWriter(
+            ReportWriterConfig(
+                path=report_path,
+                fps=float(fps),
+                include_extra_cols=bool(report_include_extra_cols),
+                notes_default="",
+            ),
+            class_names=class_names_map,
+        )
+        spool.update_run_metadata({"report_csv_relpath": report_name})
+
     print(
         f"[main] Processing {source_label} -> "
         f"{output_path if not args.no_write else '(no-write)'}"
@@ -1021,6 +1075,8 @@ def main() -> None:
     else:
         print(f"[main] Line mode: single")
         print(f"[main] Line: {p1} -> {p2}")
+    if report_writer is not None:
+        print(f"[main] Report CSV: {report_writer.cfg.path}")
     if max_frames is not None:
         print(f"[main] Frame limit: {max_frames} (via --max-frames/--max-seconds)")
     if args.frame_stride > 1:
@@ -1393,8 +1449,17 @@ def main() -> None:
                     events = line_counter.update(tracks, frame_index=process_index)
                     t_count += time.perf_counter() - t0
 
-                if spool is not None and events:
-                    spool.record_events(events, frame_bgr=frame, frame_ts=frame_ts)
+                if events:
+                    event_records = [] if (spool is not None and report_writer is not None) else None
+                    if spool is not None:
+                        spool.record_events(
+                            events,
+                            frame_bgr=frame,
+                            frame_ts=frame_ts,
+                            capture_records=event_records,
+                        )
+                    if report_writer is not None:
+                        report_writer.record_events(events, event_records=event_records)
 
                 # Gambar setiap gambar yang telah diupdate
                 # avoid "stuck" boxes when a track is kept alive across occlusions.
@@ -1556,6 +1621,8 @@ def main() -> None:
         }
         spool.update_run_metadata({"health_summary": health_summary})
         spool.close()
+    if report_writer is not None:
+        report_writer.close()
     if progress_bar is not None:
         progress_bar.close()
     if args.show:

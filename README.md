@@ -213,17 +213,24 @@ python3 -m pedestrian_line_counter.main \
   --input media/input.mp4 \
   --spool-dir data/traffic_runs \
   --site-id subang \
-  --camera-id cam_01
+  --camera-id cam_01 \
+  --report-csv \
+  --report-name report.csv
 ```
 
 Output (contoh):
 
 - `data/traffic_runs/YYYY-MM-DD/<run_uid>/run.json`
 - `data/traffic_runs/YYYY-MM-DD/<run_uid>/events.jsonl`
+- `data/traffic_runs/YYYY-MM-DD/<run_uid>/report.csv`
 - `data/traffic_runs/YYYY-MM-DD/<run_uid>/thumbs/<event_uid>.jpg`
 
 `run.json` now also includes `health_summary` at the end of a run (reconnect cycles/attempts,
 stall counts, reader dropped frames, reader read failures, and effective FPS) for daily report aggregation.
+
+`report.csv` berisi 1 baris untuk setiap crossing event (default kolom utama: `event_no`, `timestamp_s`,
+`vehicle_type`, `direction`, `notes`; plus kolom teknis opsional seperti `track_id`, `frame_index`,
+`confidence`, dan `thumb_relpath`).
 
 
 Menentukan garis virtual untuk setiap kamera yang ada

@@ -237,6 +237,19 @@ class SpoolConfig:
 
 
 @dataclass
+class ReportConfig:
+    """
+    Konfigurasi report CSV per-run (human-readable) dari crossing events.
+
+    Report berada di dalam folder run spool agar 1:1 dengan events.jsonl.
+    """
+
+    enabled: bool = True
+    filename: str = "report.csv"
+    include_extra_cols: bool = True
+
+
+@dataclass
 class VisualConfig:
     """
     Konfigurasi visual untuk overlay box/label.
@@ -283,6 +296,7 @@ class AppConfig:
     line: LineConfig = field(default_factory=LineConfig)
     io: IOConfig = field(default_factory=IOConfig)
     spool: SpoolConfig = field(default_factory=SpoolConfig)
+    report: ReportConfig = field(default_factory=ReportConfig)
     visual: VisualConfig = field(default_factory=VisualConfig)
 
 

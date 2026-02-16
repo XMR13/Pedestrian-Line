@@ -12,6 +12,7 @@ from .config import (
     IOConfig,
     LineConfig,
     ModelConfig,
+    ReportConfig,
     TrackerConfig,
     get_default_config,
 )
@@ -19,4 +20,3 @@ from .detector import Detector
 from .line_counter import LineCounter  
 from .structures import Detection, Track  
 from .tracker import Tracker  
-

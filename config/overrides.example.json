@@ -48,6 +48,11 @@
       "thumb_pad": 20,
       "thumb_max_side": 320
     },
+    "report": {
+      "enabled": true,
+      "filename": "report.csv",
+      "include_extra_cols": true
+    },
     "visual": {
       "track_color_by": "class",
       "track_default_color": [46, 204, 113],

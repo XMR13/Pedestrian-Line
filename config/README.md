@@ -11,13 +11,14 @@ Recommended workflow:
 **NOTES** : all the configurable config and what they for can be seen at `pedestrian_line_counter/config.py`. 
 
 ## Types of config
-There's 6 types of config:
+There's 7 types of config:
 1. **Model Config**. This is the configuration of all the things that relate to the model (path, confidence score, iou, etc, etc). This configuration also correlates to the class itself (class_id).
 2. **Track Config**. Configuration for trackig based on a simple greedy algorithm
 3. **Line Config**. Configuration for line dividing the 2 sides. Things that can be changed : position, singular/multiplelines.
 4. **I/O config**: Configuration for input and output processing
 5. **Spool config**: Configuration for traffic event spool output.
-6. **Visual config**: Configuration for drawing style and per-class box colors.
+6. **Report config**: Configuration for per-run report CSV output.
+7. **Visual config**: Configuration for drawing style and per-class box colors.
 
 ## Local Experiments (Ignored By Git)
 
@@ -68,6 +69,7 @@ Top-level structure for `--config`:
 - `app.line`
 - `app.io`
 - `app.spool`
+- `app.report`
 - `app.visual`
 
 Main visual keys:
@@ -94,6 +96,12 @@ Main RTSP capture/backend keys (`app.io`):
 - `app.io.rtsp_codec` (`"h264"` or `"h265"`)
 - `app.io.rtsp_gst_pipeline` (string or null; custom OpenCV+GStreamer pipeline override)
 - `app.io.live_queue_policy` (`"drop_oldest"` or `"block"`)
+
+Main report keys (`app.report`):
+
+- `app.report.enabled` (bool; only applies when spool is enabled)
+- `app.report.filename` (string; CSV filename inside each run folder)
+- `app.report.include_extra_cols` (bool; include technical columns in CSV)
 
 Line source precedence:
 
