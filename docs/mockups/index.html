@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portal Mockups</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="grain"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <img
+            class="brand-logo"
+            src="./assets/indah-kiat-logo.png"
+            alt="PT Indah Kiat logo"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+          />
+          <div class="brand-fallback">
+            <div class="mark" aria-hidden="true"></div>
+          </div>
+          <div>
+            <h1>Traffic Portal Mockups</h1>
+            <p class="sub">Static HTML screens (MVP)</p>
+            <p class="brand-path">logo file: docs/mockups/assets/indah-kiat-logo.png</p>
+          </div>
+        </div>
+        <div class="nav">
+          <a class="active" href="./index.html">Index <span class="pill">docs/mockups</span></a>
+          <a href="./dashboard.html">Dashboard</a>
+          <a href="./review_queue.html">Review Queue</a>
+          <a href="./event_detail.html">Event Detail</a>
+        </div>
+        <div style="margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.4;">
+          <p style="margin: 0 0 10px;">
+            Goal: show events + thumbnails, then label each event as
+            <span class="pill ink">Qualified YES</span> or
+            <span class="pill brand">Qualified NO</span>.
+          </p>
+          <p style="margin: 0;">
+            Open these files directly in your browser.
+          </p>
+        </div>
+      </aside>
+      <main class="content">
+        <div class="topbar">
+          <div class="title">
+            <h2>Pick a screen</h2>
+            <p>These mockups are meant to match the portal workflow in <span class="pill">plan.md</span>.</p>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="row2">
+            <div class="card">
+              <div class="pad">
+                <div class="kpi-top">
+                  <div>
+                    <div class="kpi-label">Dashboard</div>
+                    <div class="kpi-hint">KPIs, chart, recent events</div>
+                  </div>
+                  <div class="kpi-accent ink">D</div>
+                </div>
+                <div style="margin-top: 14px;">
+                  <a class="btn secondary" href="./dashboard.html" style="display:inline-block; text-decoration:none;">Open Dashboard</a>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="pad">
+                <div class="kpi-top">
+                  <div>
+                    <div class="kpi-label">Review Queue</div>
+                    <div class="kpi-hint">Fast YES/NO + notes</div>
+                  </div>
+                  <div class="kpi-accent brand">R</div>
+                </div>
+                <div style="margin-top: 14px;">
+                  <a class="btn primary" href="./review_queue.html" style="display:inline-block; text-decoration:none;">Open Review</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="pad">
+              <div class="kpi-top">
+                <div>
+                  <div class="kpi-label">Event Detail</div>
+                  <div class="kpi-hint">Evidence, metadata, history</div>
+                </div>
+                <div class="kpi-accent">E</div>
+              </div>
+              <div style="margin-top: 14px;">
+                <a class="btn" href="./event_detail.html" style="display:inline-block; text-decoration:none;">Open Event Detail</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Design notes</h3>
+            <div class="meta">
+              <div class="row"><div class="key">Palette</div><div class="val">teal + safety orange + warm paper</div></div>
+              <div class="row"><div class="key">Typography</div><div class="val">system sans + monospace for ids</div></div>
+              <div class="row"><div class="key">Review model</div><div class="val">Qualified: YES/NO + notes</div></div>
+              <div class="row"><div class="key">Next</div><div class="val">convert to Razor + HTMX</div></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

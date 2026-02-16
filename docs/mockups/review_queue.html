@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portal Mockup – Review Queue</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="grain"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <img
+            class="brand-logo"
+            src="./assets/indah-kiat-logo.png"
+            alt="PT Indah Kiat logo"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+          />
+          <div class="brand-fallback">
+            <div class="mark" aria-hidden="true"></div>
+          </div>
+          <div>
+            <h1>Traffic Portal</h1>
+            <p class="sub">Review queue</p>
+            <p class="brand-path">logo file: docs/mockups/assets/indah-kiat-logo.png</p>
+          </div>
+        </div>
+        <div class="nav">
+          <a href="./dashboard.html">Dashboard</a>
+          <a class="active" href="./review_queue.html">Review <span class="pill">Queue</span></a>
+          <a href="./event_detail.html">Event Detail</a>
+          <a href="./index.html">Back <span class="pill">index</span></a>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <div class="panel">
+            <h3>Keyboard</h3>
+            <div class="meta">
+              <div class="row"><div class="key">Prev / Next</div><div class="val">J / K</div></div>
+              <div class="row"><div class="key">Label</div><div class="val">Y / N</div></div>
+              <div class="row"><div class="key">Open detail</div><div class="val">Enter</div></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="topbar">
+          <div class="title">
+            <h2>Review Queue</h2>
+            <p>Fast Yes/No labeling + notes per crossing event.</p>
+          </div>
+          <div class="filters">
+            <div class="field">
+              <label>Camera</label>
+              <select>
+                <option>cam_01</option>
+                <option>cam_02</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Date</label>
+              <select>
+                <option>Today</option>
+                <option>Yesterday</option>
+                <option>Custom…</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Status</label>
+              <select>
+                <option>Pending</option>
+                <option>All</option>
+                <option>Qualified YES</option>
+                <option>Qualified NO</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="big-thumb" aria-label="Event thumbnail">
+            <div class="bbox" title="bbox"></div>
+            <div class="line" title="counting line"></div>
+            <div style="position:absolute; left:14px; top:14px; display:flex; gap:10px;">
+              <span class="pill ink">A_TO_B</span>
+              <span class="pill">tronton</span>
+              <span class="pill">conf 0.84</span>
+            </div>
+            <div style="position:absolute; right:14px; top:14px;">
+              <span class="pill">event_uid</span>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Event</h3>
+            <div class="meta">
+              <div class="row"><div class="key">Occurred</div><div class="val">2026-02-16T16:22:13Z</div></div>
+              <div class="row"><div class="key">Video time</div><div class="val">00:12:48.233</div></div>
+              <div class="row"><div class="key">Direction</div><div class="val">A_TO_B</div></div>
+              <div class="row"><div class="key">Track</div><div class="val">track_id 17</div></div>
+              <div class="row"><div class="key">Class</div><div class="val">tronton</div></div>
+            </div>
+
+            <div style="margin-top: 12px;">
+              <div class="btn-row equal">
+                <button class="btn secondary" type="button">Qualified YES</button>
+                <button class="btn primary" type="button">Qualified NO</button>
+              </div>
+              <div style="margin-top: 10px;" class="btn-row">
+                <span class="hint">Y</span>
+                <span class="hint">N</span>
+                <span class="hint">J/K</span>
+                <a class="hint" href="./event_detail.html" style="text-decoration:none;">Enter → Detail</a>
+              </div>
+            </div>
+
+            <div style="margin-top: 12px;">
+              <label style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Notes</label>
+              <textarea placeholder="Optional notes (e.g., cargo looks like paper, covered with tarp)."></textarea>
+            </div>
+
+            <div style="margin-top: 12px;" class="panel">
+              <h3 style="margin-bottom: 6px;">Queue</h3>
+              <div style="display:flex; gap:10px; align-items:center; justify-content:space-between;">
+                <div style="color: var(--muted); font-size: 12px;">Pending items</div>
+                <div class="pill">73</div>
+              </div>
+              <div style="margin-top: 10px; display:flex; gap:10px; align-items:center;">
+                <span class="pill ink">YES 214</span>
+                <span class="pill brand">NO 401</span>
+                <span class="pill">PENDING 73</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

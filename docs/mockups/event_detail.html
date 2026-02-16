@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portal Mockup – Event Detail</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="grain"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <img
+            class="brand-logo"
+            src="./assets/indah-kiat-logo.png"
+            alt="PT Indah Kiat logo"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+          />
+          <div class="brand-fallback">
+            <div class="mark" aria-hidden="true"></div>
+          </div>
+          <div>
+            <h1>Traffic Portal</h1>
+            <p class="sub">Event detail</p>
+            <p class="brand-path">logo file: docs/mockups/assets/indah-kiat-logo.png</p>
+          </div>
+        </div>
+        <div class="nav">
+          <a href="./dashboard.html">Dashboard</a>
+          <a href="./review_queue.html">Review</a>
+          <a class="active" href="./event_detail.html">Event Detail <span class="pill">id</span></a>
+          <a href="./index.html">Back <span class="pill">index</span></a>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <div class="panel">
+            <h3>Criteria</h3>
+            <div style="color: var(--muted); font-size: 12px; line-height: 1.4;">
+              <p style="margin:0 0 8px;">This camera defines what "Qualified" means.</p>
+              <p style="margin:0;"><span class="pill ink">Qualified YES</span> if the event matches the criteria. Otherwise <span class="pill brand">NO</span>.</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="topbar">
+          <div class="title">
+            <h2>Event Detail</h2>
+            <p>Evidence + metadata + review history.</p>
+          </div>
+          <div class="filters">
+            <div class="field">
+              <label>Search event</label>
+              <input type="text" value="event_uid: 9c9f…d2a1" />
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="big-thumb" aria-label="Event thumbnail">
+            <div class="bbox" title="bbox"></div>
+            <div class="line" title="counting line"></div>
+            <div style="position:absolute; left:14px; bottom:14px; display:flex; gap:10px;">
+              <span class="pill ink">A_TO_B</span>
+              <span class="pill">tronton</span>
+              <span class="pill">frame 23047</span>
+            </div>
+          </div>
+
+          <div class="grid">
+            <div class="panel">
+              <h3>Run context</h3>
+              <div class="meta">
+                <div class="row"><div class="key">Site</div><div class="val">subang</div></div>
+                <div class="row"><div class="key">Camera</div><div class="val">cam_01</div></div>
+                <div class="row"><div class="key">Run</div><div class="val">run_uid 71c4…2b9f</div></div>
+                <div class="row"><div class="key">Model</div><div class="val">vehicle_subclasses.onnx</div></div>
+                <div class="row"><div class="key">Line</div><div class="val">line_1 (single)</div></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>Event metadata</h3>
+              <div class="meta">
+                <div class="row"><div class="key">Occurred</div><div class="val">2026-02-16T16:22:13Z</div></div>
+                <div class="row"><div class="key">Video time</div><div class="val">768.233s</div></div>
+                <div class="row"><div class="key">Track</div><div class="val">17</div></div>
+                <div class="row"><div class="key">Class</div><div class="val">tronton</div></div>
+                <div class="row"><div class="key">Confidence</div><div class="val">0.84</div></div>
+                <div class="row"><div class="key">BBox</div><div class="val">[182, 120, 522, 368]</div></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>Review</h3>
+              <div class="btn-row equal">
+                <button class="btn secondary" type="button">Qualified YES</button>
+                <button class="btn primary" type="button">Qualified NO</button>
+                <span class="pill">PENDING</span>
+              </div>
+              <div style="margin-top: 10px;">
+                <label style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Notes</label>
+                <textarea placeholder="Reason for YES/NO."></textarea>
+              </div>
+              <div class="timeline">
+                <div class="tl-item">
+                  <div class="t">2026-02-16T16:22:14Z</div>
+                  <div class="d">Event ingested by uploader.</div>
+                </div>
+                <div class="tl-item">
+                  <div class="t">—</div>
+                  <div class="d">Awaiting review.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>
