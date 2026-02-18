@@ -42,6 +42,8 @@ class Track:
     score: float
     class_id: Optional[int]
     last_seen_frame: int
+    # Stable class estimate (for counting/reporting) derived from per-track history.
+    stable_class_id: Optional[int] = None
     # Display identifier (untuk per track event)
     display_class_id: Optional[int] = None
     display_id: Optional[int] = None
@@ -69,7 +71,7 @@ class CrossingEvent:
     This is intentionally small and edge-friendly; the portal uploader can enrich
     it (site/camera/run IDs, timestamps, etc.) before ingestion.
     """
-
+    
     track_id: int
     direction: Direction
     frame_index: int

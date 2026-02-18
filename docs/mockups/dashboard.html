@@ -10,15 +10,23 @@
     <div class="grain"></div>
     <div class="app">
       <aside class="sidebar">
-        <div class="brand">
-          <img
-            class="brand-logo"
-            src="./assets/indah-kiat-logo.png"
-            alt="PT Indah Kiat logo"
-            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
-          />
-          <div class="brand-fallback">
-            <div class="mark" aria-hidden="true"></div>
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img
+              class="brand-logo"
+              src="./assets/indah-kiat-logo.png"
+              alt="PT Indah Kiat logo"
+              width="406"
+              height="124"
+              loading="eager"
+              decoding="async"
+              fetchpriority="high"
+              onerror="this.closest('.brand-visual').classList.add('logo-missing');"
+            />
+            <div class="brand-fallback" aria-hidden="true">
+              <div class="mark"></div>
+              <span>logo unavailable</span>
+            </div>
           </div>
           <div>
             <h1>Traffic Portal</h1>
@@ -185,7 +193,7 @@
                 </div>
                 <div class="pill">events.jsonl</div>
               </div>
-              <div style="margin-top: 10px;">
+              <div class="table-scroll" style="margin-top: 10px;">
                 <table class="table">
                   <thead>
                     <tr>

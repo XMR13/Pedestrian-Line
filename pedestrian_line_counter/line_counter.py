@@ -8,6 +8,14 @@ import numpy as np
 from .structures import Track, CrossingEvent
 
 
+def _event_class_id(track: Track) -> Optional[int]:
+    if track.stable_class_id is not None:
+        return int(track.stable_class_id)
+    if track.class_id is not None:
+        return int(track.class_id)
+    return None
+
+
 @dataclass
 class _TrackState:
     """
@@ -217,13 +225,14 @@ class LineCounter:
             return None
 
         direction: str
+        event_class_id = _event_class_id(track)
         if along > 0:
             self.count_a_to_b += 1
-            self._bump_class_count("a_to_b", track.class_id)
+            self._bump_class_count("a_to_b", event_class_id)
             direction = "A_TO_B"
         else:
             self.count_b_to_a += 1
-            self._bump_class_count("b_to_a", track.class_id)
+            self._bump_class_count("b_to_a", event_class_id)
             direction = "B_TO_A"
 
         state.has_counted = True
@@ -237,7 +246,7 @@ class LineCounter:
             track_id=track.track_id,
             direction=direction,  # type: ignore[arg-type]
             frame_index=frame_index,
-            class_id=track.class_id,
+            class_id=event_class_id,
             confidence=float(track.score) if track.score is not None else None,
             bbox_xyxy=bbox,
             line_mode="line",
@@ -422,13 +431,14 @@ class TwoLineGateCounter:
 
             # jika hasil tracking selesai melewati dua buah garis yang telah ditentukan
             direction: str = ""
+            event_class_id = _event_class_id(track)
             if state.first_line == 1 and line_index == 2:
                 self.count_a_to_b += 1
-                self._bump_class_count("a_to_b", track.class_id)
+                self._bump_class_count("a_to_b", event_class_id)
                 direction = "A_TO_B"
             elif state.first_line == 2 and line_index == 1:
                 self.count_b_to_a += 1
-                self._bump_class_count("b_to_a", track.class_id)
+                self._bump_class_count("b_to_a", event_class_id)
                 direction = "B_TO_A"
 
             state.has_counted = True
@@ -439,7 +449,7 @@ class TwoLineGateCounter:
                     track_id=track.track_id,
                     direction=direction,  # type: ignore[arg-type]
                     frame_index=frame_index,
-                    class_id=track.class_id,
+                    class_id=event_class_id,
                     confidence=float(track.score) if track.score is not None else None,
                     bbox_xyxy=bbox,
                     line_mode="gate",

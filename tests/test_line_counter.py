@@ -10,6 +10,8 @@ def _make_track(
     y: float,
     class_id: int,
     frame_index: int,
+    *,
+    stable_class_id: int | None = None,
 ) -> Track:
     # Bottom-center at (x, y)
     return Track(
@@ -21,6 +23,7 @@ def _make_track(
         score=1.0,
         class_id=class_id,
         last_seen_frame=frame_index,
+        stable_class_id=stable_class_id,
     )
 
 
@@ -118,3 +121,39 @@ def test_clear_runtime_state_preserves_gate_totals() -> None:
     assert gc.count_b_to_a == 1
     assert gc.count_by_class_dir["a_to_b"][2] == 2
     assert gc.count_by_class_dir["b_to_a"][7] == 1
+
+
+def test_single_line_uses_stable_class_id_for_event_and_counts() -> None:
+    lc = LineCounter(p1=(50, 0), p2=(50, 100))
+
+    positions = [
+        (60, 10),
+        (58, 15),
+        (48, 20),
+        (46, 25),
+        (44, 30),
+        (42, 35),
+    ]
+
+    events = []
+    for i, (x, y) in enumerate(positions):
+        events.extend(
+            lc.update(
+                [
+                    _make_track(
+                        9,
+                        x,
+                        y,
+                        class_id=5,
+                        frame_index=i,
+                        stable_class_id=2,
+                    )
+                ],
+                frame_index=i,
+            )
+        )
+
+    assert len(events) == 1
+    assert events[0].class_id == 2
+    assert lc.count_by_class_dir["a_to_b"].get(2) == 1
+    assert lc.count_by_class_dir["a_to_b"].get(5) is None

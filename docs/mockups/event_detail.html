@@ -6,19 +6,27 @@
     <title>Portal Mockup – Event Detail</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body class="page-event-detail">
     <div class="grain"></div>
     <div class="app">
       <aside class="sidebar">
-        <div class="brand">
-          <img
-            class="brand-logo"
-            src="./assets/indah-kiat-logo.png"
-            alt="PT Indah Kiat logo"
-            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
-          />
-          <div class="brand-fallback">
-            <div class="mark" aria-hidden="true"></div>
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img
+              class="brand-logo"
+              src="./assets/indah-kiat-logo.png"
+              alt="PT Indah Kiat logo"
+              width="406"
+              height="124"
+              loading="eager"
+              decoding="async"
+              fetchpriority="high"
+              onerror="this.closest('.brand-visual').classList.add('logo-missing');"
+            />
+            <div class="brand-fallback" aria-hidden="true">
+              <div class="mark"></div>
+              <span>logo unavailable</span>
+            </div>
           </div>
           <div>
             <h1>Traffic Portal</h1>
@@ -58,8 +66,21 @@
           </div>
         </div>
 
-        <div class="two-col">
-          <div class="big-thumb" aria-label="Event thumbnail">
+        <section class="mode-banner detail">
+          <div class="mode-copy">
+            <div class="mode-eyebrow">DETAIL MODE</div>
+            <div class="mode-title">Single-event inspection</div>
+            <div class="mode-desc">Focused on traceability, evidence context, and review history.</div>
+          </div>
+          <div class="mode-tags">
+            <span class="pill">event_uid 9c9f…d2a1</span>
+            <span class="pill ink">readable metadata</span>
+            <span class="pill">timeline view</span>
+          </div>
+        </section>
+
+        <div class="two-col detail-layout">
+          <div class="big-thumb detail-thumb" aria-label="Event thumbnail">
             <div class="bbox" title="bbox"></div>
             <div class="line" title="counting line"></div>
             <div style="position:absolute; left:14px; bottom:14px; display:flex; gap:10px;">
@@ -69,7 +90,7 @@
             </div>
           </div>
 
-          <div class="grid">
+          <div class="grid detail-grid">
             <div class="panel">
               <h3>Run context</h3>
               <div class="meta">
@@ -98,6 +119,8 @@
               <div class="btn-row equal">
                 <button class="btn secondary" type="button">Qualified YES</button>
                 <button class="btn primary" type="button">Qualified NO</button>
+              </div>
+              <div style="margin-top: 10px;">
                 <span class="pill">PENDING</span>
               </div>
               <div style="margin-top: 10px;">

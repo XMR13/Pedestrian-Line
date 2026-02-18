@@ -6,19 +6,27 @@
     <title>Portal Mockup – Review Queue</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body class="page-review-queue">
     <div class="grain"></div>
     <div class="app">
       <aside class="sidebar">
-        <div class="brand">
-          <img
-            class="brand-logo"
-            src="./assets/indah-kiat-logo.png"
-            alt="PT Indah Kiat logo"
-            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
-          />
-          <div class="brand-fallback">
-            <div class="mark" aria-hidden="true"></div>
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img
+              class="brand-logo"
+              src="./assets/indah-kiat-logo.png"
+              alt="PT Indah Kiat logo"
+              width="406"
+              height="124"
+              loading="eager"
+              decoding="async"
+              fetchpriority="high"
+              onerror="this.closest('.brand-visual').classList.add('logo-missing');"
+            />
+            <div class="brand-fallback" aria-hidden="true">
+              <div class="mark"></div>
+              <span>logo unavailable</span>
+            </div>
           </div>
           <div>
             <h1>Traffic Portal</h1>
@@ -79,8 +87,21 @@
           </div>
         </div>
 
-        <div class="two-col">
-          <div class="big-thumb" aria-label="Event thumbnail">
+        <section class="mode-banner queue">
+          <div class="mode-copy">
+            <div class="mode-eyebrow">QUEUE MODE</div>
+            <div class="mode-title">Rapid event triage</div>
+            <div class="mode-desc">Optimized for speed: review, label, and move to the next event.</div>
+          </div>
+          <div class="mode-tags">
+            <span class="pill">item 21 / 73</span>
+            <span class="pill ink">hotkeys J/K + Y/N</span>
+            <span class="pill brand">pending focus</span>
+          </div>
+        </section>
+
+        <div class="two-col queue-layout">
+          <div class="big-thumb queue-thumb" aria-label="Event thumbnail">
             <div class="bbox" title="bbox"></div>
             <div class="line" title="counting line"></div>
             <div style="position:absolute; left:14px; top:14px; display:flex; gap:10px;">
@@ -93,7 +114,7 @@
             </div>
           </div>
 
-          <div class="panel">
+          <div class="panel queue-panel">
             <h3>Event</h3>
             <div class="meta">
               <div class="row"><div class="key">Occurred</div><div class="val">2026-02-16T16:22:13Z</div></div>

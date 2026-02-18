@@ -160,6 +160,17 @@ class TrackerConfig:
     # - When a track is not updated for a few frames (detector dropout / occlusion),
     #   allow a larger matching radius to prevent track fragmentation.
     max_distance_scale_cap: int = 5
+    # Class decision used for counting/reporting:
+    # - "instant": use current frame class directly (legacy behavior).
+    # - "majority": use most frequent class across track lifetime.
+    # - "weighted_majority": use highest confidence-weighted class across lifetime.
+    class_vote_mode: str = "weighted_majority"
+    # Minimum classified frames before majority/weighted vote is trusted.
+    class_vote_min_frames: int = 3
+    # Ambiguity guard:
+    # if top_vote / second_vote is below this ratio, keep previous stable class.
+    # Use <= 1.0 to disable.
+    class_vote_ambiguity_ratio: float = 1.15
 
 
 @dataclass

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
 from .config import TrackerConfig
 from .structures import Detection, Track
+
+
+@dataclass
+class _ClassVoteState:
+    counts: Dict[int, int] = field(default_factory=dict)
+    weighted: Dict[int, float] = field(default_factory=dict)
+    first_seen_seq: Dict[int, int] = field(default_factory=dict)
+    classified_frames: int = 0
 
 
 @dataclass
@@ -29,6 +37,8 @@ class Tracker:
     _next_display_id_by_class: Dict[int, int] = field(default_factory=dict)
     _last_center_by_id: Dict[int, Tuple[float, float]] = field(default_factory=dict)
     _velocity_by_id: Dict[int, Tuple[float, float]] = field(default_factory=dict)
+    _class_vote_by_id: Dict[int, _ClassVoteState] = field(default_factory=dict)
+    _class_vote_seq: int = 0
 
     def update(self, detections: Iterable[Detection], frame_index: int) -> List[Track]:
         detections = list(detections)
@@ -140,6 +150,7 @@ class Tracker:
             display_id=display_id,
             display_ids_by_class=display_ids_by_class,
         )
+        self._update_stable_class(track, det.class_id, det.score)
         self._tracks[self._next_id] = track
         cx, cy = det.center()
         self._last_center_by_id[self._next_id] = (float(cx), float(cy))
@@ -159,6 +170,7 @@ class Tracker:
         track.y2 = det.y2
         track.score = det.score
         track.class_id = det.class_id
+        self._update_stable_class(track, det.class_id, det.score)
         track.last_seen_frame = frame_index
 
         if det.class_id is not None:
@@ -186,6 +198,7 @@ class Tracker:
             del self._tracks[track_id]
             self._last_center_by_id.pop(track_id, None)
             self._velocity_by_id.pop(track_id, None)
+            self._class_vote_by_id.pop(track_id, None)
 
     def clear_runtime_state(self) -> None:
         """
@@ -198,3 +211,77 @@ class Tracker:
         self._last_center_by_id.clear()
         self._velocity_by_id.clear()
         self._next_display_id_by_class.clear()
+        self._class_vote_by_id.clear()
+
+    def _update_stable_class(
+        self,
+        track: Track,
+        class_id: Optional[int],
+        score: Optional[float],
+    ) -> None:
+        if class_id is None:
+            return
+
+        cid = int(class_id)
+        mode = self._normalized_class_vote_mode()
+        if mode == "instant":
+            track.stable_class_id = cid
+            return
+
+        state = self._class_vote_by_id.get(track.track_id)
+        if state is None:
+            state = _ClassVoteState()
+            self._class_vote_by_id[track.track_id] = state
+
+        if cid not in state.first_seen_seq:
+            state.first_seen_seq[cid] = self._class_vote_seq
+            self._class_vote_seq += 1
+
+        state.classified_frames += 1
+        state.counts[cid] = state.counts.get(cid, 0) + 1
+        weight = float(score) if score is not None else 1.0
+        state.weighted[cid] = state.weighted.get(cid, 0.0) + max(weight, 0.0)
+
+        min_frames = max(int(self.config.class_vote_min_frames), 1)
+        if state.classified_frames < min_frames:
+            track.stable_class_id = track.stable_class_id if track.stable_class_id is not None else cid
+            return
+
+        metric = state.weighted if mode == "weighted_majority" else {k: float(v) for k, v in state.counts.items()}
+        best, best_value, second_value = self._pick_vote_winner(metric, state.first_seen_seq)
+        if best is None:
+            track.stable_class_id = track.stable_class_id if track.stable_class_id is not None else cid
+            return
+
+        ratio = float(self.config.class_vote_ambiguity_ratio)
+        is_ambiguous = (
+            ratio > 1.0
+            and second_value > 0.0
+            and (best_value / second_value) < ratio
+        )
+        if is_ambiguous and track.stable_class_id is not None:
+            return
+
+        track.stable_class_id = best
+
+    @staticmethod
+    def _pick_vote_winner(
+        metric: Dict[int, float],
+        first_seen_seq: Dict[int, int],
+    ) -> Tuple[Optional[int], float, float]:
+        if not metric:
+            return None, 0.0, 0.0
+
+        ranked = sorted(
+            ((int(cid), float(val)) for cid, val in metric.items()),
+            key=lambda item: (-item[1], first_seen_seq.get(item[0], 10**9), item[0]),
+        )
+        best_cid, best_value = ranked[0]
+        second_value = ranked[1][1] if len(ranked) > 1 else 0.0
+        return int(best_cid), float(best_value), float(second_value)
+
+    def _normalized_class_vote_mode(self) -> str:
+        mode = str(self.config.class_vote_mode).strip().lower()
+        if mode in {"instant", "majority", "weighted_majority"}:
+            return mode
+        return "weighted_majority"

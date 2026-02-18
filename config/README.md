@@ -60,6 +60,20 @@ Then use that JSON as the baseline for future runs (and keep iterating locally i
 See `config/overrides.example.json` for the supported shape.
 See `config/subang.example.json` for a concrete camera-style example (includes line coords, RTSP placeholder, and spool metadata).
 
+## Where Output Goes
+
+- Annotated video:
+  - Default: `output.mp4` (project root, from `app.io.output_path`).
+  - Can be changed via `app.io.output_path` or CLI `--output`.
+- Spool output (only if enabled with `app.spool.root_dir` or `--spool-dir`):
+  - `<spool_root>/<YYYY-MM-DD>/<run_uid>/run.json`
+  - `<spool_root>/<YYYY-MM-DD>/<run_uid>/events.jsonl`
+  - `<spool_root>/<YYYY-MM-DD>/<run_uid>/thumbs/*`
+- Report CSV (only if report enabled and spool enabled):
+  - `<spool_root>/<YYYY-MM-DD>/<run_uid>/<app.report.filename>`
+
+If you are in live RTSP mode and do not pass `--output` (and do not set `--max-seconds/--max-frames`), output video writing is disabled automatically to avoid unbounded file growth.
+
 ## Overridable Keys
 
 Top-level structure for `--config`:

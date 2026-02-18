@@ -2,7 +2,15 @@ from pedestrian_line_counter.line_counter import TwoLineGateCounter
 from pedestrian_line_counter.structures import Track
 
 
-def _make_track(track_id: int, x: float, y: float, class_id: int, frame_index: int) -> Track:
+def _make_track(
+    track_id: int,
+    x: float,
+    y: float,
+    class_id: int,
+    frame_index: int,
+    *,
+    stable_class_id: int | None = None,
+) -> Track:
     return Track(
         track_id=track_id,
         x1=x - 5,
@@ -12,6 +20,7 @@ def _make_track(track_id: int, x: float, y: float, class_id: int, frame_index: i
         score=1.0,
         class_id=class_id,
         last_seen_frame=frame_index,
+        stable_class_id=stable_class_id,
     )
 
 
@@ -109,3 +118,39 @@ def test_gate_does_not_count_if_only_one_line_crossed() -> None:
     assert gate.count_a_to_b == 0
     assert gate.count_b_to_a == 0
     assert len(events) == 0
+
+
+def test_gate_uses_stable_class_id_for_event_and_counts() -> None:
+    gate = TwoLineGateCounter(
+        line1_p1=(40, 0),
+        line1_p2=(40, 100),
+        line2_p1=(60, 0),
+        line2_p2=(60, 100),
+        confirm_frames=2,
+        max_gap_frames=30,
+    )
+
+    positions = [
+        (30, 50),
+        (38, 50),
+        (42, 50),
+        (45, 50),
+        (55, 50),
+        (62, 50),
+        (65, 50),
+        (70, 50),
+    ]
+
+    events = []
+    for i, (x, y) in enumerate(positions):
+        events.extend(
+            gate.update(
+                [_make_track(5, x, y, class_id=7, frame_index=i, stable_class_id=2)],
+                frame_index=i,
+            )
+        )
+
+    assert len(events) == 1
+    assert events[0].class_id == 2
+    assert gate.count_by_class_dir["a_to_b"].get(2) == 1
+    assert gate.count_by_class_dir["a_to_b"].get(7) is None

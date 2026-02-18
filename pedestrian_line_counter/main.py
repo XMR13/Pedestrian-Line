@@ -128,6 +128,31 @@ def _parse_args() -> argparse.Namespace:
         help="Debug only: allow running model backends without --class-ids (counts all detected classes).",
     )
     parser.add_argument(
+        "--class-vote-mode",
+        type=str,
+        choices=["instant", "majority", "weighted_majority"],
+        default=None,
+        help=(
+            "Class decision strategy for counting/reporting per track: "
+            "'instant' | 'majority' | 'weighted_majority'."
+        ),
+    )
+    parser.add_argument(
+        "--class-vote-min-frames",
+        type=int,
+        default=None,
+        help="Minimum classified frames before majority-based class vote is used.",
+    )
+    parser.add_argument(
+        "--class-vote-ambiguity-ratio",
+        type=float,
+        default=None,
+        help=(
+            "Ambiguity guard for class vote. If top/second vote is below this ratio, "
+            "keep previous stable class. Use <= 1.0 to disable."
+        ),
+    )
+    parser.add_argument(
         "--line-json",
         type=str,
         help=(
@@ -660,11 +685,17 @@ def main() -> None:
         if value <= 0:
             raise SystemExit(f"{flag} must be > 0")
     for flag, value in (
+        ("--class-vote-min-frames", args.class_vote_min_frames),
+    ):
+        if value is not None and value <= 0:
+            raise SystemExit(f"{flag} must be > 0")
+    for flag, value in (
         ("--target-fps", args.target_fps),
         ("--log-every-seconds", args.log_every_seconds),
         ("--rtsp-reconnect-initial-delay", args.rtsp_reconnect_initial_delay),
         ("--rtsp-reconnect-max-delay", args.rtsp_reconnect_max_delay),
         ("--rtsp-stall-timeout", args.rtsp_stall_timeout),
+        ("--class-vote-ambiguity-ratio", args.class_vote_ambiguity_ratio),
     ):
         if value is not None and value <= 0:
             raise SystemExit(f"{flag} must be > 0")
@@ -757,6 +788,22 @@ def main() -> None:
         cfg.io.rtsp_gst_pipeline = str(args.rtsp_gst_pipeline)
     if args.queue_policy is not None:
         cfg.io.live_queue_policy = str(args.queue_policy)
+    if args.class_vote_mode is not None:
+        cfg.tracker.class_vote_mode = str(args.class_vote_mode)
+    if args.class_vote_min_frames is not None:
+        cfg.tracker.class_vote_min_frames = int(args.class_vote_min_frames)
+    if args.class_vote_ambiguity_ratio is not None:
+        cfg.tracker.class_vote_ambiguity_ratio = float(args.class_vote_ambiguity_ratio)
+
+    class_vote_mode = str(cfg.tracker.class_vote_mode).strip().lower()
+    if class_vote_mode not in {"instant", "majority", "weighted_majority"}:
+        raise SystemExit(
+            "Invalid class vote mode. Use one of: instant, majority, weighted_majority."
+        )
+    if int(cfg.tracker.class_vote_min_frames) <= 0:
+        raise SystemExit("tracker.class_vote_min_frames must be > 0.")
+    if float(cfg.tracker.class_vote_ambiguity_ratio) <= 0:
+        raise SystemExit("tracker.class_vote_ambiguity_ratio must be > 0.")
 
     if cfg.io.rtsp_reconnect_max_attempts < 0:
         raise SystemExit("config io.rtsp_reconnect_max_attempts must be >= 0")
@@ -1063,6 +1110,12 @@ def main() -> None:
             f"(using decoded {input_width}x{input_height})"
         )
     print(f"[main] Detector backend: {cfg.model.backend}")
+    print(
+        "[main] Class vote: "
+        f"mode={class_vote_mode} "
+        f"min_frames={int(cfg.tracker.class_vote_min_frames)} "
+        f"ambiguity_ratio={float(cfg.tracker.class_vote_ambiguity_ratio):.2f}"
+    )
     if cfg.model.track_class_ids:
         print(f"[main] Target class IDs: {sorted(set(cfg.model.track_class_ids))}")
     if class_names_map:
