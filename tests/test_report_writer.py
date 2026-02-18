@@ -42,8 +42,8 @@ def test_report_writer_writes_expected_columns_and_values(tmp_path) -> None:
         ),
     ]
     records = [
-        {"thumb_relpath": "thumbs/a.jpg"},
-        {"thumb_relpath": None},
+        {"thumb_relpath": "thumbs/a.jpg", "scene_relpath": "scene/a.jpg", "occurred_at_utc": "2026-02-18T01:00:00Z"},
+        {"thumb_relpath": None, "scene_relpath": None, "occurred_at_utc": None},
     ]
 
     written = writer.record_events(events, event_records=records)
@@ -62,6 +62,10 @@ def test_report_writer_writes_expected_columns_and_values(tmp_path) -> None:
     assert rows[1]["direction"] == "B_TO_A"
     assert rows[0]["thumb_relpath"] == "thumbs/a.jpg"
     assert rows[1]["thumb_relpath"] == ""
+    assert rows[0]["scene_relpath"] == "scene/a.jpg"
+    assert rows[1]["scene_relpath"] == ""
+    assert rows[0]["occurred_at_utc"] == "2026-02-18T01:00:00Z"
+    assert rows[1]["occurred_at_utc"] == ""
 
 
 def test_report_csv_and_spool_events_stay_in_sync(tmp_path) -> None:
@@ -71,14 +75,18 @@ def test_report_csv_and_spool_events_stay_in_sync(tmp_path) -> None:
             site_id="site_a",
             camera_id="cam_01",
             write_thumbnails=True,
+            write_scene_thumbnails=True,
             thumb_pad=5,
             thumb_max_side=128,
+            scene_thumb_max_side=160,
+            scene_thumb_quality=85,
         ),
         source={"type": "video", "value": "media/input.mp4"},
         model_version="model.onnx",
         cfg_version="test",
         line_mode="line",
         line_id="line_1",
+        lines=[((50, 0), (50, 100))],
         fps=30.0,
         frame_size=(100, 100),
         class_names={1: "pickup"},
@@ -115,7 +123,8 @@ def test_report_csv_and_spool_events_stay_in_sync(tmp_path) -> None:
     count = spool.record_events(
         events,
         frame_bgr=frame,
-        frame_ts=1738791000.0,
+        occurred_at_ts=1738791000.0,
+        occurred_at_utc_source="video_start",
         capture_records=captured,
     )
     report_count = report.record_events(events, event_records=captured)
@@ -140,3 +149,7 @@ def test_report_csv_and_spool_events_stay_in_sync(tmp_path) -> None:
     thumb_rel = csv_rows[0]["thumb_relpath"]
     assert thumb_rel.startswith("thumbs/")
     assert (spool.run_dir / thumb_rel).exists()
+
+    scene_rel = csv_rows[0]["scene_relpath"]
+    assert scene_rel.startswith("scene/")
+    assert (spool.run_dir / scene_rel).exists()

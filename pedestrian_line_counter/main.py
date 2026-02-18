@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import copy
+from dataclasses import fields, is_dataclass
 from datetime import datetime, timezone
+import difflib
 import math
 import os
 from pathlib import Path
@@ -410,6 +413,16 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--spool-thumb-pad", type=int, default=None, help="Padding (pixels) around bbox when saving thumbnails.")
     parser.add_argument("--spool-thumb-max-side", type=int, default=None, help="Max side (pixels) for saved thumbnails.")
+
+    parser.add_argument(
+        "--spool-scene-thumbnails",
+        dest="spool_scene_thumbnails",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable writing scene-context thumbnails (default: enabled).",
+    )
+    parser.add_argument("--spool-scene-thumb-max-side", type=int, default=None, help="Max side (pixels) for scene thumbnails.")
+    parser.add_argument("--spool-scene-thumb-quality", type=int, default=None, help="JPEG quality (10..100) for scene thumbnails.")
     
     parser.add_argument(
         "--report-csv",
@@ -427,8 +440,34 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--report-include-extra-cols",
         dest="report_include_extra_cols",
+        action=argparse.BooleanOptionalAction,
         default=None,
         help="Include technical columns (track_id), frame_index, class_id, confidence, thumb path)."
+    )
+
+    parser.add_argument(
+        "--video-start",
+        type=str,
+        default=None,
+        help=(
+            "Offline video only: RFC3339 timestamp with timezone for the start of the video. "
+            "If set (and spool enabled), occurred_at_utc for events is derived from video timeline "
+            "(start + frame_index/fps). Example: 2026-02-18T08:00:00+07:00"
+        ),
+    )
+    parser.add_argument(
+        "--source-fps-override",
+        type=float,
+        default=None,
+        help="Override decoded source FPS when metadata is missing/wrong (used for timestamps and writer FPS).",
+    )
+    parser.add_argument(
+        "--prompt-video-start",
+        action="store_true",
+        help=(
+            "Offline video only convenience: if spool is enabled and --video-start is missing, "
+            "prompt interactively for date/time/timezone to build a valid RFC3339 timestamp."
+        ),
     )
     return parser.parse_args()
 
@@ -463,6 +502,94 @@ def _parse_size(spec: str) -> Tuple[int, int]:
     if w <= 0 or h <= 0:
         raise ValueError(f"Invalid size '{spec}': width/height must be > 0.")
     return w, h
+
+
+def _parse_rfc3339_to_epoch_utc(value: str) -> float:
+    s = (value or "").strip()
+    if not s:
+        raise ValueError("empty timestamp")
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        raise ValueError("timestamp must include timezone offset (e.g. +07:00 or Z)")
+    return float(dt.astimezone(timezone.utc).timestamp())
+
+
+def _prompt_video_start_rfc3339(*, attempts: int = 3) -> str:
+    """
+    Interactive prompt helper. Kept simple and CLI-only (no UI deps).
+    """
+
+    def ask(prompt: str) -> str:
+        return str(input(prompt)).strip()
+
+    for _ in range(max(int(attempts), 1)):
+        print("[prompt] Enter the video start time (used for occurred_at_utc).")
+        date = ask("[prompt] Date (YYYY-MM-DD): ")
+        time_s = ask("[prompt] Time (HH:MM[:SS], default 00:00:00): ") or "00:00:00"
+        if len(time_s.split(":")) == 2:
+            time_s = f"{time_s}:00"
+        print("[prompt] Timezone options:")
+        print("[prompt]   1) WIB  (+07:00, Asia/Jakarta)")
+        print("[prompt]   2) WITA (+08:00, Asia/Makassar)")
+        print("[prompt]   3) WIT  (+09:00, Asia/Jayapura)")
+        print("[prompt]   4) Custom offset (e.g. +07:00 or Z)")
+        tz_sel = ask("[prompt] Choose (1-4, default 1): ") or "1"
+        tz_map = {"1": "WIB", "2": "WITA", "3": "WIT", "4": "CUSTOM"}
+        tz_sel_norm = tz_map.get(tz_sel.strip(), "WIB")
+        if tz_sel_norm == "CUSTOM":
+            tz = ask("[prompt] Offset (+HH:MM or Z): ")
+        else:
+            tz = tz_sel_norm
+
+        tz_upper = (tz or "").strip().upper()
+        if tz_upper in {"WIB", "JAKARTA", "ASIA/JAKARTA"}:
+            tz = "+07:00"
+        elif tz_upper in {"WITA", "MAKASSAR", "ASIA/MAKASSAR"}:
+            tz = "+08:00"
+        elif tz_upper in {"WIT", "JAYAPURA", "ASIA/JAYAPURA"}:
+            tz = "+09:00"
+        elif tz_upper == "Z":
+            tz = "Z"
+        candidate = f"{date}T{time_s}{tz}"
+        try:
+            _ = _parse_rfc3339_to_epoch_utc(candidate)
+            return candidate
+        except ValueError as exc:
+            print(f"[prompt] Invalid value: {exc}")
+            print("[prompt] Example: 2026-02-18T08:00:00+07:00")
+
+    raise SystemExit("Failed to collect a valid --video-start via prompt.")
+
+
+def _missing_path_hint(path: Path) -> str:
+    """
+    Give a helpful hint for common path mistakes (typos, Windows slashes in bash/WSL).
+    """
+
+    raw = str(path)
+    normalized = raw.replace("\\", "/")
+    if normalized != raw and Path(normalized).exists():
+        return f"Resolved by replacing backslashes: {normalized}"
+
+    parent = path.parent
+    grand = parent.parent
+    if not parent.exists() and grand.exists():
+        try:
+            siblings = [p.name for p in grand.iterdir()]
+        except OSError:
+            siblings = []
+        if siblings:
+            matches = difflib.get_close_matches(parent.name, siblings, n=1, cutoff=0.6)
+            if matches:
+                candidate_parent = grand / matches[0]
+                candidate = candidate_parent / path.name
+                if candidate.exists():
+                    return f"Did you mean: {candidate} ?"
+                return f"Did you mean folder: {candidate_parent} ?"
+
+    return ""
 
 
 def _open_source_with_first_frame(
@@ -678,6 +805,58 @@ def main() -> None:
     args = _parse_args()
     cfg = get_default_config()
 
+    def _normalize_cli_path(value: str) -> Path:
+        """
+        Normalize common Windows path forms when running under bash/WSL:
+        - .\\foo\\bar -> ./foo/bar
+        - ..\\foo\\bar -> ../foo/bar
+        - C:\\Users\\x -> /mnt/c/Users/x  (best-effort for WSL)
+        """
+
+        raw = str(value or "").strip().strip('"').strip("'")
+        if raw == "":
+            return Path(raw)
+
+        s = raw.replace("\\", "/")
+        if s.startswith("./") or s.startswith("../") or s.startswith("/"):
+            return Path(s)
+
+        # Handle ".\x" or "..\x" that becomes "./x" or "../x" after replace.
+        if s.startswith(".//"):
+            s = "./" + s[3:]
+        if s.startswith("..//"):
+            s = "../" + s[4:]
+
+        # Drive-letter best-effort: C:/... -> /mnt/c/...
+        if len(s) >= 3 and s[1] == ":" and s[2] == "/":
+            drive = s[0].lower()
+            rest = s[3:].lstrip("/")
+            mnt = Path(f"/mnt/{drive}")
+            if mnt.exists():
+                return mnt / rest
+            # If not WSL, keep as-is.
+            return Path(s)
+
+        return Path(s)
+
+    def _dataclass_diff(a: object, b: object, *, prefix: str = "") -> list[str]:
+        if type(a) is not type(b):
+            return [prefix.rstrip(".") or "<root>"]
+        if is_dataclass(a) and is_dataclass(b):
+            out: list[str] = []
+            for f in fields(a):
+                out.extend(
+                    _dataclass_diff(
+                        getattr(a, f.name),
+                        getattr(b, f.name),
+                        prefix=f"{prefix}{f.name}.",
+                    )
+                )
+            return out
+        if isinstance(a, Path) or isinstance(b, Path):
+            return [] if str(a) == str(b) else [prefix.rstrip(".") or "<root>"]
+        return [] if a == b else [prefix.rstrip(".") or "<root>"]
+
     for flag, value in (
         ("--queue-size", args.queue_size),
         ("--frame-stride", args.frame_stride),
@@ -713,15 +892,28 @@ def main() -> None:
             raise SystemExit(f"{flag} must be >= 1.0")
 
     if args.config:
-        cfg_path = Path(args.config)
+        cfg_before = copy.deepcopy(cfg)
+        cfg_path = _normalize_cli_path(args.config)
         if not cfg_path.is_absolute():
             cfg_path = ROOT_DIR / cfg_path
         if not cfg_path.exists():
-            raise SystemExit(f"Config override JSON not found: {cfg_path}")
+            raise SystemExit(
+                "Config override JSON not found.\n"
+                f"- raw: {args.config}\n"
+                f"- normalized: {cfg_path}\n"
+                "Tip: in bash/WSL, prefer './config/local/exp.json' not '.\\\\config\\\\local\\\\exp.json'."
+            )
         overrides_all = load_config_overrides(cfg_path)
         overrides_app, _overrides_extra = split_overrides(overrides_all)
         # Resolve relative paths in overrides against repo root by default.
         apply_config_overrides(cfg, overrides_app, path_base_dir=ROOT_DIR)
+        changed = _dataclass_diff(cfg_before, cfg)
+        if changed:
+            preview = ", ".join(changed[:12])
+            more = "" if len(changed) <= 12 else f" (+{len(changed) - 12} more)"
+            print(f"[main] Loaded config overrides: {cfg_path} (changed {len(changed)} keys: {preview}{more})")
+        else:
+            print(f"[main] Loaded config overrides: {cfg_path} (no effective changes)")
 
     rtsp_url: Optional[str] = None
     if args.rtsp_url is not None:
@@ -742,13 +934,13 @@ def main() -> None:
 
     # Allow CLI overrides
     if args.input:
-        cfg.io.input_path = Path(args.input)
+        cfg.io.input_path = _normalize_cli_path(args.input)
     if args.output:
-        cfg.io.output_path = Path(args.output)
+        cfg.io.output_path = _normalize_cli_path(args.output)
     if args.backend:
         cfg.model.backend = args.backend
     if args.model:
-        cfg.model.model_path = Path(args.model)
+        cfg.model.model_path = _normalize_cli_path(args.model)
     if args.confidence is not None:
         cfg.model.confidence_threshold = float(args.confidence)
     if args.nms_iou is not None:
@@ -763,7 +955,7 @@ def main() -> None:
         except Exception:
             raise SystemExit(f"Invalid --class-ids value: '{args.class_ids}'. Expected comma-separated integers.")
     if args.class_names:
-        cfg.model.class_names_path = Path(args.class_names)
+        cfg.model.class_names_path = _normalize_cli_path(args.class_names)
     if args.rtsp_reconnect is not None:
         cfg.io.rtsp_reconnect_enabled = bool(args.rtsp_reconnect)
     if args.rtsp_reconnect_max_attempts is not None:
@@ -788,6 +980,10 @@ def main() -> None:
         cfg.io.rtsp_gst_pipeline = str(args.rtsp_gst_pipeline)
     if args.queue_policy is not None:
         cfg.io.live_queue_policy = str(args.queue_policy)
+    if args.video_start is not None:
+        cfg.io.video_start = str(args.video_start)
+    if args.source_fps_override is not None:
+        cfg.io.source_fps_override = float(args.source_fps_override)
     if args.class_vote_mode is not None:
         cfg.tracker.class_vote_mode = str(args.class_vote_mode)
     if args.class_vote_min_frames is not None:
@@ -839,7 +1035,7 @@ def main() -> None:
 
     line_path: Optional[Path] = None
     if args.line_json:
-        line_path = Path(args.line_json)
+        line_path = _normalize_cli_path(args.line_json)
     elif args.camera:
         line_path = _resolve_camera_line_path(args.camera)
     elif cfg.line.line_json_path is not None:
@@ -863,7 +1059,7 @@ def main() -> None:
     output_path = cfg.io.output_path
 
     if args.dump_config:
-        dump_path = Path(args.dump_config)
+        dump_path = _normalize_cli_path(args.dump_config)
         if not dump_path.is_absolute():
             dump_path = ROOT_DIR / dump_path
         write_app_config_json(dump_path, cfg)
@@ -871,7 +1067,11 @@ def main() -> None:
         return
 
     if not is_live and not input_path.exists():
-        raise SystemExit(f"Input video not found: {input_path}")
+        hint = _missing_path_hint(input_path)
+        msg = f"Input video not found: {input_path}"
+        if hint:
+            msg += f"\n{hint}"
+        raise SystemExit(msg)
 
     if args.line_mode == "gate" and args.select_line:
         raise SystemExit("--select-line is only supported for --line-mode single. Use line_picker.py to save 2 lines.")
@@ -900,6 +1100,11 @@ def main() -> None:
 
     if fps <= 0.0:
         fps = float(args.target_fps) if (is_live and args.target_fps) else 30.0
+    if cfg.io.source_fps_override is not None:
+        override = float(cfg.io.source_fps_override)
+        if override <= 0.0:
+            raise SystemExit("io.source_fps_override must be > 0.")
+        fps = override
     writer_fps = fps
     if is_live and args.target_fps:
         # In live mode we may drop frames (via StreamReader's bounded queue) to
@@ -1031,8 +1236,15 @@ def main() -> None:
         cam_id = args.camera_id or cfg.spool.camera_id or (args.camera if args.camera else "camera")
         site_id = str(args.site_id) if args.site_id is not None else str(cfg.spool.site_id)
         write_thumbs = cfg.spool.write_thumbnails if args.spool_thumbnails is None else bool(args.spool_thumbnails)
+        write_scene_thumbs = (
+            cfg.spool.write_scene_thumbnails
+            if args.spool_scene_thumbnails is None
+            else bool(args.spool_scene_thumbnails)
+        )
         thumb_pad = int(cfg.spool.thumb_pad) if args.spool_thumb_pad is None else int(args.spool_thumb_pad)
         thumb_max_side = int(cfg.spool.thumb_max_side) if args.spool_thumb_max_side is None else int(args.spool_thumb_max_side)
+        scene_max_side = int(cfg.spool.scene_thumb_max_side) if args.spool_scene_thumb_max_side is None else int(args.spool_scene_thumb_max_side)
+        scene_quality = int(cfg.spool.scene_thumb_quality) if args.spool_scene_thumb_quality is None else int(args.spool_scene_thumb_quality)
 
         model_version = (
             "motion"
@@ -1041,13 +1253,36 @@ def main() -> None:
         )
         cfg_version = str(args.camera) if args.camera else "default"
         source = {"type": "rtsp", "value": str(rtsp_url)} if is_live else {"type": "video", "value": str(input_path)}
+        spool_lines = None
+        if hasattr(line_counter, "lines"):
+            try:
+                spool_lines = [
+                    ((int(a[0]), int(a[1])), (int(b[0]), int(b[1])))
+                    for (a, b) in list(line_counter.lines)
+                ]
+            except Exception:
+                spool_lines = None
+        if (not spool_lines) and hasattr(line_counter, "p1") and hasattr(line_counter, "p2"):
+            try:
+                spool_lines = [
+                    (
+                        (int(line_counter.p1[0]), int(line_counter.p1[1])),
+                        (int(line_counter.p2[0]), int(line_counter.p2[1])),
+                    )
+                ]
+            except Exception:
+                spool_lines = None
+
         spool_cfg = TrafficSpoolConfig(
             root_dir=Path(spool_dir),
             site_id=str(site_id),
             camera_id=str(cam_id),
             write_thumbnails=bool(write_thumbs),
+            write_scene_thumbnails=bool(write_scene_thumbs),
             thumb_pad=int(thumb_pad),
             thumb_max_side=int(thumb_max_side),
+            scene_thumb_max_side=int(scene_max_side),
+            scene_thumb_quality=int(scene_quality),
         )
         spool = TrafficSpoolWriter(
             spool_cfg,
@@ -1056,6 +1291,7 @@ def main() -> None:
             cfg_version=cfg_version,
             line_mode=("gate" if args.line_mode == "gate" else "line"),
             line_id=("gate_1" if args.line_mode == "gate" else "line_1"),
+            lines=spool_lines,
             fps=float(fps),
             frame_size=(int(width), int(height)),
             class_names=class_names_map,
@@ -1092,6 +1328,24 @@ def main() -> None:
             class_names=class_names_map,
         )
         spool.update_run_metadata({"report_csv_relpath": report_name})
+
+    video_start_epoch_utc: Optional[float] = None
+    if (not is_live) and spool is not None:
+        video_start_val = cfg.io.video_start
+        if not video_start_val:
+            if args.prompt_video_start and sys.stdin.isatty():
+                cfg.io.video_start = _prompt_video_start_rfc3339()
+                video_start_val = cfg.io.video_start
+            else:
+                raise SystemExit(
+                    "Offline video + spool enabled requires --video-start (RFC3339 with timezone). "
+                    "Example: --video-start 2026-02-18T08:00:00+07:00 "
+                    "(or pass --prompt-video-start for interactive entry)."
+                )
+        try:
+            video_start_epoch_utc = _parse_rfc3339_to_epoch_utc(str(video_start_val))
+        except ValueError as exc:
+            raise SystemExit(f"Invalid --video-start: {exc}")
 
     print(
         f"[main] Processing {source_label} -> "
@@ -1203,7 +1457,6 @@ def main() -> None:
         print("[main] tqdm is not installed; run `uv run pip install tqdm` to enable a progress bar.")
 
     frame_index = 0
-    process_index = 0
     warned_size_mismatch = False
     t_read = 0.0
     t_detect = 0.0
@@ -1488,27 +1741,33 @@ def main() -> None:
                 t_detect += time.perf_counter() - t0
 
                 t0 = time.perf_counter()
-                tracks = tracker.update(detections, process_index)
+                tracks = tracker.update(detections, frame_index)
                 t_track += time.perf_counter() - t0
                 latest_tracks = tracks
 
                 if args.line_mode == "gate":
-                    tracks_updated = [t for t in tracks if t.last_seen_frame == process_index]
+                    tracks_updated = [t for t in tracks if t.last_seen_frame == frame_index]
                     t0 = time.perf_counter()
-                    events = line_counter.update(tracks_updated, process_index)
+                    events = line_counter.update(tracks_updated, frame_index)
                     t_count += time.perf_counter() - t0
                 else:
                     t0 = time.perf_counter()
-                    events = line_counter.update(tracks, frame_index=process_index)
+                    events = line_counter.update(tracks, frame_index=frame_index)
                     t_count += time.perf_counter() - t0
 
                 if events:
+                    occurred_at_ts = frame_ts
+                    occurred_at_source = "wallclock"
+                    if (not is_live) and video_start_epoch_utc is not None:
+                        occurred_at_ts = float(video_start_epoch_utc) + (float(frame_index) / float(fps))
+                        occurred_at_source = "video_start"
                     event_records = [] if (spool is not None and report_writer is not None) else None
                     if spool is not None:
                         spool.record_events(
                             events,
                             frame_bgr=frame,
-                            frame_ts=frame_ts,
+                            occurred_at_ts=float(occurred_at_ts),
+                            occurred_at_utc_source=str(occurred_at_source),
                             capture_records=event_records,
                         )
                     if report_writer is not None:
@@ -1521,7 +1780,7 @@ def main() -> None:
                     draw_tracks(
                         frame,
                         tracks,
-                        frame_index=process_index,
+                        frame_index=frame_index,
                         stale_max_age=args.stale_frames,
                         class_names=class_names_map,
                         color=track_default_color,
@@ -1531,7 +1790,6 @@ def main() -> None:
                     )
                     draw_line_and_counts(frame, line_counter, class_names=class_names_map)
                     t_draw += time.perf_counter() - t0
-                process_index += 1
                 t_processed += 1
             elif not args.no_draw:
                 # For skipped frames, keep drawing latest tracks so overlays stay stable.
@@ -1540,7 +1798,7 @@ def main() -> None:
                     draw_tracks(
                         frame,
                         latest_tracks,
-                        frame_index=max(process_index - 1, 0),
+                        frame_index=frame_index,
                         stale_max_age=args.stale_frames,
                         class_names=class_names_map,
                         color=track_default_color,

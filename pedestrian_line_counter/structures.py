@@ -40,6 +40,7 @@ class Track:
     x2: float
     y2: float
     score: float
+    #ad-hoc class at the time of corssing line 
     class_id: Optional[int]
     last_seen_frame: int
     # Stable class estimate (for counting/reporting) derived from per-track history.

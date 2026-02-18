@@ -48,7 +48,9 @@ def _pick_box_color(
     3) `default_color`.
     """
 
-    cid = None if track.class_id is None else int(track.class_id)
+    # Prefer stable class for overlay consistency with counting/reporting.
+    chosen_class_id = track.stable_class_id if track.stable_class_id is not None else track.class_id
+    cid = None if chosen_class_id is None else int(chosen_class_id)
     if cid is not None and class_colors:
         explicit = class_colors.get(cid)
         if explicit is not None:
@@ -113,8 +115,8 @@ def draw_tracks(
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, thickness)
 
-        #  Label yang tertate rapi : "<class>  #<track_id>" (atau hanya "#<track_id>")
-        cid = track.class_id
+        # Label should match counting/reporting semantics: stable class if available.
+        cid = track.stable_class_id if track.stable_class_id is not None else track.class_id
         score = track.score
         disp_id = None
         if cid is not None:

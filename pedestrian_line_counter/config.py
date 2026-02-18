@@ -231,6 +231,13 @@ class IOConfig:
     input_path: Path = ROOT_DIR / "media" / "input.mp4"
     output_path: Path = ROOT_DIR / "output.mp4"
 
+    # Offline video timing (optional).
+    # If set (RFC3339 with timezone), event timestamps will be derived from the video
+    # timeline instead of wall-clock time: occurred_at_utc = video_start + frame_index/fps.
+    video_start: Optional[str] = None
+    # Override decoded source FPS when CAP_PROP_FPS is missing/wrong.
+    source_fps_override: Optional[float] = None
+
 @dataclass
 class SpoolConfig:
     """
@@ -243,8 +250,11 @@ class SpoolConfig:
     site_id: str = "default"
     camera_id: Optional[str] = None
     write_thumbnails: bool = True
+    write_scene_thumbnails: bool = True
     thumb_pad: int = 20
     thumb_max_side: int = 320
+    scene_thumb_max_side: int = 640
+    scene_thumb_quality: int = 85
 
 
 @dataclass

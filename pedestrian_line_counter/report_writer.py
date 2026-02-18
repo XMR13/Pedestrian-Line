@@ -35,7 +35,9 @@ class ReportWriter:
         "frame_index",
         "class_id",
         "confidence",
+        "occurred_at_utc",
         "thumb_relpath",
+        "scene_relpath",
         "line_mode",
     )
 
@@ -81,8 +83,15 @@ class ReportWriter:
         written = 0
         for idx, ev in enumerate(events):
             self._event_no += 1
-            thumb_relpath = self._thumb_relpath_from_records(event_records, idx)
-            row = self._build_row(ev, thumb_relpath=thumb_relpath)
+            thumb_relpath = self._str_from_records(event_records, idx, "thumb_relpath")
+            scene_relpath = self._str_from_records(event_records, idx, "scene_relpath")
+            occurred_at_utc = self._str_from_records(event_records, idx, "occurred_at_utc")
+            row = self._build_row(
+                ev,
+                thumb_relpath=thumb_relpath,
+                scene_relpath=scene_relpath,
+                occurred_at_utc=occurred_at_utc,
+            )
             self._writer.writerow(row)
             written += 1
 
@@ -90,7 +99,14 @@ class ReportWriter:
             self._f.flush()
         return written
 
-    def _build_row(self, ev: CrossingEvent, *, thumb_relpath: str) -> Dict[str, object]:
+    def _build_row(
+        self,
+        ev: CrossingEvent,
+        *,
+        thumb_relpath: str,
+        scene_relpath: str,
+        occurred_at_utc: str,
+    ) -> Dict[str, object]:
         row: Dict[str, object] = {
             "event_no": self._event_no,
             "timestamp_s": self._video_time_s(ev.frame_index),
@@ -101,24 +117,27 @@ class ReportWriter:
             "frame_index": int(ev.frame_index),
             "class_id": int(ev.class_id) if ev.class_id is not None else "",
             "confidence": float(ev.confidence) if ev.confidence is not None else "",
+            "occurred_at_utc": occurred_at_utc,
             "thumb_relpath": thumb_relpath,
+            "scene_relpath": scene_relpath,
             "line_mode": ev.line_mode,
         }
         #set the field names first and then we can build the rows with it
         columns_final = {k: row[k] for k in self._fieldnames}
         return columns_final
 
-    def _thumb_relpath_from_records(
+    def _str_from_records(
         self,
         event_records: Optional[Sequence[Mapping[str, object]]],
         idx: int,
+        key: str,
     ) -> str:
         if event_records is None or idx >= len(event_records):
             return ""
-        thumb_val = event_records[idx].get("thumb_relpath")
-        if thumb_val is None:
+        val = event_records[idx].get(key)
+        if val is None:
             return ""
-        return str(thumb_val)
+        return str(val)
 
     def _video_time_s(self, frame_index: int) -> str:
         fps = float(self.cfg.fps)

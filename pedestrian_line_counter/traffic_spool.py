@@ -51,8 +51,11 @@ class TrafficSpoolConfig:
     site_id: str
     camera_id: str
     write_thumbnails: bool = True
+    write_scene_thumbnails: bool = True
     thumb_pad: int = 20
     thumb_max_side: int = 320
+    scene_thumb_max_side: int = 640
+    scene_thumb_quality: int = 85
 
 
 class TrafficSpoolWriter:
@@ -74,6 +77,7 @@ class TrafficSpoolWriter:
         cfg_version: str,
         line_mode: str,
         line_id: str,
+        lines: Optional[List[Tuple[Tuple[int, int], Tuple[int, int]]]] = None,
         fps: float,
         frame_size: Tuple[int, int],
         class_names: Optional[Dict[int, str]] = None,
@@ -84,11 +88,14 @@ class TrafficSpoolWriter:
         self.started_at_utc = _iso_utc(time.time())
         self._class_names = class_names or {}
         self._fps = float(fps) if fps else 0.0
+        self._lines = lines or []
 
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self.run_dir = cfg.root_dir / day / self.run_uid
         self.thumbs_dir = self.run_dir / "thumbs"
+        self.scene_dir = self.run_dir / "scene"
         _safe_mkdir(self.thumbs_dir)
+        _safe_mkdir(self.scene_dir)
 
         self._events_path = self.run_dir / "events.jsonl"
         self._events_f = self._events_path.open("a", encoding="utf-8")
@@ -103,6 +110,10 @@ class TrafficSpoolWriter:
             "cfg_version": cfg_version,
             "line_mode": line_mode,
             "line_id": line_id,
+            "lines": [
+                {"p1": [int(p1[0]), int(p1[1])], "p2": [int(p2[0]), int(p2[1])]}
+                for (p1, p2) in self._lines
+            ],
             "fps": self._fps,
             "frame_size": {"width": int(frame_size[0]), "height": int(frame_size[1])},
         }
@@ -128,7 +139,8 @@ class TrafficSpoolWriter:
         events: Iterable[CrossingEvent],
         *,
         frame_bgr: np.ndarray,
-        frame_ts: float,
+        occurred_at_ts: float,
+        occurred_at_utc_source: str,
         capture_records: Optional[List[Dict[str, Any]]] = None,
     ) -> int:
         """
@@ -158,12 +170,23 @@ class TrafficSpoolWriter:
                     cv2.imwrite(str(thumb_path), crop, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
                     thumb_rel = f"thumbs/{thumb_path.name}"
 
+            scene_rel = None
+            if self.cfg.write_scene_thumbnails:
+                scene_img = self._build_scene_thumbnail(frame_bgr, ev)
+                if scene_img is not None:
+                    scene_path = self.scene_dir / f"{event_uid}.jpg"
+                    q = int(self.cfg.scene_thumb_quality)
+                    q = max(10, min(100, q))
+                    cv2.imwrite(str(scene_path), scene_img, [int(cv2.IMWRITE_JPEG_QUALITY), q])
+                    scene_rel = f"scene/{scene_path.name}"
+
             rec = {
                 "event_uid": event_uid,
                 "run_uid": self.run_uid,
                 "site_id": self.cfg.site_id,
                 "camera_id": self.cfg.camera_id,
-                "occurred_at_utc": _iso_utc(frame_ts),
+                "occurred_at_utc": _iso_utc(float(occurred_at_ts)),
+                "occurred_at_utc_source": str(occurred_at_utc_source),
                 "frame_index": int(ev.frame_index),
                 "video_time_s": (float(ev.frame_index) / self._fps) if self._fps > 0 else None,
                 "line_mode": ev.line_mode,
@@ -174,6 +197,7 @@ class TrafficSpoolWriter:
                 "confidence": float(ev.confidence) if ev.confidence is not None else None,
                 "bbox": list(ev.bbox_xyxy) if ev.bbox_xyxy is not None else None,
                 "thumb_relpath": thumb_rel,
+                "scene_relpath": scene_rel,
             }
             self._events_f.write(json.dumps(rec, ensure_ascii=True) + "\n")
             if capture_records is not None:
@@ -186,3 +210,65 @@ class TrafficSpoolWriter:
 
     def _write_run_meta(self) -> None:
         self._run_meta_path.write_text(json.dumps(self._run_meta, indent=2), encoding="utf-8")
+
+    def _build_scene_thumbnail(self, frame_bgr: np.ndarray, ev: CrossingEvent) -> Optional[np.ndarray]:
+        """
+        Create a small full-frame evidence thumbnail that shows:
+        - counting line(s)
+        - event bbox
+        - direction + class label
+        """
+
+        if frame_bgr is None:
+            return None
+
+        max_side = int(self.cfg.scene_thumb_max_side)
+        if max_side <= 0:
+            return None
+
+        h0, w0 = frame_bgr.shape[:2]
+        m = max(h0, w0)
+        if m <= 0:
+            return None
+
+        scale = 1.0
+        out = frame_bgr
+        if m > max_side:
+            scale = float(max_side) / float(m)
+            nh = max(1, int(round(h0 * scale)))
+            nw = max(1, int(round(w0 * scale)))
+            out = cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+
+        def sc_pt(pt: Tuple[int, int]) -> Tuple[int, int]:
+            return (int(round(pt[0] * scale)), int(round(pt[1] * scale)))
+
+        def sc_box(box: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+            x1, y1, x2, y2 = box
+            return (
+                int(round(x1 * scale)),
+                int(round(y1 * scale)),
+                int(round(x2 * scale)),
+                int(round(y2 * scale)),
+            )
+
+        # Draw lines
+        for idx, (p1, p2) in enumerate(self._lines):
+            c = (0, 255, 255) if idx == 0 else (255, 255, 0)
+            cv2.line(out, sc_pt(p1), sc_pt(p2), c, 2)
+
+        # Draw bbox
+        if ev.bbox_xyxy is not None:
+            x1, y1, x2, y2 = sc_box(ev.bbox_xyxy)
+            cv2.rectangle(out, (x1, y1), (x2, y2), (0, 220, 255), 2)
+
+        # Label block
+        cls = "unknown"
+        if ev.class_id is not None:
+            cls = self._class_names.get(int(ev.class_id)) or f"class_{int(ev.class_id)}"
+        label = f"{cls} | {ev.direction} | t={int(ev.track_id)}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+        x, y = 10, 18
+        cv2.rectangle(out, (x - 6, y - th - 6), (x + tw + 6, y + 6), (0, 0, 0), -1)
+        cv2.putText(out, label, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
+
+        return out
