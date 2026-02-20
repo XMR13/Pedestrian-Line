@@ -35,7 +35,7 @@ class ReportWriter:
         "frame_index",
         "class_id",
         "confidence",
-        "occurred_at_utc",
+        "waktu lewat (WIB)",
         "thumb_relpath",
         "scene_relpath",
         "line_mode",
@@ -85,12 +85,12 @@ class ReportWriter:
             self._event_no += 1
             thumb_relpath = self._str_from_records(event_records, idx, "thumb_relpath")
             scene_relpath = self._str_from_records(event_records, idx, "scene_relpath")
-            occurred_at_utc = self._str_from_records(event_records, idx, "occurred_at_utc")
+            waktu_wib = self._str_from_records(event_records, idx, "occurred_at_local")
             row = self._build_row(
                 ev,
                 thumb_relpath=thumb_relpath,
                 scene_relpath=scene_relpath,
-                occurred_at_utc=occurred_at_utc,
+                waktu_wib=waktu_wib,
             )
             self._writer.writerow(row)
             written += 1
@@ -105,7 +105,7 @@ class ReportWriter:
         *,
         thumb_relpath: str,
         scene_relpath: str,
-        occurred_at_utc: str,
+        waktu_wib: str,
     ) -> Dict[str, object]:
         row: Dict[str, object] = {
             "event_no": self._event_no,
@@ -117,7 +117,7 @@ class ReportWriter:
             "frame_index": int(ev.frame_index),
             "class_id": int(ev.class_id) if ev.class_id is not None else "",
             "confidence": float(ev.confidence) if ev.confidence is not None else "",
-            "occurred_at_utc": occurred_at_utc,
+            "waktu lewat (WIB)": waktu_wib,
             "thumb_relpath": thumb_relpath,
             "scene_relpath": scene_relpath,
             "line_mode": ev.line_mode,

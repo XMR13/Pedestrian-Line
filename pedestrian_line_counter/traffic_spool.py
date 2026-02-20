@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 import json
 from pathlib import Path
 import time
@@ -16,6 +16,10 @@ from .structures import CrossingEvent
 
 def _iso_utc(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _iso_local(ts: float, tz: tzinfo) -> str:
+    return datetime.fromtimestamp(ts, tz=tz).isoformat()
 
 
 def _safe_mkdir(p: Path) -> None:
@@ -141,6 +145,7 @@ class TrafficSpoolWriter:
         frame_bgr: np.ndarray,
         occurred_at_ts: float,
         occurred_at_utc_source: str,
+        occurred_at_local_tz: Optional[tzinfo] = None,
         capture_records: Optional[List[Dict[str, Any]]] = None,
     ) -> int:
         """
@@ -186,6 +191,11 @@ class TrafficSpoolWriter:
                 "site_id": self.cfg.site_id,
                 "camera_id": self.cfg.camera_id,
                 "occurred_at_utc": _iso_utc(float(occurred_at_ts)),
+                "occurred_at_local": (
+                    _iso_local(float(occurred_at_ts), occurred_at_local_tz)
+                    if occurred_at_local_tz is not None
+                    else None
+                ),
                 "occurred_at_utc_source": str(occurred_at_utc_source),
                 "frame_index": int(ev.frame_index),
                 "video_time_s": (float(ev.frame_index) / self._fps) if self._fps > 0 else None,

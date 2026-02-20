@@ -1,5 +1,6 @@
 import csv
 import json
+from datetime import timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -42,8 +43,12 @@ def test_report_writer_writes_expected_columns_and_values(tmp_path) -> None:
         ),
     ]
     records = [
-        {"thumb_relpath": "thumbs/a.jpg", "scene_relpath": "scene/a.jpg", "occurred_at_utc": "2026-02-18T01:00:00Z"},
-        {"thumb_relpath": None, "scene_relpath": None, "occurred_at_utc": None},
+        {
+            "thumb_relpath": "thumbs/a.jpg",
+            "scene_relpath": "scene/a.jpg",
+            "occurred_at_local": "2026-02-18T08:00:00+07:00",
+        },
+        {"thumb_relpath": None, "scene_relpath": None, "occurred_at_local": None},
     ]
 
     written = writer.record_events(events, event_records=records)
@@ -64,8 +69,9 @@ def test_report_writer_writes_expected_columns_and_values(tmp_path) -> None:
     assert rows[1]["thumb_relpath"] == ""
     assert rows[0]["scene_relpath"] == "scene/a.jpg"
     assert rows[1]["scene_relpath"] == ""
-    assert rows[0]["occurred_at_utc"] == "2026-02-18T01:00:00Z"
-    assert rows[1]["occurred_at_utc"] == ""
+    assert rows[0]["waktu lewat (WIB)"] == "2026-02-18T08:00:00+07:00"
+    assert rows[1]["waktu lewat (WIB)"] == ""
+    assert "occurred_at_utc" not in rows[0]
 
 
 def test_report_csv_and_spool_events_stay_in_sync(tmp_path) -> None:
@@ -125,6 +131,7 @@ def test_report_csv_and_spool_events_stay_in_sync(tmp_path) -> None:
         frame_bgr=frame,
         occurred_at_ts=1738791000.0,
         occurred_at_utc_source="video_start",
+        occurred_at_local_tz=timezone(timedelta(hours=7)),
         capture_records=captured,
     )
     report_count = report.record_events(events, event_records=captured)
@@ -145,6 +152,8 @@ def test_report_csv_and_spool_events_stay_in_sync(tmp_path) -> None:
     assert csv_rows[0]["frame_index"] == str(jsonl_lines[0]["frame_index"])
     assert csv_rows[0]["direction"] == str(jsonl_lines[0]["direction"])
     assert csv_rows[1]["track_id"] == str(jsonl_lines[1]["track_id"])
+    assert csv_rows[0]["waktu lewat (WIB)"] == str(jsonl_lines[0]["occurred_at_local"])
+    assert jsonl_lines[0]["occurred_at_local"].endswith("+07:00")
 
     thumb_rel = csv_rows[0]["thumb_relpath"]
     assert thumb_rel.startswith("thumbs/")

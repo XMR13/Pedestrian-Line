@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 from dataclasses import fields, is_dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 import difflib
 import math
 import os
@@ -1330,6 +1330,7 @@ def main() -> None:
         spool.update_run_metadata({"report_csv_relpath": report_name})
 
     video_start_epoch_utc: Optional[float] = None
+    video_start_local_tz: Optional[tzinfo] = None
     if (not is_live) and spool is not None:
         video_start_val = cfg.io.video_start
         if not video_start_val:
@@ -1344,6 +1345,18 @@ def main() -> None:
                 )
         try:
             video_start_epoch_utc = _parse_rfc3339_to_epoch_utc(str(video_start_val))
+            video_start_raw = str(video_start_val).strip()
+            if video_start_raw.endswith("Z"):
+                video_start_raw = video_start_raw[:-1] + "+00:00"
+            video_start_dt = datetime.fromisoformat(video_start_raw)
+            video_start_local_tz = video_start_dt.tzinfo
+            # Persist the parsed value so run.json explains where occurred_at_utc came from.
+            spool.update_run_metadata(
+                {
+                    "video_start": str(video_start_val),
+                    "video_start_epoch_utc": float(video_start_epoch_utc),
+                }
+            )
         except ValueError as exc:
             raise SystemExit(f"Invalid --video-start: {exc}")
 
@@ -1768,6 +1781,7 @@ def main() -> None:
                             frame_bgr=frame,
                             occurred_at_ts=float(occurred_at_ts),
                             occurred_at_utc_source=str(occurred_at_source),
+                            occurred_at_local_tz=video_start_local_tz,
                             capture_records=event_records,
                         )
                     if report_writer is not None:
