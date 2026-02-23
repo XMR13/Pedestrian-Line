@@ -1,0 +1,42 @@
+@model LoginRequest
+@{
+    ViewData["Title"] = "Login";
+}
+
+<section class="login-card reveal">
+    <div class="login-brand">
+        <img src="~/assets/indah-kiat-logo.png" alt="Indah Kiat" class="brand-logo large" />
+        <p class="login-kicker">Portal Access Gate</p>
+        <h1>Review Ops Console</h1>
+        <p class="muted">Sign in to open dashboard metrics, review queue, and labeled export.</p>
+    </div>
+
+    <form asp-controller="Account" asp-action="Login" method="post" class="login-form">
+        @Html.AntiForgeryToken()
+        <input asp-for="ReturnUrl" type="hidden" />
+
+        <label asp-for="Username"></label>
+        <input asp-for="Username" autocomplete="username" />
+        <span asp-validation-for="Username" class="text-danger"></span>
+
+        <label asp-for="Password"></label>
+        <input asp-for="Password" type="password" autocomplete="current-password" />
+        <span asp-validation-for="Password" class="text-danger"></span>
+
+        @if (!ViewData.ModelState.IsValid)
+        {
+            <div class="validation-summary">
+                @foreach (var err in ViewData.ModelState.Values.SelectMany(v => v.Errors))
+                {
+                    <p>@err.ErrorMessage</p>
+                }
+            </div>
+        }
+
+        <button type="submit" class="btn btn-primary block">Sign in</button>
+    </form>
+</section>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

@@ -1,0 +1,95 @@
+@model ReviewQueueViewModel
+@{
+    ViewData["Title"] = "Review Queue";
+}
+
+<section class="panel reveal">
+    <div class="panel-header">
+        <h1>Review Queue</h1>
+        <p>Fast workflow: <kbd>Y</kbd> Qualified, <kbd>N</kbd> Not Qualified, <kbd>S</kbd> Save notes.</p>
+    </div>
+
+    <div class="kpi-grid compact">
+        <article class="kpi-card"><span>Pending</span><strong>@Model.PendingCount</strong></article>
+        <article class="kpi-card yes"><span>Qualified</span><strong>@Model.QualifiedCount</strong></article>
+        <article class="kpi-card no"><span>Not Qualified</span><strong>@Model.NotQualifiedCount</strong></article>
+    </div>
+</section>
+
+@if (Model.Current is null)
+{
+    <section class="panel reveal">
+        <h2>Queue Empty</h2>
+        <p>No pending events right now.</p>
+    </section>
+}
+else
+{
+    <section class="split-grid">
+        <article class="panel reveal">
+            <div class="panel-header">
+                <h2>Current Event</h2>
+                <span class="pill pending">@Model.Current.ReviewStatus</span>
+            </div>
+
+            <div class="event-core">
+                @if (!string.IsNullOrWhiteSpace(Model.Current.ThumbnailUrl))
+                {
+                    <img src="@Model.Current.ThumbnailUrl" alt="event thumbnail" class="thumb-large" />
+                }
+                else
+                {
+                    <div class="thumb-placeholder">No thumbnail uploaded</div>
+                }
+
+                <dl>
+                    <dt>Event UID</dt><dd>@Model.Current.EventUid</dd>
+                    <dt>Time (UTC)</dt><dd>@Model.Current.OccurredAtUtc?.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+                    <dt>Site/Camera</dt><dd>@Model.Current.SiteId / @Model.Current.CameraId</dd>
+                    <dt>Class</dt><dd>@Model.Current.ClassName</dd>
+                    <dt>Direction</dt><dd>@Model.Current.Direction</dd>
+                </dl>
+            </div>
+
+            <div class="criteria-box">
+                <h3>@Model.Current.CriteriaTitle</h3>
+                <p>@Model.Current.CriteriaDescription</p>
+            </div>
+
+            <form method="post" action="/api/events/@Model.Current.EventUid/review" class="review-form" id="review-form">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="returnUrl" value="@Context.Request.Path@Context.Request.QueryString" />
+                <input type="hidden" name="reviewStatus" id="review-status" value="PENDING" />
+
+                <label for="review-notes">Notes</label>
+                <textarea id="review-notes" name="notes" rows="4" placeholder="Write why this event is qualified or not..."></textarea>
+
+                <div class="review-actions">
+                    <button type="submit" class="btn yes" data-shortcut="y" data-review-status="QUALIFIED">Qualified Yes (Y)</button>
+                    <button type="submit" class="btn no" data-shortcut="n" data-review-status="NOT_QUALIFIED">Qualified No (N)</button>
+                    <button type="submit" class="btn btn-neutral" data-shortcut="s" data-review-status="PENDING">Save Notes (S)</button>
+                    <a asp-action="Detail" asp-route-eventUid="@Model.Current.EventUid" class="btn btn-neutral">Open Detail</a>
+                </div>
+            </form>
+        </article>
+
+        <aside class="panel reveal">
+            <div class="panel-header">
+                <h2>Upcoming</h2>
+                <span>@Model.Upcoming.Count queued</span>
+            </div>
+            <ul class="queue-list">
+            @foreach (var item in Model.Upcoming)
+            {
+                <li>
+                    <a asp-action="Detail" asp-route-eventUid="@item.EventUid">
+                        <strong>@item.ClassName</strong>
+                        <span>@item.SiteId / @item.CameraId</span>
+                        <small>@item.OccurredAtUtc?.ToString("yyyy-MM-dd HH:mm:ss")</small>
+                    </a>
+                </li>
+            }
+            </ul>
+        </aside>
+    </section>
+}

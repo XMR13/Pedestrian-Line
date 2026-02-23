@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portal Mockup – Review Queue</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="page-review-queue">
+    <div class="grain"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img
+              class="brand-logo"
+              src="./assets/indah-kiat-logo.png"
+              alt="PT Indah Kiat logo"
+              width="406"
+              height="124"
+              loading="eager"
+              decoding="async"
+              fetchpriority="high"
+              onerror="this.closest('.brand-visual').classList.add('logo-missing');"
+            />
+            <div class="brand-fallback" aria-hidden="true">
+              <div class="mark"></div>
+              <span>logo unavailable</span>
+            </div>
+          </div>
+          <div>
+            <h1>Traffic Portal</h1>
+            <p class="sub">Review queue</p>
+            <p class="brand-path">logo file: portal/mockups/assets/indah-kiat-logo.png</p>
+          </div>
+        </div>
+        <div class="nav">
+          <a href="./dashboard.html">Dashboard</a>
+          <a class="active" href="./review_queue.html">Review <span class="pill">Queue</span></a>
+          <a href="./event_detail.html">Event Detail</a>
+          <a href="./index.html">Back <span class="pill">index</span></a>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <div class="panel">
+            <h3>Shortcut map</h3>
+            <div class="meta">
+              <div class="row"><div class="key">Prev / Next</div><div class="val"><kbd class="kbd">J</kbd> / <kbd class="kbd">K</kbd></div></div>
+              <div class="row"><div class="key">Label</div><div class="val"><kbd class="kbd">Y</kbd> / <kbd class="kbd">N</kbd></div></div>
+              <div class="row"><div class="key">Open detail</div><div class="val"><kbd class="kbd">Enter</kbd></div></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="topbar">
+          <div class="title">
+            <h2>Review Queue</h2>
+            <p>Fast Yes/No labeling + notes per crossing event.</p>
+          </div>
+          <div class="filters">
+            <div class="field">
+              <label>Camera</label>
+              <select>
+                <option>cam_01</option>
+                <option>cam_02</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Date</label>
+              <select>
+                <option>Today</option>
+                <option>Yesterday</option>
+                <option>Custom…</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Status</label>
+              <select>
+                <option>Pending</option>
+                <option>All</option>
+                <option>Qualified YES</option>
+                <option>Qualified NO</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <section class="mode-banner queue">
+          <div class="mode-copy">
+            <div class="mode-eyebrow">QUEUE MODE</div>
+            <div class="mode-title">Rapid event triage</div>
+            <div class="mode-desc">Optimized for speed: review, label, and move to the next event.</div>
+          </div>
+          <div class="mode-tags">
+            <span class="pill">item 21 / 73</span>
+            <span class="pill ink">hotkeys J/K + Y/N</span>
+            <span class="pill">pending focus</span>
+          </div>
+        </section>
+
+        <section class="queue-status-grid" aria-live="polite">
+          <article class="queue-status-card">
+            <div class="label">Current position</div>
+            <div class="value">21 / 73</div>
+          </article>
+          <article class="queue-status-card">
+            <div class="label">Pending</div>
+            <div class="value">73</div>
+          </article>
+          <article class="queue-status-card yes">
+            <div class="label">Qualified YES</div>
+            <div class="value">214</div>
+          </article>
+          <article class="queue-status-card no">
+            <div class="label">Qualified NO</div>
+            <div class="value">401</div>
+          </article>
+        </section>
+
+        <div class="two-col queue-layout">
+          <div class="big-thumb queue-thumb" aria-label="Event thumbnail">
+            <div class="bbox" title="bbox"></div>
+            <div class="line" title="counting line"></div>
+            <div style="position:absolute; left:14px; top:14px; display:flex; gap:10px;">
+              <span class="pill ink">A_TO_B</span>
+              <span class="pill">tronton</span>
+              <span class="pill">conf 0.84</span>
+            </div>
+            <div style="position:absolute; right:14px; top:14px;">
+              <span class="pill">event_uid</span>
+            </div>
+          </div>
+
+          <div class="panel queue-panel">
+            <h3>Current event</h3>
+            <div class="meta">
+              <div class="row"><div class="key">Occurred</div><div class="val">2026-02-16T16:22:13Z</div></div>
+              <div class="row"><div class="key">Video time</div><div class="val">00:12:48.233</div></div>
+              <div class="row"><div class="key">Direction</div><div class="val">A_TO_B</div></div>
+              <div class="row"><div class="key">Track</div><div class="val">track_id 17</div></div>
+              <div class="row"><div class="key">Class</div><div class="val">tronton</div></div>
+            </div>
+
+            <div class="queue-next-strip" role="status" aria-live="polite">
+              <div class="queue-next-copy">
+                <div class="head">Next target in queue</div>
+                <div class="body">event_uid 9ca7...81bf • truck • B_TO_A</div>
+              </div>
+              <span class="pill">after this: 52 pending</span>
+            </div>
+
+            <div style="margin-top: 12px;">
+              <label style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Notes</label>
+              <textarea placeholder="Optional notes (e.g., cargo looks like paper, covered with tarp)."></textarea>
+            </div>
+
+            <div class="panel">
+              <h3 style="margin-bottom: 8px;">Upcoming events</h3>
+              <div class="queue-mini-list">
+                <a class="queue-mini-item active" href="./event_detail.html">
+                  <div class="queue-mini-main">
+                    <strong>9ca7...81bf • truck • B_TO_A</strong>
+                    <span>16:22:18Z • conf 0.88</span>
+                  </div>
+                  <span class="pill">next</span>
+                </a>
+                <a class="queue-mini-item" href="./event_detail.html">
+                  <div class="queue-mini-main">
+                    <strong>e311...0f21 • tronton • A_TO_B</strong>
+                    <span>16:22:21Z • conf 0.79</span>
+                  </div>
+                  <span class="pill">2</span>
+                </a>
+              </div>
+            </div>
+
+            <div class="queue-actions">
+              <div class="btn-row equal">
+                <button class="btn yes" type="button">Qualified YES</button>
+                <button class="btn no" type="button">Qualified NO</button>
+              </div>
+              <div class="queue-help">
+                <span class="hint"><kbd class="kbd">Y</kbd> mark yes</span>
+                <span class="hint"><kbd class="kbd">N</kbd> mark no</span>
+                <span class="hint"><kbd class="kbd">J</kbd>/<kbd class="kbd">K</kbd> navigate</span>
+                <a class="hint" href="./event_detail.html" style="text-decoration:none;"><kbd class="kbd">Enter</kbd> detail</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

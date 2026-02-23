@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - Pedestrian Line Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+@{
+    var isAuthenticated = User?.Identity?.IsAuthenticated ?? false;
+    var currentController = ViewContext.RouteData.Values["controller"]?.ToString() ?? string.Empty;
+    var currentAction = ViewContext.RouteData.Values["action"]?.ToString() ?? string.Empty;
+    var isLoginPage = string.Equals(currentController, "Account", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(currentAction, "Login", StringComparison.OrdinalIgnoreCase);
+}
+
+@if (!isLoginPage)
+{
+    <header class="portal-shell">
+        <div class="brand-block">
+            <img src="~/assets/indah-kiat-logo.png" alt="Indah Kiat" class="brand-logo" />
+            <div>
+                <p class="brand-title">Pedestrian Line Portal</p>
+                <p class="brand-subtitle">Qualified review and crossing evidence</p>
+            </div>
+        </div>
+        <nav class="portal-nav">
+            <a asp-controller="Home" asp-action="Index">Dashboard</a>
+            <a asp-controller="Events" asp-action="Index">Event Browser</a>
+            <a asp-controller="Events" asp-action="ReviewQueue">Review Queue</a>
+            <a asp-controller="Events" asp-action="ExportCsv">Export CSV</a>
+        </nav>
+        @if (isAuthenticated)
+        {
+            <form asp-controller="Account" asp-action="Logout" method="post" class="logout-form">
+                @Html.AntiForgeryToken()
+                <span class="reviewer-chip">@User?.Identity?.Name</span>
+                <button type="submit" class="btn btn-neutral">Logout</button>
+            </form>
+        }
+    </header>
+}
+
+<main class="main-container @(isLoginPage ? "login-shell" : string.Empty)">
+    @RenderBody()
+</main>
+
+<script src="~/js/site.js" asp-append-version="true"></script>
+@await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

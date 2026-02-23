@@ -1,0 +1,74 @@
+@model EventDetailViewModel
+@{
+    ViewData["Title"] = "Event Detail";
+}
+
+<section class="panel reveal">
+    <div class="panel-header">
+        <h1>Event Detail</h1>
+        <a class="btn btn-neutral" asp-action="ReviewQueue">Back to Queue</a>
+    </div>
+
+    <div class="split-grid">
+        <article class="panel nested">
+            <div class="event-core">
+                @if (!string.IsNullOrWhiteSpace(Model.ThumbnailUrl))
+                {
+                    <img src="@Model.ThumbnailUrl" alt="event thumbnail" class="thumb-large" />
+                }
+                else
+                {
+                    <div class="thumb-placeholder">No thumbnail uploaded</div>
+                }
+                <dl>
+                    <dt>Event UID</dt><dd>@Model.EventUid</dd>
+                    <dt>Run UID</dt><dd>@Model.RunUid</dd>
+                    <dt>Time (UTC)</dt><dd>@Model.OccurredAtUtc?.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+                    <dt>Site/Camera</dt><dd>@Model.SiteId / @Model.CameraId</dd>
+                    <dt>Class</dt><dd>@Model.ClassName</dd>
+                    <dt>Direction</dt><dd>@Model.Direction</dd>
+                    <dt>Track ID</dt><dd>@Model.TrackId</dd>
+                    <dt>Confidence</dt><dd>@Model.Confidence?.ToString("0.000")</dd>
+                </dl>
+            </div>
+        </article>
+
+        <article class="panel nested">
+            <div class="criteria-box">
+                <h3>@Model.CriteriaTitle</h3>
+                <p>@Model.CriteriaDescription</p>
+                <p>Current state: <span class="pill @StatusClass(Model.ReviewStatus)">@Model.ReviewStatus</span></p>
+            </div>
+
+            <form method="post" action="/api/events/@Model.EventUid/review" class="review-form">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="returnUrl" value="@Context.Request.Path@Context.Request.QueryString" />
+                <label for="review-status">Review Status</label>
+                <select id="review-status" name="reviewStatus">
+                    <option value="PENDING" selected="@(Model.ReviewStatus == "PENDING")">PENDING</option>
+                    <option value="QUALIFIED" selected="@(Model.ReviewStatus == "QUALIFIED")">QUALIFIED</option>
+                    <option value="NOT_QUALIFIED" selected="@(Model.ReviewStatus == "NOT_QUALIFIED")">NOT_QUALIFIED</option>
+                </select>
+
+                <label for="review-notes">Notes</label>
+                <textarea id="review-notes" name="notes" rows="5">@Model.Notes</textarea>
+
+                <div class="review-actions">
+                    <button type="submit" class="btn btn-primary">Save Review</button>
+                </div>
+            </form>
+        </article>
+    </div>
+</section>
+
+@functions {
+    private static string StatusClass(string? status)
+    {
+        return (status ?? string.Empty).ToUpperInvariant() switch
+        {
+            ReviewStatuses.Qualified => "yes",
+            ReviewStatuses.NotQualified => "no",
+            _ => "pending",
+        };
+    }
+}

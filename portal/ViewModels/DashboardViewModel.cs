@@ -1,0 +1,17 @@
+namespace Portal.Web.ViewModels;
+
+public sealed class DashboardViewModel
+{
+    public string? SiteId { get; set; }
+    public string? CameraId { get; set; }
+    public DateTime? Date { get; set; }
+
+    public int TotalAToB { get; set; }
+    public int TotalBToA { get; set; }
+    public int TotalPending { get; set; }
+    public int TotalReviewed { get; set; }
+    public int TotalQualified { get; set; }
+    public int TotalNotQualified { get; set; }
+
+    public List<EventListItemViewModel> RecentEvents { get; set; } = new();
+}

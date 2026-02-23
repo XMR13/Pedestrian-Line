@@ -1,0 +1,108 @@
+@model DashboardViewModel
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<section class="panel reveal">
+    <div class="panel-header">
+        <h1>Dashboard</h1>
+        <p>Totals by direction and queue state for current filter window.</p>
+    </div>
+
+    <form method="get" class="filter-grid">
+        <label>
+            Site
+            <input type="text" name="siteId" value="@Model.SiteId" placeholder="subang" />
+        </label>
+        <label>
+            Camera
+            <input type="text" name="cameraId" value="@Model.CameraId" placeholder="cam_01" />
+        </label>
+        <label>
+            Date
+            <input type="date" name="date" value="@(Model.Date?.ToString("yyyy-MM-dd"))" />
+        </label>
+        <button type="submit" class="btn btn-primary">Apply Filter</button>
+    </form>
+
+    <div class="kpi-grid">
+        <article class="kpi-card">
+            <span>A → B</span>
+            <strong>@Model.TotalAToB</strong>
+        </article>
+        <article class="kpi-card">
+            <span>B → A</span>
+            <strong>@Model.TotalBToA</strong>
+        </article>
+        <article class="kpi-card">
+            <span>Pending</span>
+            <strong>@Model.TotalPending</strong>
+        </article>
+        <article class="kpi-card yes">
+            <span>Qualified</span>
+            <strong>@Model.TotalQualified</strong>
+        </article>
+        <article class="kpi-card no">
+            <span>Not Qualified</span>
+            <strong>@Model.TotalNotQualified</strong>
+        </article>
+        <article class="kpi-card">
+            <span>Reviewed</span>
+            <strong>@Model.TotalReviewed</strong>
+        </article>
+    </div>
+</section>
+
+<section class="panel reveal">
+    <div class="panel-header">
+        <h2>Recent Events</h2>
+        <a class="btn btn-neutral" asp-controller="Events" asp-action="Index">Open Browser</a>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">Time (UTC)</th>
+                    <th scope="col">Site/Camera</th>
+                    <th scope="col">Class</th>
+                    <th scope="col">Direction</th>
+                    <th scope="col">Review</th>
+                    <th scope="col">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.RecentEvents.Count == 0)
+            {
+                <tr><td colspan="6">No events found for this filter.</td></tr>
+            }
+            else
+            {
+                foreach (var item in Model.RecentEvents)
+                {
+                    <tr>
+                        <td>@item.OccurredAtUtc?.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@item.SiteId / @item.CameraId</td>
+                        <td>@item.ClassName</td>
+                        <td>@item.Direction</td>
+                        <td><span class="pill @StatusClass(item.ReviewStatus)">@item.ReviewStatus</span></td>
+                        <td><a asp-controller="Events" asp-action="Detail" asp-route-eventUid="@item.EventUid">Review</a></td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@functions {
+    private static string StatusClass(string? status)
+    {
+        return (status ?? string.Empty).ToUpperInvariant() switch
+        {
+            ReviewStatuses.Qualified => "yes",
+            ReviewStatuses.NotQualified => "no",
+            _ => "pending",
+        };
+    }
+}

@@ -1,0 +1,132 @@
+@model EventListPageViewModel
+@{
+    ViewData["Title"] = "Event Browser";
+}
+
+<section class="panel reveal">
+    <div class="panel-header">
+        <h1>Event Browser</h1>
+        <a class="btn btn-neutral" asp-action="ExportCsv"
+           asp-route-siteId="@Model.SiteId"
+           asp-route-cameraId="@Model.CameraId"
+           asp-route-date="@(Model.Date?.ToString("yyyy-MM-dd"))"
+           asp-route-direction="@Model.Direction"
+           asp-route-className="@Model.ClassName"
+           asp-route-reviewStatus="@Model.ReviewStatus">Export Reviewed CSV</a>
+    </div>
+
+    <form method="get" class="filter-grid multi">
+        <label>Site<input type="text" name="siteId" value="@Model.SiteId" /></label>
+        <label>Camera<input type="text" name="cameraId" value="@Model.CameraId" /></label>
+        <label>Date<input type="date" name="date" value="@(Model.Date?.ToString("yyyy-MM-dd"))" /></label>
+        <label>
+            Direction
+            <select name="direction">
+                <option value="">All</option>
+                <option value="A_TO_B" selected="@(Model.Direction == "A_TO_B")">A_TO_B</option>
+                <option value="B_TO_A" selected="@(Model.Direction == "B_TO_A")">B_TO_A</option>
+            </select>
+        </label>
+        <label>Class<input type="text" name="className" value="@Model.ClassName" /></label>
+        <label>
+            Review
+            <select name="reviewStatus">
+                <option value="">All</option>
+                <option value="PENDING" selected="@(Model.ReviewStatus == "PENDING")">PENDING</option>
+                <option value="QUALIFIED" selected="@(Model.ReviewStatus == "QUALIFIED")">QUALIFIED</option>
+                <option value="NOT_QUALIFIED" selected="@(Model.ReviewStatus == "NOT_QUALIFIED")">NOT_QUALIFIED</option>
+            </select>
+        </label>
+        <button type="submit" class="btn btn-primary">Apply</button>
+    </form>
+</section>
+
+<section class="panel reveal">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">Thumb</th>
+                    <th scope="col">Time (UTC)</th>
+                    <th scope="col">Site/Camera</th>
+                    <th scope="col">Class</th>
+                    <th scope="col">Direction</th>
+                    <th scope="col">Review</th>
+                    <th scope="col">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Items.Count == 0)
+            {
+                <tr><td colspan="7">No events match current filters.</td></tr>
+            }
+            else
+            {
+                foreach (var item in Model.Items)
+                {
+                    <tr>
+                        <td>
+                            @if (!string.IsNullOrWhiteSpace(item.ThumbnailUrl))
+                            {
+                                <img src="@item.ThumbnailUrl" alt="thumbnail" class="thumb-small" />
+                            }
+                            else
+                            {
+                                <span class="muted">No image</span>
+                            }
+                        </td>
+                        <td>@item.OccurredAtUtc?.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@item.SiteId / @item.CameraId</td>
+                        <td>@item.ClassName</td>
+                        <td>@item.Direction</td>
+                        <td><span class="pill @StatusClass(item.ReviewStatus)">@item.ReviewStatus</span></td>
+                        <td><a asp-action="Detail" asp-route-eventUid="@item.EventUid">Open</a></td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pager">
+        <span>Page @Model.Page of @Model.TotalPages (@Model.Total total)</span>
+        <div>
+            @if (Model.Page > 1)
+            {
+                <a class="btn btn-neutral" asp-action="Index"
+                   asp-route-page="@(Model.Page - 1)"
+                   asp-route-pageSize="@Model.PageSize"
+                   asp-route-siteId="@Model.SiteId"
+                   asp-route-cameraId="@Model.CameraId"
+                   asp-route-date="@(Model.Date?.ToString("yyyy-MM-dd"))"
+                   asp-route-direction="@Model.Direction"
+                   asp-route-className="@Model.ClassName"
+                   asp-route-reviewStatus="@Model.ReviewStatus">Previous</a>
+            }
+            @if (Model.Page < Model.TotalPages)
+            {
+                <a class="btn btn-neutral" asp-action="Index"
+                   asp-route-page="@(Model.Page + 1)"
+                   asp-route-pageSize="@Model.PageSize"
+                   asp-route-siteId="@Model.SiteId"
+                   asp-route-cameraId="@Model.CameraId"
+                   asp-route-date="@(Model.Date?.ToString("yyyy-MM-dd"))"
+                   asp-route-direction="@Model.Direction"
+                   asp-route-className="@Model.ClassName"
+                   asp-route-reviewStatus="@Model.ReviewStatus">Next</a>
+            }
+        </div>
+    </div>
+</section>
+
+@functions {
+    private static string StatusClass(string? status)
+    {
+        return (status ?? string.Empty).ToUpperInvariant() switch
+        {
+            ReviewStatuses.Qualified => "yes",
+            ReviewStatuses.NotQualified => "no",
+            _ => "pending",
+        };
+    }
+}
