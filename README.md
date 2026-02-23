@@ -263,6 +263,110 @@ Catatan penting:
 - Progress sinkronisasi per-run disimpan di `.portal_upload_state.json` pada folder run.
 - Contract normalisasi edge→portal ada di `pedestrian_line_counter/portal_contract.py`.
 
+Portal website MVP (Phase 7.3)
+------------------------------
+
+Portal ASP.NET Core sekarang tersedia di folder `portal/`.
+
+Mode default lokal: SQLite (biar cepat testing, tanpa setup SQL Server dulu).
+Untuk deployment target tetap SQL Server.
+
+Fitur MVP:
+
+- Login gate minimal (cookie auth) dengan branding logo.
+- Dashboard ringkasan total A→B/B→A + status review.
+- Event browser dengan filter (site/camera/date/direction/class/review).
+- Review queue cepat (Qualified Yes/No + notes + shortcut keyboard).
+- Export CSV untuk event yang sudah direview.
+
+Quick start:
+
+```bash
+cd portal
+dotnet restore
+dotnet run
+```
+
+Konfigurasi penting ada di `portal/appsettings.json`:
+
+- `Database:Provider` (`Sqlite` default lokal, atau `SqlServer`).
+- `ConnectionStrings:PortalDb` sesuai provider.
+- `Portal:ApiKey` untuk endpoint uploader (`X-API-Key`).
+- `Portal:EvidenceRootPath` untuk penyimpanan thumbnail.
+- `LoginGate:*` untuk username/password login MVP.
+
+Jika mode `Sqlite` default, DB `portal/portal.db` dibuat otomatis saat `dotnet run`.
+Jika mode `SqlServer`, bisa pakai bootstrap:
+
+- `portal/sql/001_init.sql`
+
+Detail endpoint + setup ada di `portal/README.md`.
+
+Runbook cepat (Windows)
+-----------------------
+
+Karena project ada di drive Windows, jalankan portal dari PowerShell Windows:
+
+1. Start portal (SQLite lokal):
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+dotnet restore
+dotnet run
+```
+
+Atau pakai script helper (background + log file):
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+.\scripts\start-portal.ps1 -Port 5000
+```
+
+2. Stop portal:
+
+- Tekan `Ctrl + C` pada terminal yang sama.
+- Jika masih ada proses di port 5000:
+
+```powershell
+$pid = (Get-NetTCPConnection -LocalPort 5000 -State Listen).OwningProcess
+Stop-Process -Id $pid -Force
+```
+
+Atau pakai script helper:
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+.\scripts\stop-portal.ps1 -Port 5000 -Force
+```
+
+3. Simpan log ke file:
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+New-Item -ItemType Directory -Force logs | Out-Null
+dotnet run *>&1 | Tee-Object -FilePath ".\logs\portal-$(Get-Date -Format yyyyMMdd-HHmmss).log"
+```
+
+Jika pakai `start-portal.ps1`, log otomatis dibuat di:
+
+- `portal/logs/portal-<timestamp>-stdout.log`
+- `portal/logs/portal-<timestamp>-stderr.log`
+
+4. Jika port 5000 bentrok, pakai port lain:
+
+```powershell
+dotnet run --urls "http://localhost:5001"
+```
+
+Lalu sesuaikan uploader:
+
+```bash
+python3 -m pedestrian_line_counter.portal_uploader \
+  --spool-dir data/traffic_runs \
+  --api-base-url http://localhost:5001 \
+  --api-key "$PORTAL_API_KEY"
+```
+
 
 Menentukan garis virtual untuk setiap kamera yang ada
 ---------------------------------------

@@ -21,5 +21,18 @@ config/*.local.json
 config/*.local.yaml
 config/*.local.yml
 
+#logging fromm sql
+portal/logs/*
+
 # Virtual environments
 .venv
+
+# .NET build outputs
+portal/bin/
+portal/obj/
+portal/*.db
+portal/*.db-shm
+portal/*.db-wal
+portal/.portal.pid
+portal/logs/
+portal/evidence/
