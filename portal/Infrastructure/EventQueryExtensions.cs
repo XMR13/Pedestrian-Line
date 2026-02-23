@@ -62,7 +62,6 @@ public static class EventQueryExtensions
     {
         return events
             .AsNoTracking()
-            .Include(x => x.Review)
             .AsQueryable();
     }
 }

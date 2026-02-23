@@ -301,31 +301,79 @@ public sealed class EventsController(
         var options = portalOptions.Value;
         var pageSize = ClampPageSize(request.PageSize, options.DefaultPageSize, options.MaxPageSize);
         var page = Math.Max(request.Page, 1);
+        var pageOffset = (page - 1) * pageSize;
+        var isSqlServer = db.Database.IsSqlServer();
 
         var baseQuery = db.Events.PortalQueryable().ApplyEventFilters(request);
         var total = await baseQuery.CountAsync(ct);
 
-        var rows = (await baseQuery
-            .Select(x => new
+        List<EventListRow> rows;
+        if (isSqlServer)
+        {
+            rows = await baseQuery
+                .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
+                .ThenByDescending(x => x.EventUid)
+                .Skip(pageOffset)
+                .Take(pageSize)
+                .Select(x => new EventListRow
+                {
+                    EventUid = x.EventUid,
+                    RunUid = x.RunUid,
+                    SiteId = x.SiteId,
+                    CameraId = x.CameraId,
+                    OccurredAtUtc = x.OccurredAtUtc,
+                    Direction = x.Direction,
+                    ClassName = x.ClassName,
+                    TrackId = x.TrackId,
+                    ThumbPath = x.ThumbPath,
+                    ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
+                    Notes = x.Review != null ? x.Review.Notes : null,
+                })
+                .ToListAsync(ct);
+        }
+        else
+        {
+            var orderedEventUids = (await baseQuery
+                .Select(x => new
+                {
+                    x.EventUid,
+                    x.OccurredAtUtc,
+                })
+                .ToListAsync(ct))
+                .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
+                .ThenByDescending(x => x.EventUid)
+                .Skip(pageOffset)
+                .Take(pageSize)
+                .Select(x => x.EventUid)
+                .ToList();
+
+            if (orderedEventUids.Count == 0)
             {
-                x.EventUid,
-                x.RunUid,
-                x.SiteId,
-                x.CameraId,
-                x.OccurredAtUtc,
-                x.Direction,
-                x.ClassName,
-                x.TrackId,
-                x.ThumbPath,
-                ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                x.Review!.Notes,
-            })
-            .ToListAsync(ct))
-            .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
-            .ThenByDescending(x => x.EventUid)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToList();
+                rows = [];
+            }
+            else
+            {
+                var pageRows = await baseQuery
+                    .Where(x => orderedEventUids.Contains(x.EventUid))
+                    .Select(x => new EventListRow
+                    {
+                        EventUid = x.EventUid,
+                        RunUid = x.RunUid,
+                        SiteId = x.SiteId,
+                        CameraId = x.CameraId,
+                        OccurredAtUtc = x.OccurredAtUtc,
+                        Direction = x.Direction,
+                        ClassName = x.ClassName,
+                        TrackId = x.TrackId,
+                        ThumbPath = x.ThumbPath,
+                        ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
+                        Notes = x.Review != null ? x.Review.Notes : null,
+                    })
+                    .ToListAsync(ct);
+
+                rows = OrderByEventUids(pageRows, orderedEventUids, x => x.EventUid);
+            }
+        }
 
         return Ok(new
         {
@@ -386,6 +434,36 @@ public sealed class EventsController(
 
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private static List<T> OrderByEventUids<T>(IEnumerable<T> rows, IReadOnlyList<string> orderedEventUids, Func<T, string> getEventUid)
+    {
+        var rowMap = rows.ToDictionary(getEventUid, StringComparer.Ordinal);
+        var ordered = new List<T>(orderedEventUids.Count);
+        foreach (var eventUid in orderedEventUids)
+        {
+            if (rowMap.TryGetValue(eventUid, out var row))
+            {
+                ordered.Add(row);
+            }
+        }
+
+        return ordered;
+    }
+
+    private sealed class EventListRow
+    {
+        public string EventUid { get; set; } = string.Empty;
+        public string RunUid { get; set; } = string.Empty;
+        public string SiteId { get; set; } = string.Empty;
+        public string CameraId { get; set; } = string.Empty;
+        public DateTimeOffset? OccurredAtUtc { get; set; }
+        public string? Direction { get; set; }
+        public string? ClassName { get; set; }
+        public int? TrackId { get; set; }
+        public string? ThumbPath { get; set; }
+        public string ReviewStatus { get; set; } = ReviewStatuses.Pending;
+        public string? Notes { get; set; }
     }
 
     private static int ClampPageSize(int pageSize, int defaultValue, int maxValue)

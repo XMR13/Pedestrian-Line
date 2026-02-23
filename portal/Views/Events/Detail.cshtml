@@ -1,65 +1,115 @@
 @model EventDetailViewModel
 @{
     ViewData["Title"] = "Event Detail";
+    ViewData["CurrentEventUid"] = Model.EventUid;
 }
 
-<section class="panel reveal">
-    <div class="panel-header">
-        <h1>Event Detail</h1>
-        <a class="btn btn-neutral" asp-action="ReviewQueue">Back to Queue</a>
+<div class="topbar">
+    <div class="title">
+        <h2>Event Detail</h2>
+        <p>Evidence + metadata + review history.</p>
+    </div>
+    <div class="filters">
+        <div class="field">
+            <label for="event-search">Event UID</label>
+            <input id="event-search" type="text" value="@Model.EventUid" readonly />
+        </div>
+        <a class="btn secondary" asp-action="ReviewQueue" style="text-decoration:none;">Back to Queue</a>
+    </div>
+</div>
+
+<section class="mode-banner detail">
+    <div class="mode-copy">
+        <div class="mode-eyebrow">DETAIL MODE</div>
+        <div class="mode-title">Single-event inspection</div>
+        <div class="mode-desc">Focused on traceability, evidence context, and review history.</div>
+    </div>
+    <div class="mode-tags">
+        <span class="pill">event_uid @Model.EventUid</span>
+        <span class="pill ink">readable metadata</span>
+        <span class="pill">timeline view</span>
+    </div>
+</section>
+
+<div class="two-col detail-layout">
+    <div class="big-thumb detail-thumb" aria-label="Event thumbnail">
+        @if (!string.IsNullOrWhiteSpace(Model.ThumbnailUrl))
+        {
+            <img src="@Model.ThumbnailUrl" alt="event thumbnail" class="big-thumb-image" />
+        }
+        <div class="bbox" title="bbox"></div>
+        <div class="line" title="counting line"></div>
+        <div style="position:absolute; left:14px; bottom:14px; display:flex; gap:10px; flex-wrap: wrap;">
+            <span class="pill @(Model.Direction == "A_TO_B" ? "ink" : "brand")">@Model.Direction</span>
+            <span class="pill">@Model.ClassName</span>
+            <span class="pill">frame @(Model.FrameIndex?.ToString() ?? "n/a")</span>
+        </div>
     </div>
 
-    <div class="split-grid">
-        <article class="panel nested">
-            <div class="event-core">
-                @if (!string.IsNullOrWhiteSpace(Model.ThumbnailUrl))
-                {
-                    <img src="@Model.ThumbnailUrl" alt="event thumbnail" class="thumb-large" />
-                }
-                else
-                {
-                    <div class="thumb-placeholder">No thumbnail uploaded</div>
-                }
-                <dl>
-                    <dt>Event UID</dt><dd>@Model.EventUid</dd>
-                    <dt>Run UID</dt><dd>@Model.RunUid</dd>
-                    <dt>Time (UTC)</dt><dd>@Model.OccurredAtUtc?.ToString("yyyy-MM-dd HH:mm:ss")</dd>
-                    <dt>Site/Camera</dt><dd>@Model.SiteId / @Model.CameraId</dd>
-                    <dt>Class</dt><dd>@Model.ClassName</dd>
-                    <dt>Direction</dt><dd>@Model.Direction</dd>
-                    <dt>Track ID</dt><dd>@Model.TrackId</dd>
-                    <dt>Confidence</dt><dd>@Model.Confidence?.ToString("0.000")</dd>
-                </dl>
+    <div class="grid detail-grid">
+        <div class="panel">
+            <h3>Run context</h3>
+            <div class="meta">
+                <div class="row"><div class="key">Site</div><div class="val">@Model.SiteId</div></div>
+                <div class="row"><div class="key">Camera</div><div class="val">@Model.CameraId</div></div>
+                <div class="row"><div class="key">Run</div><div class="val">@Model.RunUid</div></div>
+                <div class="row"><div class="key">Criteria</div><div class="val">@Model.CriteriaTitle</div></div>
+                <div class="row"><div class="key">Description</div><div class="val">@Model.CriteriaDescription</div></div>
             </div>
-        </article>
+        </div>
 
-        <article class="panel nested">
-            <div class="criteria-box">
-                <h3>@Model.CriteriaTitle</h3>
-                <p>@Model.CriteriaDescription</p>
-                <p>Current state: <span class="pill @StatusClass(Model.ReviewStatus)">@Model.ReviewStatus</span></p>
+        <div class="panel">
+            <h3>Event metadata</h3>
+            <div class="meta">
+                <div class="row"><div class="key">Occurred</div><div class="val">@Model.OccurredAtUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ")</div></div>
+                <div class="row"><div class="key">Video time</div><div class="val">@(Model.VideoTimeS?.ToString("0.###") ?? "-") s</div></div>
+                <div class="row"><div class="key">Track</div><div class="val">@Model.TrackId</div></div>
+                <div class="row"><div class="key">Class</div><div class="val">@Model.ClassName</div></div>
+                <div class="row"><div class="key">Confidence</div><div class="val">@(Model.Confidence?.ToString("0.000") ?? "-")</div></div>
+                <div class="row"><div class="key">Direction</div><div class="val">@Model.Direction</div></div>
             </div>
+        </div>
 
-            <form method="post" action="/api/events/@Model.EventUid/review" class="review-form">
+        <div class="panel">
+            <h3>Review</h3>
+            <form method="post" action="/api/events/@Model.EventUid/review" class="review-form" data-disable-on-submit>
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="returnUrl" value="@Context.Request.Path@Context.Request.QueryString" />
-                <label for="review-status">Review Status</label>
+
+                <label for="review-status" style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Review Status</label>
                 <select id="review-status" name="reviewStatus">
                     <option value="PENDING" selected="@(Model.ReviewStatus == "PENDING")">PENDING</option>
                     <option value="QUALIFIED" selected="@(Model.ReviewStatus == "QUALIFIED")">QUALIFIED</option>
                     <option value="NOT_QUALIFIED" selected="@(Model.ReviewStatus == "NOT_QUALIFIED")">NOT_QUALIFIED</option>
                 </select>
 
-                <label for="review-notes">Notes</label>
-                <textarea id="review-notes" name="notes" rows="5">@Model.Notes</textarea>
+                <div style="margin-top: 10px;">
+                    <span class="pill @StatusClass(Model.ReviewStatus)">@Model.ReviewStatus</span>
+                </div>
 
-                <div class="review-actions">
-                    <button type="submit" class="btn btn-primary">Save Review</button>
+                <div style="margin-top: 10px;">
+                    <label for="review-notes" style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Notes</label>
+                    <textarea id="review-notes" name="notes" rows="5" placeholder="Reason for YES/NO.">@Model.Notes</textarea>
+                </div>
+
+                <div class="btn-row" style="margin-top: 10px;">
+                    <button type="submit" class="btn primary">Save Review</button>
                 </div>
             </form>
-        </article>
+
+            <div class="timeline">
+                <div class="tl-item">
+                    <div class="t">@Model.OccurredAtUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ")</div>
+                    <div class="d">Event captured and ingested by portal.</div>
+                </div>
+                <div class="tl-item">
+                    <div class="t">latest state</div>
+                    <div class="d">Current review status: @Model.ReviewStatus.</div>
+                </div>
+            </div>
+        </div>
     </div>
-</section>
+</div>
 
 @functions {
     private static string StatusClass(string? status)

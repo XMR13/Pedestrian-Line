@@ -1,99 +1,207 @@
 @model DashboardViewModel
 @{
     ViewData["Title"] = "Dashboard";
+
+    var pending = Model.TotalPending;
+    var reviewed = Model.TotalReviewed;
+    var totalObserved = Model.TotalAToB + Model.TotalBToA;
+    var queueEstimateMinutes = pending == 0 ? 0 : Math.Max(1, (int)Math.Ceiling((pending * 5.0) / 60.0));
+    var reviewCompletion = (pending + reviewed) == 0 ? 0 : (int)Math.Round((reviewed * 100.0) / (pending + reviewed));
 }
 
-<section class="panel reveal">
-    <div class="panel-header">
-        <h1>Dashboard</h1>
-        <p>Totals by direction and queue state for current filter window.</p>
+<div class="topbar">
+    <div class="title">
+        <h2>Dashboard</h2>
+        <p>Totals + review progress for current filter window.</p>
     </div>
 
-    <form method="get" class="filter-grid">
-        <label>
-            Site
-            <input type="text" name="siteId" value="@Model.SiteId" placeholder="subang" />
-        </label>
-        <label>
-            Camera
-            <input type="text" name="cameraId" value="@Model.CameraId" placeholder="cam_01" />
-        </label>
-        <label>
-            Date
-            <input type="date" name="date" value="@(Model.Date?.ToString("yyyy-MM-dd"))" />
-        </label>
-        <button type="submit" class="btn btn-primary">Apply Filter</button>
+    <form method="get" class="filters">
+        <div class="field">
+            <label for="siteId">Site</label>
+            <input id="siteId" type="text" name="siteId" value="@Model.SiteId" placeholder="subang" />
+        </div>
+        <div class="field">
+            <label for="cameraId">Camera</label>
+            <input id="cameraId" type="text" name="cameraId" value="@Model.CameraId" placeholder="cam_01" />
+        </div>
+        <div class="field">
+            <label for="date">Date</label>
+            <input id="date" type="date" name="date" value="@(Model.Date?.ToString("yyyy-MM-dd"))" />
+        </div>
+        <button type="submit" class="btn primary">Apply</button>
     </form>
+</div>
 
-    <div class="kpi-grid">
-        <article class="kpi-card">
-            <span>A → B</span>
-            <strong>@Model.TotalAToB</strong>
-        </article>
-        <article class="kpi-card">
-            <span>B → A</span>
-            <strong>@Model.TotalBToA</strong>
-        </article>
-        <article class="kpi-card">
-            <span>Pending</span>
-            <strong>@Model.TotalPending</strong>
-        </article>
-        <article class="kpi-card yes">
-            <span>Qualified</span>
-            <strong>@Model.TotalQualified</strong>
-        </article>
-        <article class="kpi-card no">
-            <span>Not Qualified</span>
-            <strong>@Model.TotalNotQualified</strong>
-        </article>
-        <article class="kpi-card">
-            <span>Reviewed</span>
-            <strong>@Model.TotalReviewed</strong>
-        </article>
-    </div>
-</section>
+<div class="grid">
+    <section class="mode-banner" aria-label="Review flow status">
+        <div class="mode-copy">
+            <div class="mode-eyebrow">OPS PULSE</div>
+            <div class="mode-title">Review lane is active with @pending pending event(s)</div>
+            <div class="mode-desc">Estimated queue clearance: @(queueEstimateMinutes == 0 ? "cleared" : $"~{queueEstimateMinutes} min"). Completion rate: @reviewCompletion%.</div>
+        </div>
+        <div class="mode-tags">
+            <span class="pill">pending @pending</span>
+            <span class="pill ink">reviewed @reviewed</span>
+            <span class="pill brand">observed @totalObserved</span>
+        </div>
+    </section>
 
-<section class="panel reveal">
-    <div class="panel-header">
-        <h2>Recent Events</h2>
-        <a class="btn btn-neutral" asp-controller="Events" asp-action="Index">Open Browser</a>
-    </div>
+    <section class="kpis" aria-label="Key metrics">
+        <article class="card">
+            <div class="pad">
+                <div class="kpi-top">
+                    <div class="kpi-label">A_TO_B</div>
+                    <div class="kpi-accent ink">A→B</div>
+                </div>
+                <div class="kpi-value">@Model.TotalAToB.ToString("N0")</div>
+                <div class="kpi-hint">Crossings from side A to side B.</div>
+            </div>
+        </article>
 
-    <div class="table-wrap">
-        <table>
-            <thead>
-                <tr>
-                    <th scope="col">Time (UTC)</th>
-                    <th scope="col">Site/Camera</th>
-                    <th scope="col">Class</th>
-                    <th scope="col">Direction</th>
-                    <th scope="col">Review</th>
-                    <th scope="col">Action</th>
-                </tr>
-            </thead>
-            <tbody>
-            @if (Model.RecentEvents.Count == 0)
-            {
-                <tr><td colspan="6">No events found for this filter.</td></tr>
-            }
-            else
-            {
-                foreach (var item in Model.RecentEvents)
-                {
-                    <tr>
-                        <td>@item.OccurredAtUtc?.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                        <td>@item.SiteId / @item.CameraId</td>
-                        <td>@item.ClassName</td>
-                        <td>@item.Direction</td>
-                        <td><span class="pill @StatusClass(item.ReviewStatus)">@item.ReviewStatus</span></td>
-                        <td><a asp-controller="Events" asp-action="Detail" asp-route-eventUid="@item.EventUid">Review</a></td>
-                    </tr>
-                }
-            }
-            </tbody>
-        </table>
-    </div>
-</section>
+        <article class="card">
+            <div class="pad">
+                <div class="kpi-top">
+                    <div class="kpi-label">B_TO_A</div>
+                    <div class="kpi-accent brand">B→A</div>
+                </div>
+                <div class="kpi-value">@Model.TotalBToA.ToString("N0")</div>
+                <div class="kpi-hint">Crossings from side B to side A.</div>
+            </div>
+        </article>
+
+        <article class="card">
+            <div class="pad">
+                <div class="kpi-top">
+                    <div class="kpi-label">Pending reviews</div>
+                    <div class="kpi-accent">P</div>
+                </div>
+                <div class="kpi-value">@pending.ToString("N0")</div>
+                <div class="kpi-hint">Awaiting reviewer decisions.</div>
+            </div>
+        </article>
+
+        <article class="card">
+            <div class="pad">
+                <div class="kpi-top">
+                    <div class="kpi-label">Qualified YES</div>
+                    <div class="kpi-accent yes">Y</div>
+                </div>
+                <div class="kpi-value">@Model.TotalQualified.ToString("N0")</div>
+                <div class="kpi-hint">Criteria matched.</div>
+            </div>
+        </article>
+
+        <article class="card">
+            <div class="pad">
+                <div class="kpi-top">
+                    <div class="kpi-label">Qualified NO</div>
+                    <div class="kpi-accent no">N</div>
+                </div>
+                <div class="kpi-value">@Model.TotalNotQualified.ToString("N0")</div>
+                <div class="kpi-hint">Criteria not matched.</div>
+            </div>
+        </article>
+    </section>
+
+    <section class="row2">
+        <div class="chart" aria-label="Direction and review trend preview">
+            <svg viewBox="0 0 900 320" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0" stop-color="rgba(64,64,64,0.85)"></stop>
+                        <stop offset="1" stop-color="rgba(232,24,32,0.90)"></stop>
+                    </linearGradient>
+                </defs>
+                <path d="M40,240 C120,180 200,240 280,200 C360,160 440,120 520,145 C600,170 680,120 760,105 C820,95 860,120 880,110"
+                      fill="none" stroke="url(#g1)" stroke-width="5" stroke-linecap="round"></path>
+                <path d="M40,260 C140,210 220,275 300,235 C390,190 470,205 560,180 C640,160 720,200 880,160"
+                      fill="none" stroke="rgba(15,23,42,0.25)" stroke-width="3" stroke-linecap="round" stroke-dasharray="6 8"></path>
+            </svg>
+            <div style="position:absolute; left:14px; top:14px; display:flex; gap:10px; align-items:center;">
+                <span class="pill ink">A_TO_B @Model.TotalAToB</span>
+                <span class="pill brand">B_TO_A @Model.TotalBToA</span>
+                <span class="pill">reviewed @reviewed</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="pad">
+                <div class="kpi-top">
+                    <div>
+                        <div class="kpi-label">Review queue</div>
+                        <div class="kpi-hint">Jump straight into YES/NO labeling.</div>
+                    </div>
+                    <div class="kpi-accent">↳</div>
+                </div>
+                <div class="btn-row" style="margin-top: 14px;">
+                    <a class="btn primary" asp-controller="Events" asp-action="ReviewQueue" style="text-decoration:none;">Open Review</a>
+                    <a class="btn secondary" asp-controller="Events" asp-action="Index" style="text-decoration:none;">Open Browser</a>
+                </div>
+                <div style="margin-top: 14px; color: var(--muted); font-size: 12px; line-height: 1.4;">
+                    <p style="margin:0;">Qualified YES/NO is saved in SQL and exported as reviewed CSV for audit/training.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="pad">
+            <div class="kpi-top">
+                <div>
+                    <div class="kpi-label">Recent events</div>
+                    <div class="kpi-hint">One row per line-crossing event.</div>
+                </div>
+                <div class="pill">latest @Model.RecentEvents.Count</div>
+            </div>
+
+            <div class="table-scroll" style="margin-top: 10px;">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Thumb</th>
+                            <th scope="col">Time (UTC)</th>
+                            <th scope="col">Site/Camera</th>
+                            <th scope="col">Direction</th>
+                            <th scope="col">Class</th>
+                            <th scope="col">Review</th>
+                            <th scope="col">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @if (Model.RecentEvents.Count == 0)
+                    {
+                        <tr><td colspan="7">No events found for this filter.</td></tr>
+                    }
+                    else
+                    {
+                        foreach (var item in Model.RecentEvents)
+                        {
+                            <tr>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(item.ThumbnailUrl))
+                                    {
+                                        <img src="@item.ThumbnailUrl" alt="event thumbnail" class="thumb-inline" loading="lazy" />
+                                    }
+                                    else
+                                    {
+                                        <div class="thumb" title="thumbnail unavailable"></div>
+                                    }
+                                </td>
+                                <td><span class="pill">@item.OccurredAtUtc?.ToString("yyyy-MM-dd HH:mm:ss")</span></td>
+                                <td>@item.SiteId / @item.CameraId</td>
+                                <td><span class="pill @(item.Direction == "A_TO_B" ? "ink" : "brand")">@item.Direction</span></td>
+                                <td>@item.ClassName</td>
+                                <td><span class="pill @StatusClass(item.ReviewStatus)">@item.ReviewStatus</span></td>
+                                <td><a asp-controller="Events" asp-action="Detail" asp-route-eventUid="@item.EventUid" class="pill" style="text-decoration:none;">open</a></td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
 
 @functions {
     private static string StatusClass(string? status)
