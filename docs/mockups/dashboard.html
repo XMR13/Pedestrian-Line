@@ -44,7 +44,7 @@
           <div class="panel">
             <h3>Camera criteria</h3>
             <div style="color: var(--muted); font-size: 12px; line-height: 1.4;">
-              <p style="margin:0 0 8px;"><span class="pill ink">Qualified YES</span> means the target vehicle matches the camera's criteria.</p>
+              <p style="margin:0 0 8px;"><span class="pill yes">Qualified YES</span> means the target vehicle matches the camera's criteria.</p>
               <p style="margin:0;">Example: “Tronton carrying waste paper.”</p>
             </div>
           </div>
@@ -83,6 +83,19 @@
         </div>
 
         <div class="grid">
+          <section class="mode-banner" aria-label="Review flow status">
+            <div class="mode-copy">
+              <div class="mode-eyebrow">OPS PULSE</div>
+              <div class="mode-title">Review lane is active and within SLA</div>
+              <div class="mode-desc">Estimated clearance time: 12 minutes with current reviewer pace.</div>
+            </div>
+            <div class="mode-tags">
+              <span class="pill">pending 73</span>
+              <span class="pill ink">avg 4.1s/event</span>
+              <span class="pill brand">target &lt; 15 min</span>
+            </div>
+          </section>
+
           <section class="kpis">
             <div class="card">
               <div class="pad">
@@ -118,7 +131,7 @@
               <div class="pad">
                 <div class="kpi-top">
                   <div class="kpi-label">Qualified YES</div>
-                  <div class="kpi-accent ink">Y</div>
+                  <div class="kpi-accent yes">Y</div>
                 </div>
                 <div class="kpi-value">214</div>
                 <div class="kpi-hint">criteria matched</div>
@@ -128,7 +141,7 @@
               <div class="pad">
                 <div class="kpi-top">
                   <div class="kpi-label">Qualified NO</div>
-                  <div class="kpi-accent brand">N</div>
+                  <div class="kpi-accent no">N</div>
                 </div>
                 <div class="kpi-value">401</div>
                 <div class="kpi-hint">not matching</div>
@@ -197,12 +210,12 @@
                 <table class="table">
                   <thead>
                     <tr>
-                      <th>Thumb</th>
-                      <th>Time</th>
-                      <th>Direction</th>
-                      <th>Class</th>
-                      <th>Review</th>
-                      <th>Action</th>
+                      <th scope="col">Thumb</th>
+                      <th scope="col">Time</th>
+                      <th scope="col">Direction</th>
+                      <th scope="col">Class</th>
+                      <th scope="col">Review</th>
+                      <th scope="col">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -219,7 +232,7 @@
                       <td><span class="pill">16:21:50Z</span></td>
                       <td><span class="pill brand">B_TO_A</span></td>
                       <td>pickup</td>
-                      <td><span class="pill ink">YES</span></td>
+                      <td><span class="pill yes">YES</span></td>
                       <td><a href="./event_detail.html" style="text-decoration:none;" class="pill">open</a></td>
                     </tr>
                     <tr>
@@ -227,7 +240,7 @@
                       <td><span class="pill">16:21:11Z</span></td>
                       <td><span class="pill ink">A_TO_B</span></td>
                       <td>truck</td>
-                      <td><span class="pill brand">NO</span></td>
+                      <td><span class="pill no">NO</span></td>
                       <td><a href="./event_detail.html" style="text-decoration:none;" class="pill">open</a></td>
                     </tr>
                     <tr>

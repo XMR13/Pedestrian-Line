@@ -43,11 +43,11 @@
 
         <div style="margin-top: 16px;">
           <div class="panel">
-            <h3>Keyboard</h3>
+            <h3>Shortcut map</h3>
             <div class="meta">
-              <div class="row"><div class="key">Prev / Next</div><div class="val">J / K</div></div>
-              <div class="row"><div class="key">Label</div><div class="val">Y / N</div></div>
-              <div class="row"><div class="key">Open detail</div><div class="val">Enter</div></div>
+              <div class="row"><div class="key">Prev / Next</div><div class="val"><kbd class="kbd">J</kbd> / <kbd class="kbd">K</kbd></div></div>
+              <div class="row"><div class="key">Label</div><div class="val"><kbd class="kbd">Y</kbd> / <kbd class="kbd">N</kbd></div></div>
+              <div class="row"><div class="key">Open detail</div><div class="val"><kbd class="kbd">Enter</kbd></div></div>
             </div>
           </div>
         </div>
@@ -96,8 +96,27 @@
           <div class="mode-tags">
             <span class="pill">item 21 / 73</span>
             <span class="pill ink">hotkeys J/K + Y/N</span>
-            <span class="pill brand">pending focus</span>
+            <span class="pill">pending focus</span>
           </div>
+        </section>
+
+        <section class="queue-status-grid" aria-live="polite">
+          <article class="queue-status-card">
+            <div class="label">Current position</div>
+            <div class="value">21 / 73</div>
+          </article>
+          <article class="queue-status-card">
+            <div class="label">Pending</div>
+            <div class="value">73</div>
+          </article>
+          <article class="queue-status-card yes">
+            <div class="label">Qualified YES</div>
+            <div class="value">214</div>
+          </article>
+          <article class="queue-status-card no">
+            <div class="label">Qualified NO</div>
+            <div class="value">401</div>
+          </article>
         </section>
 
         <div class="two-col queue-layout">
@@ -115,7 +134,7 @@
           </div>
 
           <div class="panel queue-panel">
-            <h3>Event</h3>
+            <h3>Current event</h3>
             <div class="meta">
               <div class="row"><div class="key">Occurred</div><div class="val">2026-02-16T16:22:13Z</div></div>
               <div class="row"><div class="key">Video time</div><div class="val">00:12:48.233</div></div>
@@ -124,17 +143,12 @@
               <div class="row"><div class="key">Class</div><div class="val">tronton</div></div>
             </div>
 
-            <div style="margin-top: 12px;">
-              <div class="btn-row equal">
-                <button class="btn secondary" type="button">Qualified YES</button>
-                <button class="btn primary" type="button">Qualified NO</button>
+            <div class="queue-next-strip" role="status" aria-live="polite">
+              <div class="queue-next-copy">
+                <div class="head">Next target in queue</div>
+                <div class="body">event_uid 9ca7...81bf • truck • B_TO_A</div>
               </div>
-              <div style="margin-top: 10px;" class="btn-row">
-                <span class="hint">Y</span>
-                <span class="hint">N</span>
-                <span class="hint">J/K</span>
-                <a class="hint" href="./event_detail.html" style="text-decoration:none;">Enter → Detail</a>
-              </div>
+              <span class="pill">after this: 52 pending</span>
             </div>
 
             <div style="margin-top: 12px;">
@@ -142,16 +156,36 @@
               <textarea placeholder="Optional notes (e.g., cargo looks like paper, covered with tarp)."></textarea>
             </div>
 
-            <div style="margin-top: 12px;" class="panel">
-              <h3 style="margin-bottom: 6px;">Queue</h3>
-              <div style="display:flex; gap:10px; align-items:center; justify-content:space-between;">
-                <div style="color: var(--muted); font-size: 12px;">Pending items</div>
-                <div class="pill">73</div>
+            <div class="panel">
+              <h3 style="margin-bottom: 8px;">Upcoming events</h3>
+              <div class="queue-mini-list">
+                <a class="queue-mini-item active" href="./event_detail.html">
+                  <div class="queue-mini-main">
+                    <strong>9ca7...81bf • truck • B_TO_A</strong>
+                    <span>16:22:18Z • conf 0.88</span>
+                  </div>
+                  <span class="pill">next</span>
+                </a>
+                <a class="queue-mini-item" href="./event_detail.html">
+                  <div class="queue-mini-main">
+                    <strong>e311...0f21 • tronton • A_TO_B</strong>
+                    <span>16:22:21Z • conf 0.79</span>
+                  </div>
+                  <span class="pill">2</span>
+                </a>
               </div>
-              <div style="margin-top: 10px; display:flex; gap:10px; align-items:center;">
-                <span class="pill ink">YES 214</span>
-                <span class="pill brand">NO 401</span>
-                <span class="pill">PENDING 73</span>
+            </div>
+
+            <div class="queue-actions">
+              <div class="btn-row equal">
+                <button class="btn yes" type="button">Qualified YES</button>
+                <button class="btn no" type="button">Qualified NO</button>
+              </div>
+              <div class="queue-help">
+                <span class="hint"><kbd class="kbd">Y</kbd> mark yes</span>
+                <span class="hint"><kbd class="kbd">N</kbd> mark no</span>
+                <span class="hint"><kbd class="kbd">J</kbd>/<kbd class="kbd">K</kbd> navigate</span>
+                <a class="hint" href="./event_detail.html" style="text-decoration:none;"><kbd class="kbd">Enter</kbd> detail</a>
               </div>
             </div>
           </div>
