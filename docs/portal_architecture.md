@@ -138,6 +138,74 @@ Endpoints:
 - `GET /api/dashboard/summary`
   - Aggregates counts and review stats.
 
+### Example Payloads (Contract v1)
+
+`POST /api/runs/upsert`
+
+```json
+{
+  "contract_version": "v1",
+  "run_uid": "7c6b4e9f4e1a4f6bbbf6e88f4c62f7eb",
+  "site_id": "subang",
+  "camera_id": "cam_01",
+  "started_at_utc": "2026-02-20T01:00:00Z",
+  "ended_at_utc": "2026-02-20T01:15:31Z",
+  "source_type": "rtsp",
+  "source_value": "rtsp://example/cam01",
+  "model_version": "vehicle_subclasses.onnx",
+  "cfg_version": "default",
+  "line_mode": "single",
+  "line_id": "line_subang_cam01",
+  "fps": 30.0,
+  "frame_width": 1920,
+  "frame_height": 1080,
+  "health_summary_json": {
+    "frames_total": 27158,
+    "effective_fps": 29.3
+  },
+  "report_csv_relpath": "report.csv"
+}
+```
+
+`POST /api/events/upsert`
+
+```json
+{
+  "contract_version": "v1",
+  "events": [
+    {
+      "contract_version": "v1",
+      "event_uid": "b9e0f6f7f9fd4b0aa0ea7fbe36c4c2a0",
+      "run_uid": "7c6b4e9f4e1a4f6bbbf6e88f4c62f7eb",
+      "site_id": "subang",
+      "camera_id": "cam_01",
+      "occurred_at_utc": "2026-02-20T01:02:14Z",
+      "frame_index": 4050,
+      "video_time_s": 135.0,
+      "direction": "A_TO_B",
+      "track_id": 148,
+      "class_id": 2,
+      "class_name": "truck",
+      "confidence": 0.91,
+      "bbox_xyxy": [561, 337, 731, 569],
+      "line_mode": "single",
+      "occurred_at_utc_source": "wall_clock",
+      "thumb_relpath": "thumbs/b9e0f6f7f9fd4b0aa0ea7fbe36c4c2a0.jpg",
+      "scene_relpath": "scene/b9e0f6f7f9fd4b0aa0ea7fbe36c4c2a0.jpg"
+    }
+  ]
+}
+```
+
+## Uploader Runtime State
+
+The edge uploader stores per-run progress in:
+
+- `<run_dir>/.portal_upload_state.json`
+
+This allows safe restart/resume and keeps network retries independent from the
+inference process. Contract idempotency remains the source of truth.
+
 ## UI Pages (MVP)
 
 - Dashboard (summary + filters)
@@ -158,4 +226,3 @@ by:
 
 Later, those human labels can train a dedicated classifier so the portal can
 auto-suggest `Qualified` while keeping human review as source of truth.
-

@@ -1925,8 +1925,9 @@ def main() -> None:
         writer.release()
     if spool is not None:
         elapsed_s = max(time.perf_counter() - run_started_perf_s, 1e-9)
+        ended_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         health_summary = {
-            "ended_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "ended_at_utc": ended_at_utc,
             "frames_total": int(t_frames),
             "frames_processed": int(t_processed),
             "effective_fps": float(t_frames) / elapsed_s if t_frames > 0 else 0.0,
@@ -1944,7 +1945,7 @@ def main() -> None:
             "rtsp_transport": rtsp_transport if is_live else None,
             "rtsp_codec": rtsp_codec if is_live else None,
         }
-        spool.update_run_metadata({"health_summary": health_summary})
+        spool.update_run_metadata({"ended_at_utc": ended_at_utc, "health_summary": health_summary})
         spool.close()
     if report_writer is not None:
         report_writer.close()

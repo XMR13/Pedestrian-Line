@@ -232,6 +232,37 @@ stall counts, reader dropped frames, reader read failures, and effective FPS) fo
 `vehicle_type`, `direction`, `notes`; plus kolom teknis opsional seperti `track_id`, `frame_index`,
 `confidence`, dan `thumb_relpath`).
 
+Portal uploader (Phase 7.2)
+---------------------------
+
+Setelah spool runs tersedia di disk, upload ke portal API dengan proses terpisah:
+
+```bash
+python3 -m pedestrian_line_counter.portal_uploader \
+  --spool-dir data/traffic_runs \
+  --api-base-url http://portal.local:5000 \
+  --api-key "$PORTAL_API_KEY" \
+  --events-batch-size 200
+```
+
+Mode daemon/polling:
+
+```bash
+python3 -m pedestrian_line_counter.portal_uploader \
+  --spool-dir data/traffic_runs \
+  --api-base-url http://portal.local:5000 \
+  --api-key "$PORTAL_API_KEY" \
+  --watch \
+  --poll-interval-s 10
+```
+
+Catatan penting:
+
+- Upload bersifat idempotent (run by `run_uid`, event by `event_uid`).
+- Retry/backoff aktif untuk error transient (network / 5xx / 429).
+- Progress sinkronisasi per-run disimpan di `.portal_upload_state.json` pada folder run.
+- Contract normalisasi edge→portal ada di `pedestrian_line_counter/portal_contract.py`.
+
 
 Menentukan garis virtual untuk setiap kamera yang ada
 ---------------------------------------

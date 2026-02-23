@@ -11,6 +11,7 @@ import uuid
 import cv2
 import numpy as np
 
+from .portal_contract import PORTAL_CONTRACT_VERSION
 from .structures import CrossingEvent
 
 
@@ -105,11 +106,15 @@ class TrafficSpoolWriter:
         self._events_f = self._events_path.open("a", encoding="utf-8")
 
         run_meta = {
+            "contract_version": PORTAL_CONTRACT_VERSION,
             "run_uid": self.run_uid,
             "site_id": cfg.site_id,
             "camera_id": cfg.camera_id,
             "started_at_utc": self.started_at_utc,
+            "ended_at_utc": None,
             "source": source,
+            "source_type": source.get("type"),
+            "source_value": source.get("value"),
             "model_version": model_version,
             "cfg_version": cfg_version,
             "line_mode": line_mode,
@@ -120,6 +125,8 @@ class TrafficSpoolWriter:
             ],
             "fps": self._fps,
             "frame_size": {"width": int(frame_size[0]), "height": int(frame_size[1])},
+            "frame_width": int(frame_size[0]),
+            "frame_height": int(frame_size[1]),
         }
         self._run_meta_path = self.run_dir / "run.json"
         self._run_meta: Dict[str, Any] = dict(run_meta)
@@ -186,6 +193,7 @@ class TrafficSpoolWriter:
                     scene_rel = f"scene/{scene_path.name}"
 
             rec = {
+                "contract_version": PORTAL_CONTRACT_VERSION,
                 "event_uid": event_uid,
                 "run_uid": self.run_uid,
                 "site_id": self.cfg.site_id,
@@ -206,6 +214,7 @@ class TrafficSpoolWriter:
                 "class_name": class_name,
                 "confidence": float(ev.confidence) if ev.confidence is not None else None,
                 "bbox": list(ev.bbox_xyxy) if ev.bbox_xyxy is not None else None,
+                "bbox_xyxy": list(ev.bbox_xyxy) if ev.bbox_xyxy is not None else None,
                 "thumb_relpath": thumb_rel,
                 "scene_relpath": scene_rel,
             }
