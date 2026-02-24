@@ -47,7 +47,9 @@ public sealed class EventsController(
                     ClassName = x.ClassName ?? "unknown",
                     ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
                     Notes = x.Review != null ? x.Review.Notes : null,
-                    ThumbnailUrl = x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null,
+                    ThumbnailUrl = x.ScenePath != null
+                        ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
+                        : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
                 })
                 .ToListAsync(ct);
         }
@@ -86,7 +88,9 @@ public sealed class EventsController(
                         ClassName = x.ClassName ?? "unknown",
                         ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
                         Notes = x.Review != null ? x.Review.Notes : null,
-                        ThumbnailUrl = x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null,
+                        ThumbnailUrl = x.ScenePath != null
+                            ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
+                            : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
                     })
                     .ToListAsync(ct);
 
@@ -142,7 +146,9 @@ public sealed class EventsController(
                     Confidence = x.Confidence,
                     ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
                     Notes = x.Review != null ? x.Review.Notes : null,
-                    ThumbnailUrl = x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null,
+                    ThumbnailUrl = x.ScenePath != null
+                        ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
+                        : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
                 })
                 .ToListAsync(ct);
         }
@@ -184,7 +190,9 @@ public sealed class EventsController(
                         Confidence = x.Confidence,
                         ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
                         Notes = x.Review != null ? x.Review.Notes : null,
-                        ThumbnailUrl = x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null,
+                        ThumbnailUrl = x.ScenePath != null
+                            ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
+                            : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
                     })
                     .ToListAsync(ct);
 
@@ -275,7 +283,7 @@ public sealed class EventsController(
             Confidence = row.Confidence,
             ReviewStatus = row.Review != null ? row.Review.ReviewStatus : ReviewStatuses.Pending,
             Notes = row.Review?.Notes,
-            ThumbnailUrl = row.ThumbPath != null ? $"/api/events/{row.EventUid}/thumbnail" : null,
+            ThumbnailUrl = BuildEvidenceUrl(row.EventUid, row.ThumbPath, row.ScenePath),
         };
 
         var criteria = await db.CameraCriteria
@@ -352,6 +360,21 @@ public sealed class EventsController(
         var cap = maxValue > 0 ? maxValue : 200;
         var value = pageSize > 0 ? pageSize : fallback;
         return Math.Min(Math.Max(1, value), cap);
+    }
+
+    private static string? BuildEvidenceUrl(string eventUid, string? thumbPath, string? scenePath)
+    {
+        if (!string.IsNullOrWhiteSpace(scenePath))
+        {
+            return $"/api/events/{eventUid}/thumbnail?kind=scene";
+        }
+
+        if (!string.IsNullOrWhiteSpace(thumbPath))
+        {
+            return $"/api/events/{eventUid}/thumbnail";
+        }
+
+        return null;
     }
 
     private static string Csv(string? value)

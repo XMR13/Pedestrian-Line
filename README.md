@@ -262,6 +262,7 @@ Catatan penting:
 - Retry/backoff aktif untuk error transient (network / 5xx / 429).
 - Progress sinkronisasi per-run disimpan di `.portal_upload_state.json` pada folder run.
 - Contract normalisasi edge→portal ada di `pedestrian_line_counter/portal_contract.py`.
+- API key uploader dapat diambil otomatis dari `portal/appsettings.Local.json` (`Portal.ApiKey`) jika `--api-key` / env tidak diset.
 
 One-command mode (single process: detect + spool + upload)
 -----------------------------------------------------------
@@ -296,6 +297,9 @@ python3 -m pedestrian_line_counter.main \
   --portal-api-key "$PORTAL_API_KEY" \
   --portal-upload-interval-s 10
 ```
+
+Jika kamu tidak ingin `export` setiap sesi, cukup isi `Portal.ApiKey` sekali di file lokal untracked `portal/appsettings.Local.json`.
+Uploader (`portal_uploader.py`) dan integrated uploader (`main.py --portal-upload`) sekarang akan otomatis fallback ke file tersebut.
 
 Portal website MVP (Phase 7.3)
 ------------------------------

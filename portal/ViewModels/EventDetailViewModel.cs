@@ -17,6 +17,8 @@ public sealed class EventDetailViewModel
     public string? Notes { get; set; }
     public string? ThumbnailUrl { get; set; }
 
+    public DateTimeOffset? OccurredAtLocal => OccurredAtUtc?.ToLocalTime();
+
     public string CriteriaTitle { get; set; } = "Qualified Criteria";
     public string CriteriaDescription { get; set; } = "Use your site SOP for qualification decisions.";
 }

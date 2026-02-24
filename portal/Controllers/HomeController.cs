@@ -60,7 +60,9 @@ public sealed class HomeController(PortalDbContext db) : Controller
                     Direction = x.Direction ?? "-",
                     ClassName = x.ClassName ?? "unknown",
                     ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                    ThumbnailUrl = x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null,
+                    ThumbnailUrl = x.ScenePath != null
+                        ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
+                        : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
                 })
                 .ToListAsync(ct);
         }
@@ -97,7 +99,9 @@ public sealed class HomeController(PortalDbContext db) : Controller
                         Direction = x.Direction ?? "-",
                         ClassName = x.ClassName ?? "unknown",
                         ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                        ThumbnailUrl = x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null,
+                        ThumbnailUrl = x.ScenePath != null
+                            ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
+                            : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
                     })
                     .ToListAsync(ct);
 

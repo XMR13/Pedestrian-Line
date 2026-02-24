@@ -50,6 +50,11 @@ public static class EventQueryExtensions
 
     public static string? ToThumbnailUrl(this EventRecord e)
     {
+        if (!string.IsNullOrWhiteSpace(e.ScenePath))
+        {
+            return $"/api/events/{e.EventUid}/thumbnail?kind=scene";
+        }
+
         if (string.IsNullOrWhiteSpace(e.ThumbPath))
         {
             return null;

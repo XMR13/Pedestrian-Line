@@ -38,8 +38,6 @@
         {
             <img src="@Model.ThumbnailUrl" alt="event thumbnail" class="big-thumb-image" />
         }
-        <div class="bbox" title="bbox"></div>
-        <div class="line" title="counting line"></div>
         <div style="position:absolute; left:14px; bottom:14px; display:flex; gap:10px; flex-wrap: wrap;">
             <span class="pill @(Model.Direction == "A_TO_B" ? "ink" : "brand")">@Model.Direction</span>
             <span class="pill">@Model.ClassName</span>
@@ -62,7 +60,8 @@
         <div class="panel">
             <h3>Event metadata</h3>
             <div class="meta">
-                <div class="row"><div class="key">Occurred</div><div class="val">@Model.OccurredAtUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ")</div></div>
+                <div class="row"><div class="key">Occurred (Local)</div><div class="val">@Model.OccurredAtLocal?.ToString("yyyy-MM-dd HH:mm:ss zzz")</div></div>
+                <div class="row"><div class="key">Occurred (UTC)</div><div class="val">@Model.OccurredAtUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ")</div></div>
                 <div class="row"><div class="key">Video time</div><div class="val">@(Model.VideoTimeS?.ToString("0.###") ?? "-") s</div></div>
                 <div class="row"><div class="key">Track</div><div class="val">@Model.TrackId</div></div>
                 <div class="row"><div class="key">Class</div><div class="val">@Model.ClassName</div></div>
@@ -100,7 +99,7 @@
 
             <div class="timeline">
                 <div class="tl-item">
-                    <div class="t">@Model.OccurredAtUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ")</div>
+                    <div class="t">@Model.OccurredAtLocal?.ToString("yyyy-MM-dd HH:mm:ss zzz")</div>
                     <div class="d">Event captured and ingested by portal.</div>
                 </div>
                 <div class="tl-item">

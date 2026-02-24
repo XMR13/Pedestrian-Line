@@ -67,8 +67,6 @@ else
             {
                 <img src="@Model.Current.ThumbnailUrl" alt="event thumbnail" class="big-thumb-image" />
             }
-            <div class="bbox" title="bbox"></div>
-            <div class="line" title="counting line"></div>
             <div style="position:absolute; left:14px; top:14px; display:flex; gap:10px; flex-wrap: wrap;">
                 <span class="pill @(Model.Current.Direction == "A_TO_B" ? "ink" : "brand")">@Model.Current.Direction</span>
                 <span class="pill">@Model.Current.ClassName</span>
@@ -82,7 +80,8 @@ else
         <div class="panel queue-panel">
             <h3>Current event</h3>
             <div class="meta">
-                <div class="row"><div class="key">Occurred</div><div class="val">@Model.Current.OccurredAtUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ")</div></div>
+                <div class="row"><div class="key">Occurred (Local)</div><div class="val">@Model.Current.OccurredAtLocal?.ToString("yyyy-MM-dd HH:mm:ss zzz")</div></div>
+                <div class="row"><div class="key">Occurred (UTC)</div><div class="val">@Model.Current.OccurredAtUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ")</div></div>
                 <div class="row"><div class="key">Video time</div><div class="val">@(Model.Current.VideoTimeS?.ToString("0.###") ?? "-") s</div></div>
                 <div class="row"><div class="key">Direction</div><div class="val">@Model.Current.Direction</div></div>
                 <div class="row"><div class="key">Track</div><div class="val">track_id @Model.Current.TrackId</div></div>
@@ -134,7 +133,7 @@ else
                                 <a class="queue-mini-item @(i == 0 ? "active" : string.Empty)" asp-action="Detail" asp-route-eventUid="@item.EventUid" data-queue-link>
                                     <div class="queue-mini-main">
                                         <strong>@item.EventUid • @item.ClassName • @item.Direction</strong>
-                                        <span>@item.OccurredAtUtc?.ToString("HH:mm:ss") UTC • @item.SiteId/@item.CameraId</span>
+                                        <span>@item.OccurredAtLocal?.ToString("HH:mm:ss") local • @item.SiteId/@item.CameraId</span>
                                     </div>
                                     <span class="pill">@(i == 0 ? "next" : (i + 1).ToString())</span>
                                 </a>

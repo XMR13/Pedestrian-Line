@@ -205,6 +205,8 @@ python3 -m pedestrian_line_counter.portal_uploader \
 ```
 
 Set uploader API key to match `Portal:ApiKey`.
+If you do not want to export env vars every session, set `Portal.ApiKey` once in
+`portal/appsettings.Local.json`; uploader now auto-loads from that file.
 
 ### Uploader watch mode
 

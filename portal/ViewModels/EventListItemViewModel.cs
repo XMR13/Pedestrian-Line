@@ -12,4 +12,6 @@ public sealed class EventListItemViewModel
     public string ReviewStatus { get; set; } = string.Empty;
     public string? Notes { get; set; }
     public string? ThumbnailUrl { get; set; }
+
+    public DateTimeOffset? OccurredAtLocal => OccurredAtUtc?.ToLocalTime();
 }

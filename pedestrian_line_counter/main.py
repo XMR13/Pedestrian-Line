@@ -22,7 +22,7 @@ from .config_io import apply_config_overrides, load_config_overrides, split_over
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
-from .portal_uploader import RetryConfig, UploaderConfig, process_pending_runs
+from .portal_uploader import RetryConfig, UploaderConfig, process_pending_runs, resolve_portal_api_key
 from .report_writer import ReportWriter, ReportWriterConfig
 from .stream_reader import StreamReader
 from .traffic_spool import TrafficSpoolConfig, TrafficSpoolWriter
@@ -473,6 +473,15 @@ def _parse_args() -> argparse.Namespace:
         type=str,
         default="PORTAL_API_KEY",
         help="Environment variable containing portal API key for integrated upload.",
+    )
+    parser.add_argument(
+        "--portal-api-key-json-path",
+        type=str,
+        default=None,
+        help=(
+            "Optional path to appsettings.Local.json containing Portal.ApiKey. "
+            "If omitted, integrated uploader tries ./portal/appsettings.Local.json."
+        ),
     )
     parser.add_argument(
         "--portal-upload-interval-s",
@@ -1419,16 +1428,16 @@ def main() -> None:
             )
         if not args.portal_api_base_url:
             raise SystemExit("--portal-upload requires --portal-api-base-url.")
-        portal_api_key = args.portal_api_key
-        if not portal_api_key:
-            env_name = str(args.portal_api_key_env).strip()
-            if env_name == "":
-                raise SystemExit("--portal-api-key-env must be a non-empty variable name.")
-            portal_api_key = os.environ.get(env_name)
+        portal_api_key = resolve_portal_api_key(
+            args.portal_api_key,
+            api_key_env=str(args.portal_api_key_env),
+            appsettings_local_path=args.portal_api_key_json_path,
+        )
         if not portal_api_key:
             raise SystemExit(
                 "Missing portal API key for integrated upload. "
-                "Pass --portal-api-key or set --portal-api-key-env."
+                "Pass --portal-api-key, set --portal-api-key-env, "
+                "or set Portal.ApiKey in portal/appsettings.Local.json."
             )
         portal_uploader_cfg = UploaderConfig(
             spool_dir=Path(spool_dir),

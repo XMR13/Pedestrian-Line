@@ -142,6 +142,36 @@ class PortalApiClient:
             raise RetryableUploadError(f"timeout on {url}") from exc
 
 
+def resolve_portal_api_key(
+    direct_api_key: Optional[str],
+    *,
+    api_key_env: str = "PORTAL_API_KEY",
+    appsettings_local_path: Optional[str] = None,
+) -> str:
+    """
+    Resolve portal API key with this precedence:
+    1) direct CLI value
+    2) environment variable
+    3) appsettings.Local.json (untracked)
+    """
+    key = (str(direct_api_key).strip() if direct_api_key is not None else "")
+    if key:
+        return key
+
+    env_name = str(api_key_env).strip()
+    if env_name:
+        key = (os.getenv(env_name, "") or "").strip()
+        if key:
+            return key
+
+    for path in _candidate_local_settings_paths(appsettings_local_path):
+        key = _load_api_key_from_local_settings(path)
+        if key:
+            return key
+
+    return ""
+
+
 def process_pending_runs(
     cfg: UploaderConfig,
     *,
@@ -431,12 +461,60 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _candidate_local_settings_paths(path_arg: Optional[str]) -> List[Path]:
+    if path_arg is not None and str(path_arg).strip():
+        return [Path(str(path_arg).strip())]
+
+    module_root = Path(__file__).resolve().parents[1]
+    candidates = [
+        Path.cwd() / "portal" / "appsettings.Local.json",
+        module_root / "portal" / "appsettings.Local.json",
+    ]
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    uniq: List[Path] = []
+    for p in candidates:
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(p)
+    return uniq
+
+
+def _load_api_key_from_local_settings(path: Path) -> str:
+    if not path.exists():
+        return ""
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    if not isinstance(obj, dict):
+        return ""
+    portal = obj.get("Portal")
+    if not isinstance(portal, dict):
+        return ""
+    raw = portal.get("ApiKey")
+    if not isinstance(raw, str):
+        return ""
+    return raw.strip()
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Upload edge spool runs to portal API (idempotent + retry/backoff).")
     parser.add_argument("--spool-dir", type=str, required=True, help="Root spool directory containing YYYY-MM-DD/<run_uid> runs.")
     parser.add_argument("--api-base-url", type=str, required=True, help="Portal API base URL, e.g. http://portal.local:5000")
     parser.add_argument("--api-key", type=str, default=None, help="Portal API key. If omitted, --api-key-env is used.")
     parser.add_argument("--api-key-env", type=str, default="PORTAL_API_KEY", help="Environment variable containing API key.")
+    parser.add_argument(
+        "--api-key-json-path",
+        type=str,
+        default=None,
+        help=(
+            "Optional path to appsettings.Local.json containing Portal.ApiKey. "
+            "If omitted, uploader tries ./portal/appsettings.Local.json."
+        ),
+    )
 
     parser.add_argument("--watch", action="store_true", help="Run forever and poll for new runs.")
     parser.add_argument("--poll-interval-s", type=float, default=10.0, help="Watch mode polling interval in seconds.")
@@ -466,11 +544,16 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _build_cfg(args: argparse.Namespace) -> UploaderConfig:
-    api_key = args.api_key
-    if not api_key:
-        api_key = os.getenv(str(args.api_key_env), "")
+    api_key = resolve_portal_api_key(
+        args.api_key,
+        api_key_env=str(args.api_key_env),
+        appsettings_local_path=args.api_key_json_path,
+    )
     if not args.dry_run and not api_key:
-        raise SystemExit(f"Missing API key. Pass --api-key or set {args.api_key_env}.")
+        raise SystemExit(
+            "Missing API key. Provide --api-key, set "
+            f"{args.api_key_env}, or set Portal.ApiKey in portal/appsettings.Local.json."
+        )
 
     retry = RetryConfig(
         max_attempts=int(args.retry_max_attempts),

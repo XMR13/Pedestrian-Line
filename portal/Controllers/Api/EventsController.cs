@@ -326,6 +326,7 @@ public sealed class EventsController(
                     ClassName = x.ClassName,
                     TrackId = x.TrackId,
                     ThumbPath = x.ThumbPath,
+                    ScenePath = x.ScenePath,
                     ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
                     Notes = x.Review != null ? x.Review.Notes : null,
                 })
@@ -366,6 +367,7 @@ public sealed class EventsController(
                         ClassName = x.ClassName,
                         TrackId = x.TrackId,
                         ThumbPath = x.ThumbPath,
+                        ScenePath = x.ScenePath,
                         ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
                         Notes = x.Review != null ? x.Review.Notes : null,
                     })
@@ -392,32 +394,47 @@ public sealed class EventsController(
                 track_id = x.TrackId,
                 review_status = x.ReviewStatus,
                 notes = x.Notes,
-                thumbnail_url = string.IsNullOrWhiteSpace(x.ThumbPath) ? null : $"/api/events/{x.EventUid}/thumbnail",
+                thumbnail_url = !string.IsNullOrWhiteSpace(x.ScenePath)
+                    ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
+                    : (string.IsNullOrWhiteSpace(x.ThumbPath) ? null : $"/api/events/{x.EventUid}/thumbnail"),
             }),
         });
     }
 
     [HttpGet("{eventUid}/thumbnail")]
     [Authorize]
-    public async Task<IActionResult> Thumbnail(string eventUid, CancellationToken ct)
+    public async Task<IActionResult> Thumbnail(string eventUid, [FromQuery] string? kind, CancellationToken ct)
     {
         var row = await db.Events
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.EventUid == eventUid, ct);
 
-        if (row is null || string.IsNullOrWhiteSpace(row.ThumbPath))
+        if (row is null)
         {
             return NotFound();
         }
 
         var root = EnsureEvidenceRoot();
-        var absolutePath = Path.Combine(root, row.ThumbPath.Replace('/', Path.DirectorySeparatorChar));
-        if (!System.IO.File.Exists(absolutePath))
+        var wantScene = string.Equals((kind ?? string.Empty).Trim(), "scene", StringComparison.OrdinalIgnoreCase);
+        var candidates = wantScene
+            ? new[] { row.ScenePath, row.ThumbPath }
+            : new[] { row.ThumbPath, row.ScenePath };
+
+        foreach (var rel in candidates)
         {
-            return NotFound();
+            if (string.IsNullOrWhiteSpace(rel))
+            {
+                continue;
+            }
+
+            var absolutePath = Path.Combine(root, rel.Replace('/', Path.DirectorySeparatorChar));
+            if (System.IO.File.Exists(absolutePath))
+            {
+                return PhysicalFile(absolutePath, "image/jpeg", enableRangeProcessing: true);
+            }
         }
 
-        return PhysicalFile(absolutePath, "image/jpeg", enableRangeProcessing: true);
+        return NotFound();
     }
 
     private string EnsureEvidenceRoot()
@@ -462,6 +479,7 @@ public sealed class EventsController(
         public string? ClassName { get; set; }
         public int? TrackId { get; set; }
         public string? ThumbPath { get; set; }
+        public string? ScenePath { get; set; }
         public string ReviewStatus { get; set; } = ReviewStatuses.Pending;
         public string? Notes { get; set; }
     }

@@ -6,6 +6,7 @@ from pedestrian_line_counter.portal_uploader import (
     RetryableUploadError,
     UploaderConfig,
     process_single_run,
+    resolve_portal_api_key,
 )
 
 
@@ -198,3 +199,29 @@ def test_process_single_run_in_progress_uploads_only_new_events(tmp_path) -> Non
     state = json.loads((run_dir / ".state.json").read_text(encoding="utf-8"))
     assert state["events_uploaded_count"] == 2
     assert "completed_at_utc" not in state
+
+
+def test_resolve_portal_api_key_prefers_direct_value(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("PORTAL_API_KEY", "env-secret")
+    settings_path = tmp_path / "appsettings.Local.json"
+    settings_path.write_text(json.dumps({"Portal": {"ApiKey": "file-secret"}}), encoding="utf-8")
+
+    key = resolve_portal_api_key(
+        "direct-secret",
+        api_key_env="PORTAL_API_KEY",
+        appsettings_local_path=str(settings_path),
+    )
+    assert key == "direct-secret"
+
+
+def test_resolve_portal_api_key_uses_local_settings_fallback(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("PORTAL_API_KEY", raising=False)
+    settings_path = tmp_path / "appsettings.Local.json"
+    settings_path.write_text(json.dumps({"Portal": {"ApiKey": "file-secret"}}), encoding="utf-8")
+
+    key = resolve_portal_api_key(
+        None,
+        api_key_env="PORTAL_API_KEY",
+        appsettings_local_path=str(settings_path),
+    )
+    assert key == "file-secret"

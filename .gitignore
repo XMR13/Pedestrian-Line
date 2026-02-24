@@ -38,4 +38,4 @@ portal/logs/
 portal/evidence/
 portal/tests/**/bin/
 portal/tests/**/obj/
-portal/appsettings.Local.json
+portal/appsettings.Local*.json

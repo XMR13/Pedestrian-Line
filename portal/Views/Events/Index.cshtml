@@ -74,7 +74,7 @@
                 <thead>
                     <tr>
                         <th scope="col">Thumb</th>
-                        <th scope="col">Time (UTC)</th>
+                        <th scope="col">Time (Local)</th>
                         <th scope="col">Site/Camera</th>
                         <th scope="col">Class</th>
                         <th scope="col">Direction</th>
@@ -102,7 +102,7 @@
                                     <div class="thumb" title="thumbnail unavailable"></div>
                                 }
                             </td>
-                            <td>@item.OccurredAtUtc?.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            <td>@item.OccurredAtLocal?.ToString("yyyy-MM-dd HH:mm:ss")</td>
                             <td>@item.SiteId / @item.CameraId</td>
                             <td>@item.ClassName</td>
                             <td><span class="pill @(item.Direction == "A_TO_B" ? "ink" : "brand")">@item.Direction</span></td>
