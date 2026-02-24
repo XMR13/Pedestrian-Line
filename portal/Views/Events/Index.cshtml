@@ -62,7 +62,7 @@
     </div>
     <div class="mode-tags">
         <span class="pill">page size @Model.PageSize</span>
-        <span class="pill ink">direction @(string.IsNullOrWhiteSpace(Model.Direction) ? "all" : Model.Direction)</span>
+        <span class="pill @(Model.Direction == "A_TO_B" ? "dir-a" : (Model.Direction == "B_TO_A" ? "dir-b" : "ink"))">direction @(string.IsNullOrWhiteSpace(Model.Direction) ? "all" : Model.Direction)</span>
         <span class="pill brand">review @(string.IsNullOrWhiteSpace(Model.ReviewStatus) ? "all" : Model.ReviewStatus)</span>
     </div>
 </section>
@@ -105,7 +105,7 @@
                             <td>@item.OccurredAtLocal?.ToString("yyyy-MM-dd HH:mm:ss")</td>
                             <td>@item.SiteId / @item.CameraId</td>
                             <td>@item.ClassName</td>
-                            <td><span class="pill @(item.Direction == "A_TO_B" ? "ink" : "brand")">@item.Direction</span></td>
+                            <td><span class="pill @(item.Direction == "A_TO_B" ? "dir-a" : "dir-b")">@item.Direction</span></td>
                             <td><span class="pill @StatusClass(item.ReviewStatus)">@item.ReviewStatus</span></td>
                             <td>
                                 <a asp-action="Detail" asp-route-eventUid="@item.EventUid" class="btn secondary btn-compact action-inspect">Inspect</a>

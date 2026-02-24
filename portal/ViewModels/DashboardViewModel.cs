@@ -13,5 +13,10 @@ public sealed class DashboardViewModel
     public int TotalQualified { get; set; }
     public int TotalNotQualified { get; set; }
 
+    public string TrendBucket { get; set; } = "hour";
+    public string TrendTimezone { get; set; } = TimeZoneInfo.Local.Id;
+    public string TrendRangeLabel { get; set; } = string.Empty;
+    public List<DashboardTrendPointViewModel> TrendPoints { get; set; } = [];
+
     public List<EventListItemViewModel> RecentEvents { get; set; } = new();
 }

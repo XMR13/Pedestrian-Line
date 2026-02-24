@@ -44,6 +44,24 @@ public sealed class HomeController(PortalDbContext db) : Controller
 
         vm.TotalReviewed = vm.TotalQualified + vm.TotalNotQualified;
 
+        var trendRows = await DashboardTrendBuilder.QueryRowsAsync(filtered, request.Date, ct);
+        var trend = DashboardTrendBuilder.Build(trendRows, request.Date, TimeZoneInfo.Local);
+        vm.TrendBucket = trend.Bucket;
+        vm.TrendTimezone = trend.TimeZoneId;
+        vm.TrendRangeLabel = trend.RangeLabel;
+        vm.TrendPoints = trend.Points
+            .Select(x => new DashboardTrendPointViewModel
+            {
+                BucketStartLocal = x.BucketStartLocal,
+                Label = x.Label,
+                TooltipLabel = x.TooltipLabel,
+                AToB = x.AToB,
+                BToA = x.BToA,
+                Reviewed = x.Reviewed,
+                Pending = x.Pending,
+            })
+            .ToList();
+
         if (isSqlServer)
         {
             vm.RecentEvents = await filtered

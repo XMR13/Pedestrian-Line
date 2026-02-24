@@ -39,7 +39,7 @@
             <img src="@Model.ThumbnailUrl" alt="event thumbnail" class="big-thumb-image" />
         }
         <div style="position:absolute; left:14px; bottom:14px; display:flex; gap:10px; flex-wrap: wrap;">
-            <span class="pill @(Model.Direction == "A_TO_B" ? "ink" : "brand")">@Model.Direction</span>
+            <span class="pill @(Model.Direction == "A_TO_B" ? "dir-a" : "dir-b")">@Model.Direction</span>
             <span class="pill">@Model.ClassName</span>
             <span class="pill">frame @(Model.FrameIndex?.ToString() ?? "n/a")</span>
         </div>

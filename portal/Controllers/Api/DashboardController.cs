@@ -39,6 +39,9 @@ public sealed class DashboardController(PortalDbContext db) : ControllerBase
 
         var reviewed = qualified + notQualified;
 
+        var trendRows = await DashboardTrendBuilder.QueryRowsAsync(filtered, request.Date, ct);
+        var trend = DashboardTrendBuilder.Build(trendRows, request.Date, TimeZoneInfo.Local);
+
         List<object> recent;
         if (isSqlServer)
         {
@@ -113,6 +116,22 @@ public sealed class DashboardController(PortalDbContext db) : ControllerBase
                 reviewed,
                 qualified,
                 not_qualified = notQualified,
+            },
+            trend = new
+            {
+                bucket = trend.Bucket,
+                timezone = trend.TimeZoneId,
+                range_label = trend.RangeLabel,
+                points = trend.Points.Select(x => new
+                {
+                    bucket_start_local = x.BucketStartLocal.ToString("yyyy-MM-ddTHH:mm:ss"),
+                    label = x.Label,
+                    tooltip = x.TooltipLabel,
+                    a_to_b = x.AToB,
+                    b_to_a = x.BToA,
+                    reviewed = x.Reviewed,
+                    pending = x.Pending,
+                }),
             },
             recent,
         });

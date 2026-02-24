@@ -48,6 +48,7 @@ public sealed class PortalWorkflowTests
         var json = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(json);
         var totals = doc.RootElement.GetProperty("totals");
+        var trend = doc.RootElement.GetProperty("trend");
 
         Assert.Equal(2, totals.GetProperty("a_to_b").GetInt32());
         Assert.Equal(1, totals.GetProperty("b_to_a").GetInt32());
@@ -55,6 +56,14 @@ public sealed class PortalWorkflowTests
         Assert.Equal(2, totals.GetProperty("reviewed").GetInt32());
         Assert.Equal(1, totals.GetProperty("qualified").GetInt32());
         Assert.Equal(1, totals.GetProperty("not_qualified").GetInt32());
+
+        Assert.Equal("day", trend.GetProperty("bucket").GetString());
+        var points = trend.GetProperty("points").EnumerateArray().ToList();
+        Assert.Equal(14, points.Count);
+        Assert.Equal(2, points.Sum(x => x.GetProperty("a_to_b").GetInt32()));
+        Assert.Equal(1, points.Sum(x => x.GetProperty("b_to_a").GetInt32()));
+        Assert.Equal(2, points.Sum(x => x.GetProperty("reviewed").GetInt32()));
+        Assert.Equal(1, points.Sum(x => x.GetProperty("pending").GetInt32()));
     }
 
     [Fact]
