@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Portal.Web.Data;
 using Portal.Web.Infrastructure;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
 builder.Services
     .AddControllersWithViews()
@@ -48,6 +50,22 @@ builder.Services.AddDbContext<PortalDbContext>(options =>
 });
 
 var app = builder.Build();
+var portalOptions = app.Services.GetRequiredService<IOptions<PortalOptions>>().Value;
+if (string.IsNullOrWhiteSpace(portalOptions.ApiKey?.Trim()))
+{
+    throw new InvalidOperationException(
+        "Missing Portal:ApiKey. Set environment variable 'Portal__ApiKey' or create 'portal/appsettings.Local.json'."
+    );
+}
+
+var loginOptions = app.Services.GetRequiredService<IOptions<LoginGateOptions>>().Value;
+if (string.IsNullOrWhiteSpace(loginOptions.Username?.Trim()) ||
+    string.IsNullOrWhiteSpace(loginOptions.Password))
+{
+    throw new InvalidOperationException(
+        "Missing LoginGate credentials. Set env vars 'LoginGate__Username' and 'LoginGate__Password' or add them in 'portal/appsettings.Local.json'."
+    );
+}
 
 if (!app.Environment.IsDevelopment())
 {

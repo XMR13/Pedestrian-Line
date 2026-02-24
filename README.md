@@ -325,9 +325,12 @@ Konfigurasi penting ada di `portal/appsettings.json`:
 
 - `Database:Provider` (`Sqlite` default lokal, atau `SqlServer`).
 - `ConnectionStrings:PortalDb` sesuai provider.
-- `Portal:ApiKey` untuk endpoint uploader (`X-API-Key`).
 - `Portal:EvidenceRootPath` untuk penyimpanan thumbnail.
-- `LoginGate:*` untuk username/password login MVP.
+- `LoginGate:DisplayName` untuk nama tampilan reviewer.
+
+`Portal:ApiKey` dan `LoginGate:Username/Password` jangan disimpan di file tracked.
+Set via env var (`Portal__ApiKey`, `LoginGate__Username`, `LoginGate__Password`)
+atau file lokal untracked `portal/appsettings.Local.json`.
 
 Jika mode `Sqlite` default, DB `portal/portal.db` dibuat otomatis saat `dotnet run`.
 Jika mode `SqlServer`, bisa pakai bootstrap:

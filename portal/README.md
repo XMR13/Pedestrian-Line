@@ -27,13 +27,22 @@ Then provides:
 
 ## Configuration
 
-Edit `appsettings.json`:
+Edit `appsettings.json` for non-secret values:
 
 - `Database:Provider`: `Sqlite` (local) or `SqlServer` (deployment)
 - `ConnectionStrings:PortalDb`: provider-specific connection string
-- `Portal:ApiKey`: API key expected on uploader endpoints (`X-API-Key`)
 - `Portal:EvidenceRootPath`: disk folder for thumbnails (relative or absolute)
-- `LoginGate:Username/Password/DisplayName`: MVP login credentials
+- `LoginGate:DisplayName`: reviewer display name
+
+`Portal:ApiKey` and `LoginGate:Username/Password` are **not** meant to be committed. Provide secrets via:
+
+1. Environment variables (recommended):
+   - `Portal__ApiKey`
+   - `LoginGate__Username`
+   - `LoginGate__Password`
+2. Local untracked file: `portal/appsettings.Local.json` (copy from `portal/appsettings.Local.example.json`)
+
+Startup fails fast if API key or login credentials are missing.
 
 ## Run (Local SQLite, recommended)
 
@@ -64,11 +73,6 @@ Now listening on: http://localhost:5000
 Login page:
 
 - `http://localhost:5000/Account/Login`
-
-Default credentials:
-
-- username: `admin`
-- password: `admin123`
 
 With default `Sqlite` config, no SQL Server setup is required.
 
@@ -197,7 +201,7 @@ Use existing edge uploader:
 python3 -m pedestrian_line_counter.portal_uploader \
   --spool-dir /path/to/spool \
   --api-base-url http://localhost:5000 \
-  --api-key change-this-api-key
+  --api-key "$PORTAL_API_KEY"
 ```
 
 Set uploader API key to match `Portal:ApiKey`.
@@ -208,7 +212,7 @@ Set uploader API key to match `Portal:ApiKey`.
 python3 -m pedestrian_line_counter.portal_uploader \
   --spool-dir /path/to/spool \
   --api-base-url http://localhost:5000 \
-  --api-key change-this-api-key \
+  --api-key "$PORTAL_API_KEY" \
   --watch \
   --poll-interval-s 10
 ```
