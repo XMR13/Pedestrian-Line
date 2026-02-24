@@ -1,19 +1,20 @@
 @model EventDetailViewModel
 @{
-    ViewData["Title"] = "Event Detail";
+    ViewData["Title"] = "Event Inspector";
     ViewData["CurrentEventUid"] = Model.EventUid;
 }
 
 <div class="topbar">
     <div class="title">
-        <h2>Event Detail</h2>
-        <p>Evidence + metadata + review history.</p>
+        <h2>Event Inspector</h2>
+        <p>Focused single-event evidence, metadata, and review timeline.</p>
     </div>
-    <div class="filters">
+    <div class="filters detail-header-tools">
         <div class="field">
             <label for="event-search">Event UID</label>
             <input id="event-search" type="text" value="@Model.EventUid" readonly />
         </div>
+        <a class="btn secondary" asp-action="Index" style="text-decoration:none;">Back to Browser</a>
         <a class="btn secondary" asp-action="ReviewQueue" style="text-decoration:none;">Back to Queue</a>
     </div>
 </div>

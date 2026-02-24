@@ -81,19 +81,19 @@ else
                     Review <span class="pill">Y/N</span>
                 </a>
                 <a class="@NavClass("Events", "Index")" aria-current="@AriaCurrent("Events", "Index")" asp-controller="Events" asp-action="Index">
-                    Event Browser
+                    Event Browser <span class="pill">LIST</span>
                 </a>
                 @if (!string.IsNullOrWhiteSpace(currentEventUid))
                 {
                     <a class="@NavClass("Events", "Detail")" aria-current="@AriaCurrent("Events", "Detail")" asp-controller="Events" asp-action="Detail" asp-route-eventUid="@currentEventUid">
-                        Event Detail
+                        Event Inspector <span class="pill ink">FOCUS</span>
                     </a>
                 }
                 else
                 {
-                    <a asp-controller="Events" asp-action="Index">
-                        Event Detail
-                    </a>
+                    <span class="nav-disabled" aria-disabled="true" title="Select an event from Event Browser or Review Queue first.">
+                        Event Inspector <span class="pill">select event</span>
+                    </span>
                 }
                 <a asp-controller="Events" asp-action="ExportCsv">
                     Export <span class="pill">CSV</span>

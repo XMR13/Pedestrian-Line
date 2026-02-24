@@ -217,6 +217,19 @@ Per-run uploader state file:
 
 - `<run_dir>/.portal_upload_state.json`
 
+## Tests
+
+Focused Phase 7.3 portal integration tests live in:
+
+- `portal/tests/Portal.Web.Tests/`
+
+Run:
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+dotnet test .\tests\Portal.Web.Tests\Portal.Web.Tests.csproj
+```
+
 ## Route map
 
 Pages:

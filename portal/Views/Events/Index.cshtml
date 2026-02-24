@@ -6,7 +6,7 @@
 <div class="topbar">
     <div class="title">
         <h2>Event Browser</h2>
-        <p>Filter by camera/date/class/review and export reviewed events.</p>
+        <p>Step 1: search and shortlist events. Step 2: open one row to inspect full evidence.</p>
     </div>
     <a class="btn secondary" asp-action="ExportCsv"
        asp-route-siteId="@Model.SiteId"
@@ -17,7 +17,7 @@
        asp-route-reviewStatus="@Model.ReviewStatus">Export Reviewed CSV</a>
 </div>
 
-<form method="get" class="filters" style="margin-bottom: 14px;">
+<form method="get" class="filters event-browser-filters" style="margin-bottom: 14px;">
     <div class="field">
         <label for="siteId">Site</label>
         <input id="siteId" type="text" name="siteId" value="@Model.SiteId" placeholder="subang" />
@@ -79,7 +79,7 @@
                         <th scope="col">Class</th>
                         <th scope="col">Direction</th>
                         <th scope="col">Review</th>
-                        <th scope="col">Action</th>
+                        <th scope="col">Inspect</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -107,7 +107,9 @@
                             <td>@item.ClassName</td>
                             <td><span class="pill @(item.Direction == "A_TO_B" ? "ink" : "brand")">@item.Direction</span></td>
                             <td><span class="pill @StatusClass(item.ReviewStatus)">@item.ReviewStatus</span></td>
-                            <td><a asp-action="Detail" asp-route-eventUid="@item.EventUid" class="pill" style="text-decoration:none;">open</a></td>
+                            <td>
+                                <a asp-action="Detail" asp-route-eventUid="@item.EventUid" class="btn secondary btn-compact action-inspect">Inspect</a>
+                            </td>
                         </tr>
                     }
                 }
