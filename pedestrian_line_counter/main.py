@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+import threading
 import time
 
 import cv2
@@ -21,6 +22,7 @@ from .config_io import apply_config_overrides, load_config_overrides, split_over
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
+from .portal_uploader import RetryConfig, UploaderConfig, process_pending_runs
 from .report_writer import ReportWriter, ReportWriterConfig
 from .stream_reader import StreamReader
 from .traffic_spool import TrafficSpoolConfig, TrafficSpoolWriter
@@ -443,6 +445,96 @@ def _parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=None,
         help="Include technical columns (track_id), frame_index, class_id, confidence, thumb path)."
+    )
+    parser.add_argument(
+        "--portal-upload",
+        dest="portal_upload",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Enable integrated portal uploader in this same process. "
+            "Use this to run detect+spool+upload with a single command."
+        ),
+    )
+    parser.add_argument(
+        "--portal-api-base-url",
+        type=str,
+        default=None,
+        help="Portal API base URL for integrated upload (e.g. http://localhost:5000).",
+    )
+    parser.add_argument(
+        "--portal-api-key",
+        type=str,
+        default=None,
+        help="Portal API key for integrated upload. If omitted, --portal-api-key-env is used.",
+    )
+    parser.add_argument(
+        "--portal-api-key-env",
+        type=str,
+        default="PORTAL_API_KEY",
+        help="Environment variable containing portal API key for integrated upload.",
+    )
+    parser.add_argument(
+        "--portal-upload-interval-s",
+        type=float,
+        default=10.0,
+        help="Live mode only: how often integrated uploader syncs spool runs.",
+    )
+    parser.add_argument(
+        "--portal-upload-max-runs-per-pass",
+        type=int,
+        default=None,
+        help="Integrated uploader: limit runs processed per sync pass.",
+    )
+    parser.add_argument(
+        "--portal-upload-timeout-s",
+        type=float,
+        default=20.0,
+        help="Integrated uploader HTTP timeout in seconds.",
+    )
+    parser.add_argument(
+        "--portal-upload-events-batch-size",
+        type=int,
+        default=200,
+        help="Integrated uploader batch size for /api/events/upsert.",
+    )
+    parser.add_argument(
+        "--portal-upload-thumbnails",
+        dest="portal_upload_thumbnails",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Integrated uploader: enable/disable event thumbnail upload.",
+    )
+    parser.add_argument(
+        "--portal-upload-scene-thumbnails",
+        dest="portal_upload_scene_thumbnails",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Integrated uploader: enable/disable scene thumbnail upload.",
+    )
+    parser.add_argument(
+        "--portal-upload-retry-max-attempts",
+        type=int,
+        default=8,
+        help="Integrated uploader retry attempts per API request (0=unlimited).",
+    )
+    parser.add_argument(
+        "--portal-upload-retry-initial-delay-s",
+        type=float,
+        default=1.0,
+        help="Integrated uploader initial retry delay in seconds.",
+    )
+    parser.add_argument(
+        "--portal-upload-retry-max-delay-s",
+        type=float,
+        default=30.0,
+        help="Integrated uploader max retry delay in seconds.",
+    )
+    parser.add_argument(
+        "--portal-upload-retry-backoff-factor",
+        type=float,
+        default=2.0,
+        help="Integrated uploader retry backoff factor (>=1.0).",
     )
 
     parser.add_argument(
@@ -882,14 +974,33 @@ def main() -> None:
         raise SystemExit("--rtsp-latency-ms must be >= 0")
     for flag, value in (
         ("--rtsp-reconnect-max-attempts", args.rtsp_reconnect_max_attempts),
+        ("--portal-upload-max-runs-per-pass", args.portal_upload_max_runs_per_pass),
+        ("--portal-upload-retry-max-attempts", args.portal_upload_retry_max_attempts),
     ):
         if value is not None and value < 0:
             raise SystemExit(f"{flag} must be >= 0")
     for flag, value in (
         ("--rtsp-reconnect-backoff", args.rtsp_reconnect_backoff),
+        ("--portal-upload-retry-backoff-factor", args.portal_upload_retry_backoff_factor),
     ):
         if value is not None and value < 1.0:
             raise SystemExit(f"{flag} must be >= 1.0")
+    for flag, value in (
+        ("--portal-upload-interval-s", args.portal_upload_interval_s),
+        ("--portal-upload-timeout-s", args.portal_upload_timeout_s),
+        ("--portal-upload-retry-initial-delay-s", args.portal_upload_retry_initial_delay_s),
+        ("--portal-upload-retry-max-delay-s", args.portal_upload_retry_max_delay_s),
+    ):
+        if value is not None and value <= 0:
+            raise SystemExit(f"{flag} must be > 0")
+    if (
+        args.portal_upload_retry_max_delay_s is not None
+        and args.portal_upload_retry_initial_delay_s is not None
+        and float(args.portal_upload_retry_max_delay_s) < float(args.portal_upload_retry_initial_delay_s)
+    ):
+        raise SystemExit("--portal-upload-retry-max-delay-s must be >= --portal-upload-retry-initial-delay-s")
+    if args.portal_upload_events_batch_size is not None and int(args.portal_upload_events_batch_size) <= 0:
+        raise SystemExit("--portal-upload-events-batch-size must be > 0")
 
     if args.config:
         cfg_before = copy.deepcopy(cfg)
@@ -1231,6 +1342,11 @@ def main() -> None:
 
     spool: Optional[TrafficSpoolWriter] = None
     report_writer: Optional[ReportWriter] = None
+    portal_uploader_cfg: Optional[UploaderConfig] = None
+    portal_uploader_interval_s: float = float(args.portal_upload_interval_s)
+    portal_uploader_max_runs: Optional[int] = args.portal_upload_max_runs_per_pass
+    portal_uploader_stop_event: Optional[threading.Event] = None
+    portal_uploader_thread: Optional[threading.Thread] = None
     spool_dir = Path(args.spool_dir) if args.spool_dir else cfg.spool.root_dir
     if spool_dir is not None:
         cam_id = args.camera_id or cfg.spool.camera_id or (args.camera if args.camera else "camera")
@@ -1295,6 +1411,39 @@ def main() -> None:
             fps=float(fps),
             frame_size=(int(width), int(height)),
             class_names=class_names_map,
+        )
+    if args.portal_upload:
+        if spool is None or spool_dir is None:
+            raise SystemExit(
+                "--portal-upload requires spool output. Set --spool-dir (or app.spool.root_dir) first."
+            )
+        if not args.portal_api_base_url:
+            raise SystemExit("--portal-upload requires --portal-api-base-url.")
+        portal_api_key = args.portal_api_key
+        if not portal_api_key:
+            env_name = str(args.portal_api_key_env).strip()
+            if env_name == "":
+                raise SystemExit("--portal-api-key-env must be a non-empty variable name.")
+            portal_api_key = os.environ.get(env_name)
+        if not portal_api_key:
+            raise SystemExit(
+                "Missing portal API key for integrated upload. "
+                "Pass --portal-api-key or set --portal-api-key-env."
+            )
+        portal_uploader_cfg = UploaderConfig(
+            spool_dir=Path(spool_dir),
+            api_base_url=str(args.portal_api_base_url),
+            api_key=str(portal_api_key),
+            timeout_s=float(args.portal_upload_timeout_s),
+            events_batch_size=int(args.portal_upload_events_batch_size),
+            upload_thumbnails=bool(args.portal_upload_thumbnails),
+            upload_scene_thumbnails=bool(args.portal_upload_scene_thumbnails),
+            retry=RetryConfig(
+                max_attempts=int(args.portal_upload_retry_max_attempts),
+                initial_delay_s=float(args.portal_upload_retry_initial_delay_s),
+                max_delay_s=float(args.portal_upload_retry_max_delay_s),
+                backoff_factor=float(args.portal_upload_retry_backoff_factor),
+            ),
         )
 
     report_enabled = (
@@ -1512,6 +1661,47 @@ def main() -> None:
             overflow_policy=queue_policy,
         )
         reader.start()
+
+    def _portal_upload_pass(reason: str) -> None:
+        if portal_uploader_cfg is None:
+            return
+        try:
+            summary = process_pending_runs(
+                portal_uploader_cfg,
+                force=False,
+                dry_run=False,
+                max_runs=portal_uploader_max_runs,
+            )
+            if summary.completed_runs > 0 or summary.failed_runs > 0:
+                print(
+                    f"[main][portal] {reason}: discovered={summary.discovered_runs} "
+                    f"completed={summary.completed_runs} skipped={summary.skipped_runs} failed={summary.failed_runs}"
+                )
+        except Exception as exc:
+            print(f"[main][portal] {reason} upload pass failed: {exc}")
+
+    if portal_uploader_cfg is not None:
+        if is_live:
+            portal_uploader_stop_event = threading.Event()
+
+            def _portal_upload_loop() -> None:
+                assert portal_uploader_stop_event is not None
+                while not portal_uploader_stop_event.is_set():
+                    _portal_upload_pass("watch-pass")
+                    portal_uploader_stop_event.wait(max(float(portal_uploader_interval_s), 0.5))
+
+            portal_uploader_thread = threading.Thread(
+                target=_portal_upload_loop,
+                name="portal-uploader",
+                daemon=True,
+            )
+            portal_uploader_thread.start()
+            print(
+                "[main][portal] integrated uploader enabled "
+                f"(interval={float(portal_uploader_interval_s):.1f}s, max_runs_per_pass={portal_uploader_max_runs})"
+            )
+        else:
+            print("[main][portal] integrated uploader enabled (single final upload pass at end).")
 
     try:
         def refresh_realtime_fps(
@@ -1914,6 +2104,11 @@ def main() -> None:
     except KeyboardInterrupt:
         print("[main] Interrupted (Ctrl-C). Shutting down...")
 
+    if portal_uploader_stop_event is not None:
+        portal_uploader_stop_event.set()
+        if portal_uploader_thread is not None:
+            portal_uploader_thread.join(timeout=max(float(portal_uploader_interval_s) + 1.0, 2.0))
+
     if reader is not None:
         live_reader_read_frames_total += int(getattr(reader, "read_frames", 0))
         live_reader_dropped_total += int(getattr(reader, "dropped", 0))
@@ -1949,6 +2144,8 @@ def main() -> None:
         spool.close()
     if report_writer is not None:
         report_writer.close()
+    if portal_uploader_cfg is not None:
+        _portal_upload_pass("final-pass")
     if progress_bar is not None:
         progress_bar.close()
     if args.show:

@@ -189,10 +189,12 @@ def process_single_run(
 
     run_payload = build_run_upsert_payload(run_meta)
     event_payloads = [build_event_upsert_payload(ev) for ev in events]
+    run_is_closed = bool(str(run_payload.get("ended_at_utc") or "").strip())
 
     if dry_run:
         print(
-            f"[uploader] dry-run run_uid={run_payload['run_uid']} events={len(event_payloads)} "
+            f"[uploader] dry-run run_uid={run_payload['run_uid']} closed={run_is_closed} "
+            f"events={len(event_payloads)} "
             f"thumbs={_count_evidence(event_payloads, 'thumb_relpath')}"
         )
         return "completed"
@@ -206,9 +208,24 @@ def process_single_run(
             )
             state["run_upserted_at_utc"] = _utcnow_iso()
             _save_state(run_dir, cfg.state_filename, state)
+        elif run_is_closed and not state.get("run_finalized_at_utc"):
+            # Ensure final metadata (ended_at_utc + health summary) is pushed once the run ends.
+            _retry_with_backoff(
+                lambda: client.upsert_run(run_payload),
+                cfg.retry,
+                what=f"upsert_run_finalize({run_payload['run_uid']})",
+            )
+            state["run_finalized_at_utc"] = _utcnow_iso()
+            _save_state(run_dir, cfg.state_filename, state)
 
-        if force or not state.get("events_upserted_at_utc"):
-            for batch in split_batches(event_payloads, int(cfg.events_batch_size)):
+        prev_event_count = _state_int(state, "events_uploaded_count")
+        if prev_event_count > len(event_payloads):
+            prev_event_count = 0
+        should_sync_events = force or (len(event_payloads) > prev_event_count) or (not state.get("events_upserted_at_utc"))
+        if should_sync_events:
+            start_idx = 0 if force else prev_event_count
+            events_delta = event_payloads[start_idx:]
+            for batch in split_batches(events_delta, int(cfg.events_batch_size)):
                 payload = build_events_batch_payload(batch)
                 _retry_with_backoff(
                     lambda p=payload: client.upsert_events(p),
@@ -219,41 +236,68 @@ def process_single_run(
             state["events_uploaded_count"] = len(event_payloads)
             _save_state(run_dir, cfg.state_filename, state)
 
-        if cfg.upload_thumbnails and (force or not state.get("thumbs_upserted_at_utc")):
+        prev_thumb_seen = _state_int(state, "thumbs_seen_event_count")
+        if prev_thumb_seen > len(event_payloads):
+            prev_thumb_seen = 0
+        if cfg.upload_thumbnails and (force or (len(event_payloads) > prev_thumb_seen) or (not state.get("thumbs_upserted_at_utc"))):
+            start_idx = 0 if force else prev_thumb_seen
             uploaded = _upload_event_thumbnails(
                 run_dir,
-                event_payloads,
+                event_payloads[start_idx:],
                 cfg,
                 client,
                 relpath_key="thumb_relpath",
                 evidence_kind="object",
             )
             state["thumbs_upserted_at_utc"] = _utcnow_iso()
-            state["thumbs_uploaded_count"] = uploaded
+            if force:
+                state["thumbs_uploaded_count"] = uploaded
+            else:
+                state["thumbs_uploaded_count"] = _state_int(state, "thumbs_uploaded_count") + uploaded
+            state["thumbs_seen_event_count"] = len(event_payloads)
             _save_state(run_dir, cfg.state_filename, state)
 
-        if cfg.upload_scene_thumbnails and (force or not state.get("scene_upserted_at_utc")):
+        prev_scene_seen = _state_int(state, "scene_seen_event_count")
+        if prev_scene_seen > len(event_payloads):
+            prev_scene_seen = 0
+        if cfg.upload_scene_thumbnails and (force or (len(event_payloads) > prev_scene_seen) or (not state.get("scene_upserted_at_utc"))):
+            start_idx = 0 if force else prev_scene_seen
             uploaded_scene = _upload_event_thumbnails(
                 run_dir,
-                event_payloads,
+                event_payloads[start_idx:],
                 cfg,
                 client,
                 relpath_key="scene_relpath",
                 evidence_kind="scene",
             )
             state["scene_upserted_at_utc"] = _utcnow_iso()
-            state["scene_uploaded_count"] = uploaded_scene
+            if force:
+                state["scene_uploaded_count"] = uploaded_scene
+            else:
+                state["scene_uploaded_count"] = _state_int(state, "scene_uploaded_count") + uploaded_scene
+            state["scene_seen_event_count"] = len(event_payloads)
             _save_state(run_dir, cfg.state_filename, state)
 
         state["contract_version"] = PORTAL_CONTRACT_VERSION
         state["run_uid"] = run_payload["run_uid"]
-        state["completed_at_utc"] = _utcnow_iso()
         state["last_error"] = None
+        if run_is_closed:
+            state["completed_at_utc"] = _utcnow_iso()
+            state["in_progress_last_sync_at_utc"] = None
+        else:
+            state.pop("completed_at_utc", None)
+            state["in_progress_last_sync_at_utc"] = _utcnow_iso()
         _save_state(run_dir, cfg.state_filename, state)
-        print(
-            f"[uploader] completed run_uid={run_payload['run_uid']} "
-            f"events={len(event_payloads)} thumbs={state.get('thumbs_uploaded_count', 0)}"
-        )
+        if run_is_closed:
+            print(
+                f"[uploader] completed run_uid={run_payload['run_uid']} "
+                f"events={len(event_payloads)} thumbs={state.get('thumbs_uploaded_count', 0)}"
+            )
+        else:
+            print(
+                f"[uploader] synced(in-progress) run_uid={run_payload['run_uid']} "
+                f"events={len(event_payloads)} thumbs={state.get('thumbs_uploaded_count', 0)}"
+            )
         return "completed"
     except Exception as exc:
         state["last_error"] = str(exc)
@@ -348,6 +392,14 @@ def _load_state(run_dir: Path, state_filename: str) -> Dict[str, Any]:
     if isinstance(obj, dict):
         return obj
     return {}
+
+
+def _state_int(state: Mapping[str, Any], key: str) -> int:
+    value = state.get(key, 0)
+    try:
+        return max(int(value), 0)
+    except Exception:
+        return 0
 
 
 def _save_state(run_dir: Path, state_filename: str, state: Mapping[str, Any]) -> None:

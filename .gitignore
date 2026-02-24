@@ -36,3 +36,5 @@ portal/*.db-wal
 portal/.portal.pid
 portal/logs/
 portal/evidence/
+portal/tests/**/bin/
+portal/tests/**/obj/

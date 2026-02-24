@@ -263,6 +263,40 @@ Catatan penting:
 - Progress sinkronisasi per-run disimpan di `.portal_upload_state.json` pada folder run.
 - Contract normalisasi edge→portal ada di `pedestrian_line_counter/portal_contract.py`.
 
+One-command mode (single process: detect + spool + upload)
+-----------------------------------------------------------
+
+Kalau kamu tidak mau menjalankan 2 proses terpisah, gunakan integrated uploader langsung dari `main.py`:
+
+```bash
+python3 -m pedestrian_line_counter.main \
+  --backend onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --input media/input.mp4 \
+  --spool-dir data/traffic_runs \
+  --site-id subang \
+  --camera-id cam_01 \
+  --video-start 2026-02-24T08:00:00+07:00 \
+  --portal-upload \
+  --portal-api-base-url http://portal.local:5000 \
+  --portal-api-key "$PORTAL_API_KEY"
+```
+
+Untuk live RTSP, cukup pakai flag yang sama (`--portal-upload`) dan `main.py` akan melakukan sync berkala selama proses berjalan:
+
+```bash
+python3 -m pedestrian_line_counter.main \
+  --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
+  --spool-dir data/traffic_runs \
+  --site-id subang \
+  --camera-id cam_01 \
+  --portal-upload \
+  --portal-api-base-url http://portal.local:5000 \
+  --portal-api-key "$PORTAL_API_KEY" \
+  --portal-upload-interval-s 10
+```
+
 Portal website MVP (Phase 7.3)
 ------------------------------
 

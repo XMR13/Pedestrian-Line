@@ -63,3 +63,14 @@ def test_iter_event_records_raises_for_invalid_json(tmp_path) -> None:
 
     with pytest.raises(PortalContractError):
         list(iter_event_records(run_dir))
+
+
+def test_iter_event_records_ignores_trailing_partial_line(tmp_path) -> None:
+    run_dir = tmp_path / "2026-02-20" / "run_001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text('{"ok":1}\n{"partial":', encoding="utf-8")
+
+    rows = list(iter_event_records(run_dir))
+
+    assert len(rows) == 1
+    assert rows[0]["ok"] == 1

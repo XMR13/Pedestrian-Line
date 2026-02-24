@@ -26,17 +26,23 @@ def iter_event_records(run_dir: Path) -> Iterator[Dict[str, Any]]:
     if not path.exists():
         raise PortalContractError(f"event stream not found: {path}")
 
-    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        row = line.strip()
-        if not row:
-            continue
-        try:
-            obj = json.loads(row)
-        except json.JSONDecodeError as exc:
-            raise PortalContractError(f"invalid JSON on {path}:{i}: {exc}") from exc
-        if not isinstance(obj, dict):
-            raise PortalContractError(f"invalid event object on {path}:{i}: expected JSON object")
-        yield obj
+    with path.open("r", encoding="utf-8") as f:
+        for i, line in enumerate(f, start=1):
+            row = line.strip()
+            if not row:
+                continue
+            try:
+                obj = json.loads(row)
+            except json.JSONDecodeError as exc:
+                # In live mode, uploader may read while writer is appending the last line.
+                # If the final line is not newline-terminated, treat it as an in-progress
+                # partial write and ignore for this pass.
+                if not line.endswith("\n"):
+                    break
+                raise PortalContractError(f"invalid JSON on {path}:{i}: {exc}") from exc
+            if not isinstance(obj, dict):
+                raise PortalContractError(f"invalid event object on {path}:{i}: expected JSON object")
+            yield obj
 
 
 def load_event_records(run_dir: Path) -> List[Dict[str, Any]]:
