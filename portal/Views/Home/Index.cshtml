@@ -7,6 +7,45 @@
     var totalObserved = Model.TotalAToB + Model.TotalBToA;
     var queueEstimateMinutes = pending == 0 ? 0 : Math.Max(1, (int)Math.Ceiling((pending * 5.0) / 60.0));
     var reviewCompletion = (pending + reviewed) == 0 ? 0 : (int)Math.Round((reviewed * 100.0) / (pending + reviewed));
+    var trendPoints = Model.TrendPoints;
+    var trendCount = trendPoints.Count;
+    const double trendWidth = 920d;
+    const double trendHeight = 210d;
+    const double trendPadLeft = 44d;
+    const double trendPadRight = 18d;
+    const double trendPadTop = 16d;
+    const double trendPadBottom = 28d;
+    var trendPlotWidth = trendWidth - trendPadLeft - trendPadRight;
+    var trendPlotHeight = trendHeight - trendPadTop - trendPadBottom;
+    var trendMax = trendCount == 0
+        ? 1
+        : Math.Max(1, trendPoints.Max(x => Math.Max(x.AToB, x.BToA)));
+    var trendXAxisStep = trendCount <= 10 ? 1 : Math.Max(1, (int)Math.Ceiling(trendCount / 8.0));
+    var xAxisMeaning = Model.TrendBucket == "hour"
+        ? "Hour of selected date (local time)"
+        : "Date (local time)";
+    var aSeriesPoints = new List<string>(trendCount);
+    var bSeriesPoints = new List<string>(trendCount);
+    for (var i = 0; i < trendCount; i++)
+    {
+        var x = TrendX(i, trendCount, trendPadLeft, trendPlotWidth);
+        var aY = TrendY(trendPoints[i].AToB, trendMax, trendPadTop, trendPlotHeight);
+        var bY = TrendY(trendPoints[i].BToA, trendMax, trendPadTop, trendPlotHeight);
+        aSeriesPoints.Add($"{Fmt(x)},{Fmt(aY)}");
+        bSeriesPoints.Add($"{Fmt(x)},{Fmt(bY)}");
+    }
+    var aSeriesPath = string.Join(" ", aSeriesPoints);
+    var bSeriesPath = string.Join(" ", bSeriesPoints);
+    var peakPoint = trendCount == 0
+        ? null
+        : trendPoints
+            .Select(x => new
+            {
+                x.Label,
+                Total = x.AToB + x.BToA,
+            })
+            .OrderByDescending(x => x.Total)
+            .First();
 }
 
 <div class="topbar">
@@ -51,7 +90,7 @@
             <div class="pad">
                 <div class="kpi-top">
                     <div class="kpi-label">A_TO_B</div>
-                    <div class="kpi-accent ink">A→B</div>
+                    <div class="kpi-accent dir-a">A→B</div>
                 </div>
                 <div class="kpi-value">@Model.TotalAToB.ToString("N0")</div>
                 <div class="kpi-hint">Crossings from side A to side B.</div>
@@ -62,7 +101,7 @@
             <div class="pad">
                 <div class="kpi-top">
                     <div class="kpi-label">B_TO_A</div>
-                    <div class="kpi-accent brand">B→A</div>
+                    <div class="kpi-accent dir-b">B→A</div>
                 </div>
                 <div class="kpi-value">@Model.TotalBToA.ToString("N0")</div>
                 <div class="kpi-hint">Crossings from side B to side A.</div>
@@ -104,25 +143,107 @@
     </section>
 
     <section class="row2">
-        <div class="chart" aria-label="Direction and review trend preview">
-            <svg viewBox="0 0 900 320" preserveAspectRatio="none" aria-hidden="true">
-                <defs>
-                    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
-                        <stop offset="0" stop-color="rgba(64,64,64,0.85)"></stop>
-                        <stop offset="1" stop-color="rgba(232,24,32,0.90)"></stop>
-                    </linearGradient>
-                </defs>
-                <path d="M40,240 C120,180 200,240 280,200 C360,160 440,120 520,145 C600,170 680,120 760,105 C820,95 860,120 880,110"
-                      fill="none" stroke="url(#g1)" stroke-width="5" stroke-linecap="round"></path>
-                <path d="M40,260 C140,210 220,275 300,235 C390,190 470,205 560,180 C640,160 720,200 880,160"
-                      fill="none" stroke="rgba(15,23,42,0.25)" stroke-width="3" stroke-linecap="round" stroke-dasharray="6 8"></path>
-            </svg>
-            <div style="position:absolute; left:14px; top:14px; display:flex; gap:10px; align-items:center;">
-                <span class="pill ink">A_TO_B @Model.TotalAToB</span>
-                <span class="pill brand">B_TO_A @Model.TotalBToA</span>
-                <span class="pill">reviewed @reviewed</span>
+        <section class="card dashboard-trend" aria-label="Live trend chart">
+            <div class="pad">
+                <div class="kpi-top">
+                    <div>
+                        <div class="kpi-label">Event trend (@Model.TrendBucket)</div>
+                        <div class="kpi-hint">@Model.TrendRangeLabel</div>
+                    </div>
+                    <div class="pill">points @trendCount</div>
+                </div>
+
+                @if (trendCount == 0)
+                {
+                    <div class="trend-empty">No events with timestamps for this filter window.</div>
+                }
+                else
+                {
+                    <div class="trend-context">
+                        <p class="trend-meaning">Simple direction trend: A→B and B→A per time bucket.</p>
+                        <div class="trend-meta-pills">
+                            <span class="pill">timezone @Model.TrendTimezone</span>
+                            @if (peakPoint is not null)
+                            {
+                                <span class="pill ink">peak @peakPoint.Total at @peakPoint.Label</span>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="trend-legend" aria-label="Series explanation">
+                        <span class="trend-key">
+                            <span class="trend-key-line dir-a" aria-hidden="true"></span>
+                            A→B
+                        </span>
+                        <span class="trend-key">
+                            <span class="trend-key-line dir-b" aria-hidden="true"></span>
+                            B→A
+                        </span>
+                    </div>
+                    <div class="trend-hint">Hover line points to see exact values for each bucket.</div>
+
+                    <div class="trend-chart-wrap">
+                        <svg class="trend-svg" viewBox="0 0 920 210" preserveAspectRatio="none" role="img" aria-label="Line chart for A to B and B to A crossings by time bucket" aria-describedby="trend-chart-desc" xmlns:svg="http://www.w3.org/2000/svg">
+                            @for (var i = 0; i <= 2; i++)
+                            {
+                                var y = trendPadTop + (trendPlotHeight * i / 2.0);
+                                var tickValue = (int)Math.Round(trendMax * (2 - i) / 2.0);
+                                <line class="trend-grid-line" x1="@Fmt(trendPadLeft)" y1="@Fmt(y)" x2="@Fmt(trendPadLeft + trendPlotWidth)" y2="@Fmt(y)"></line>
+                                <svg:text class="trend-grid-value" x="@Fmt(trendPadLeft - 6)" y="@Fmt(y + 4)">@tickValue</svg:text>
+                            }
+
+                            <polyline class="trend-line dir-a" points="@aSeriesPath"></polyline>
+                            <polyline class="trend-line dir-b" points="@bSeriesPath"></polyline>
+
+                            @for (var i = 0; i < trendCount; i++)
+                            {
+                                var pointX = TrendX(i, trendCount, trendPadLeft, trendPlotWidth);
+                                var pointAY = TrendY(trendPoints[i].AToB, trendMax, trendPadTop, trendPlotHeight);
+                                var pointBY = TrendY(trendPoints[i].BToA, trendMax, trendPadTop, trendPlotHeight);
+                                <circle class="trend-point dir-a" cx="@Fmt(pointX)" cy="@Fmt(pointAY)" r="2.8">
+                                    <title>@($"{trendPoints[i].TooltipLabel} | A→B: {trendPoints[i].AToB}")</title>
+                                </circle>
+                                <circle class="trend-point dir-b" cx="@Fmt(pointX)" cy="@Fmt(pointBY)" r="2.8">
+                                    <title>@($"{trendPoints[i].TooltipLabel} | B→A: {trendPoints[i].BToA}")</title>
+                                </circle>
+                            }
+
+                            @{
+                                var lastIndex = trendCount - 1;
+                                var lastX = TrendX(lastIndex, trendCount, trendPadLeft, trendPlotWidth);
+                                var lastATrendY = TrendY(trendPoints[lastIndex].AToB, trendMax, trendPadTop, trendPlotHeight);
+                                var lastBTrendY = TrendY(trendPoints[lastIndex].BToA, trendMax, trendPadTop, trendPlotHeight);
+                            }
+                            <circle class="trend-focus-dot dir-a" cx="@Fmt(lastX)" cy="@Fmt(lastATrendY)" r="3.5">
+                                <title>@($"Latest A→B: {trendPoints[trendCount - 1].AToB}")</title>
+                            </circle>
+                            <circle class="trend-focus-dot dir-b" cx="@Fmt(lastX)" cy="@Fmt(lastBTrendY)" r="3.5">
+                                <title>@($"Latest B→A: {trendPoints[trendCount - 1].BToA}")</title>
+                            </circle>
+
+                            @for (var i = 0; i < trendCount; i += trendXAxisStep)
+                            {
+                                var x = TrendX(i, trendCount, trendPadLeft, trendPlotWidth);
+                                <svg:text class="trend-axis-label" x="@Fmt(x)" y="@Fmt(trendPadTop + trendPlotHeight + 18)">@trendPoints[i].Label</svg:text>
+                            }
+                            @if (trendCount > 1 && ((trendCount - 1) % trendXAxisStep) != 0)
+                            {
+                                var lastTickX = TrendX(trendCount - 1, trendCount, trendPadLeft, trendPlotWidth);
+                                <svg:text class="trend-axis-label" x="@Fmt(lastTickX)" y="@Fmt(trendPadTop + trendPlotHeight + 18)">@trendPoints[trendCount - 1].Label</svg:text>
+                            }
+                        </svg>
+                        <div class="trend-x-title">X-axis: @xAxisMeaning. Y-axis: Events per bucket.</div>
+                        <p id="trend-chart-desc" class="visually-hidden">
+                            Line chart with two series per time bucket: A to B crossings and B to A crossings. Y-axis is events per bucket. X-axis is @xAxisMeaning.
+                        </p>
+                    </div>
+                    <div class="trend-value-strip" aria-label="Latest trend values">
+                        <span class="pill dir-a">latest A→B @trendPoints[trendCount - 1].AToB</span>
+                        <span class="pill dir-b">latest B→A @trendPoints[trendCount - 1].BToA</span>
+                    </div>
+                }
             </div>
-        </div>
+        </section>
 
         <div class="card">
             <div class="pad">
@@ -189,7 +310,7 @@
                                 </td>
                                 <td><span class="pill">@item.OccurredAtLocal?.ToString("yyyy-MM-dd HH:mm:ss")</span></td>
                                 <td>@item.SiteId / @item.CameraId</td>
-                                <td><span class="pill @(item.Direction == "A_TO_B" ? "ink" : "brand")">@item.Direction</span></td>
+                                <td><span class="pill @(item.Direction == "A_TO_B" ? "dir-a" : "dir-b")">@item.Direction</span></td>
                                 <td>@item.ClassName</td>
                                 <td><span class="pill @StatusClass(item.ReviewStatus)">@item.ReviewStatus</span></td>
                                 <td><a asp-controller="Events" asp-action="Detail" asp-route-eventUid="@item.EventUid" class="pill" style="text-decoration:none;">open</a></td>
@@ -204,6 +325,27 @@
 </div>
 
 @functions {
+    private static double TrendY(int value, int maxValue, double padTop, double plotHeight)
+    {
+        var safeMax = Math.Max(1, maxValue);
+        return padTop + plotHeight - ((plotHeight * value) / safeMax);
+    }
+
+    private static double TrendX(int index, int totalPoints, double padLeft, double plotWidth)
+    {
+        if (totalPoints <= 1)
+        {
+            return padLeft + (plotWidth / 2d);
+        }
+
+        return padLeft + ((plotWidth * index) / (totalPoints - 1d));
+    }
+
+    private static string Fmt(double value)
+    {
+        return value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private static string StatusClass(string? status)
     {
         return (status ?? string.Empty).ToUpperInvariant() switch
