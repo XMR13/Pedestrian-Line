@@ -36,7 +36,7 @@
     <div class="big-thumb detail-thumb" aria-label="Event thumbnail">
         @if (!string.IsNullOrWhiteSpace(Model.ThumbnailUrl))
         {
-            <img src="@Model.ThumbnailUrl" alt="event thumbnail" class="big-thumb-image" />
+            <img src="@Model.ThumbnailUrl" alt="@($"Thumbnail for event {Model.EventUid} ({Model.ClassName}, {Model.Direction})")" class="big-thumb-image" />
         }
         <div style="position:absolute; left:14px; bottom:14px; display:flex; gap:10px; flex-wrap: wrap;">
             <span class="pill @(Model.Direction == "A_TO_B" ? "dir-a" : "dir-b")">@Model.Direction</span>

@@ -11,7 +11,8 @@
     <a class="btn secondary" asp-action="ExportCsv"
        asp-route-siteId="@Model.SiteId"
        asp-route-cameraId="@Model.CameraId"
-       asp-route-date="@(Model.Date?.ToString("yyyy-MM-dd"))"
+       asp-route-dateFrom="@(Model.DateFrom?.ToString("yyyy-MM-dd") ?? Model.Date?.ToString("yyyy-MM-dd"))"
+       asp-route-dateTo="@(Model.DateTo?.ToString("yyyy-MM-dd") ?? Model.Date?.ToString("yyyy-MM-dd"))"
        asp-route-direction="@Model.Direction"
        asp-route-className="@Model.ClassName"
        asp-route-reviewStatus="@Model.ReviewStatus">Export Reviewed CSV</a>
@@ -27,8 +28,12 @@
         <input id="cameraId" type="text" name="cameraId" value="@Model.CameraId" placeholder="cam_01" />
     </div>
     <div class="field">
-        <label for="date">Date</label>
-        <input id="date" type="date" name="date" value="@(Model.Date?.ToString("yyyy-MM-dd"))" />
+        <label for="dateFrom">Date From</label>
+        <input id="dateFrom" type="date" name="dateFrom" value="@(Model.DateFrom?.ToString("yyyy-MM-dd") ?? Model.Date?.ToString("yyyy-MM-dd"))" />
+    </div>
+    <div class="field">
+        <label for="dateTo">Date To</label>
+        <input id="dateTo" type="date" name="dateTo" value="@(Model.DateTo?.ToString("yyyy-MM-dd") ?? Model.Date?.ToString("yyyy-MM-dd"))" />
     </div>
     <div class="field">
         <label for="direction">Direction</label>
@@ -95,7 +100,7 @@
                             <td>
                                 @if (!string.IsNullOrWhiteSpace(item.ThumbnailUrl))
                                 {
-                                    <img src="@item.ThumbnailUrl" alt="thumbnail" class="thumb-inline" loading="lazy" />
+                                    <img src="@item.ThumbnailUrl" alt="@($"Thumbnail for event {item.EventUid} ({item.ClassName}, {item.Direction})")" class="thumb-inline" loading="lazy" />
                                 }
                                 else
                                 {
@@ -127,7 +132,8 @@
                        asp-route-pageSize="@Model.PageSize"
                        asp-route-siteId="@Model.SiteId"
                        asp-route-cameraId="@Model.CameraId"
-                       asp-route-date="@(Model.Date?.ToString("yyyy-MM-dd"))"
+                       asp-route-dateFrom="@(Model.DateFrom?.ToString("yyyy-MM-dd") ?? Model.Date?.ToString("yyyy-MM-dd"))"
+                       asp-route-dateTo="@(Model.DateTo?.ToString("yyyy-MM-dd") ?? Model.Date?.ToString("yyyy-MM-dd"))"
                        asp-route-direction="@Model.Direction"
                        asp-route-className="@Model.ClassName"
                        asp-route-reviewStatus="@Model.ReviewStatus">Previous</a>
@@ -139,7 +145,8 @@
                        asp-route-pageSize="@Model.PageSize"
                        asp-route-siteId="@Model.SiteId"
                        asp-route-cameraId="@Model.CameraId"
-                       asp-route-date="@(Model.Date?.ToString("yyyy-MM-dd"))"
+                       asp-route-dateFrom="@(Model.DateFrom?.ToString("yyyy-MM-dd") ?? Model.Date?.ToString("yyyy-MM-dd"))"
+                       asp-route-dateTo="@(Model.DateTo?.ToString("yyyy-MM-dd") ?? Model.Date?.ToString("yyyy-MM-dd"))"
                        asp-route-direction="@Model.Direction"
                        asp-route-className="@Model.ClassName"
                        asp-route-reviewStatus="@Model.ReviewStatus">Next</a>

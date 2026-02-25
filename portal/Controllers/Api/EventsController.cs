@@ -304,12 +304,14 @@ public sealed class EventsController(
         var pageOffset = (page - 1) * pageSize;
         var isSqlServer = db.Database.IsSqlServer();
 
-        var baseQuery = db.Events.PortalQueryable().ApplyEventFilters(request);
-        var total = await baseQuery.CountAsync(ct);
+        var baseQuery = db.Events.PortalQueryable()
+            .ApplyEventFilters(request, includeDateFilter: isSqlServer);
 
         List<EventListRow> rows;
+        int total;
         if (isSqlServer)
         {
+            total = await baseQuery.CountAsync(ct);
             rows = await baseQuery
                 .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
                 .ThenByDescending(x => x.EventUid)
@@ -334,47 +336,33 @@ public sealed class EventsController(
         }
         else
         {
-            var orderedEventUids = (await baseQuery
-                .Select(x => new
+            rows = (await baseQuery
+                .Select(x => new EventListRow
                 {
-                    x.EventUid,
-                    x.OccurredAtUtc,
+                    EventUid = x.EventUid,
+                    RunUid = x.RunUid,
+                    SiteId = x.SiteId,
+                    CameraId = x.CameraId,
+                    OccurredAtUtc = x.OccurredAtUtc,
+                    Direction = x.Direction,
+                    ClassName = x.ClassName,
+                    TrackId = x.TrackId,
+                    ThumbPath = x.ThumbPath,
+                    ScenePath = x.ScenePath,
+                    ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
+                    Notes = x.Review != null ? x.Review.Notes : null,
                 })
                 .ToListAsync(ct))
+                .ApplyLocalDateRangeInMemory(request, x => x.OccurredAtUtc)
+                .ToList();
+
+            total = rows.Count;
+            rows = rows
                 .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
                 .ThenByDescending(x => x.EventUid)
                 .Skip(pageOffset)
                 .Take(pageSize)
-                .Select(x => x.EventUid)
                 .ToList();
-
-            if (orderedEventUids.Count == 0)
-            {
-                rows = [];
-            }
-            else
-            {
-                var pageRows = await baseQuery
-                    .Where(x => orderedEventUids.Contains(x.EventUid))
-                    .Select(x => new EventListRow
-                    {
-                        EventUid = x.EventUid,
-                        RunUid = x.RunUid,
-                        SiteId = x.SiteId,
-                        CameraId = x.CameraId,
-                        OccurredAtUtc = x.OccurredAtUtc,
-                        Direction = x.Direction,
-                        ClassName = x.ClassName,
-                        TrackId = x.TrackId,
-                        ThumbPath = x.ThumbPath,
-                        ScenePath = x.ScenePath,
-                        ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                        Notes = x.Review != null ? x.Review.Notes : null,
-                    })
-                    .ToListAsync(ct);
-
-                rows = OrderByEventUids(pageRows, orderedEventUids, x => x.EventUid);
-            }
         }
 
         return Ok(new

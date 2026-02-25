@@ -16,35 +16,39 @@ public sealed class DashboardController(PortalDbContext db) : ControllerBase
     [HttpGet("summary")]
     public async Task<IActionResult> Summary([FromQuery] EventQueryRequest request, CancellationToken ct)
     {
-        var filtered = db.Events.PortalQueryable().ApplyEventFilters(request);
         var isSqlServer = db.Database.IsSqlServer();
+        var selectedSingleDate = request.ResolveSingleLocalDate();
+        var filtered = db.Events.PortalQueryable()
+            .ApplyEventFilters(request, includeDateFilter: isSqlServer);
 
-        var totals = await filtered
-            .GroupBy(_ => 1)
-            .Select(g => new
-            {
-                TotalAToB = g.Sum(x => x.Direction == "A_TO_B" ? 1 : 0),
-                TotalBToA = g.Sum(x => x.Direction == "B_TO_A" ? 1 : 0),
-                Pending = g.Sum(x => x.Review == null || x.Review.ReviewStatus == ReviewStatuses.Pending ? 1 : 0),
-                Qualified = g.Sum(x => x.Review != null && x.Review.ReviewStatus == ReviewStatuses.Qualified ? 1 : 0),
-                NotQualified = g.Sum(x => x.Review != null && x.Review.ReviewStatus == ReviewStatuses.NotQualified ? 1 : 0),
-            })
-            .FirstOrDefaultAsync(ct);
-
-        var totalAToB = totals?.TotalAToB ?? 0;
-        var totalBToA = totals?.TotalBToA ?? 0;
-        var pending = totals?.Pending ?? 0;
-        var qualified = totals?.Qualified ?? 0;
-        var notQualified = totals?.NotQualified ?? 0;
-
-        var reviewed = qualified + notQualified;
-
-        var trendRows = await DashboardTrendBuilder.QueryRowsAsync(filtered, request.Date, ct);
-        var trend = DashboardTrendBuilder.Build(trendRows, request.Date, TimeZoneInfo.Local);
-
+        int totalAToB;
+        int totalBToA;
+        int pending;
+        int qualified;
+        int notQualified;
+        List<DashboardTrendEventRow> trendRows;
         List<object> recent;
         if (isSqlServer)
         {
+            var totals = await filtered
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    TotalAToB = g.Sum(x => x.Direction == "A_TO_B" ? 1 : 0),
+                    TotalBToA = g.Sum(x => x.Direction == "B_TO_A" ? 1 : 0),
+                    Pending = g.Sum(x => x.Review == null || x.Review.ReviewStatus == ReviewStatuses.Pending ? 1 : 0),
+                    Qualified = g.Sum(x => x.Review != null && x.Review.ReviewStatus == ReviewStatuses.Qualified ? 1 : 0),
+                    NotQualified = g.Sum(x => x.Review != null && x.Review.ReviewStatus == ReviewStatuses.NotQualified ? 1 : 0),
+                })
+                .FirstOrDefaultAsync(ct);
+
+            totalAToB = totals?.TotalAToB ?? 0;
+            totalBToA = totals?.TotalBToA ?? 0;
+            pending = totals?.Pending ?? 0;
+            qualified = totals?.Qualified ?? 0;
+            notQualified = totals?.NotQualified ?? 0;
+
+            trendRows = await DashboardTrendBuilder.QueryRowsAsync(filtered, selectedSingleDate, ct);
             recent = (await filtered
                 .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
                 .ThenByDescending(x => x.EventUid)
@@ -65,46 +69,57 @@ public sealed class DashboardController(PortalDbContext db) : ControllerBase
         }
         else
         {
-            var orderedEventUids = (await filtered
-                .Select(x => new
+            var rows = (await filtered
+                .Select(x => new DashboardSummaryRow
                 {
-                    x.EventUid,
-                    x.OccurredAtUtc,
+                    EventUid = x.EventUid,
+                    OccurredAtUtc = x.OccurredAtUtc,
+                    SiteId = x.SiteId,
+                    CameraId = x.CameraId,
+                    ClassName = x.ClassName,
+                    Direction = x.Direction,
+                    ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
                 })
                 .ToListAsync(ct))
+                .ApplyLocalDateRangeInMemory(request, x => x.OccurredAtUtc)
+                .ToList();
+
+            totalAToB = rows.Count(x => string.Equals(x.Direction, "A_TO_B", StringComparison.OrdinalIgnoreCase));
+            totalBToA = rows.Count(x => string.Equals(x.Direction, "B_TO_A", StringComparison.OrdinalIgnoreCase));
+            qualified = rows.Count(x => string.Equals(x.ReviewStatus, ReviewStatuses.Qualified, StringComparison.OrdinalIgnoreCase));
+            notQualified = rows.Count(x => string.Equals(x.ReviewStatus, ReviewStatuses.NotQualified, StringComparison.OrdinalIgnoreCase));
+            pending = rows.Count - qualified - notQualified;
+
+            trendRows = rows
+                .Where(x => x.OccurredAtUtc.HasValue)
+                .Select(x => new DashboardTrendEventRow
+                {
+                    OccurredAtUtc = x.OccurredAtUtc ?? DateTimeOffset.MinValue,
+                    Direction = x.Direction,
+                    ReviewStatus = x.ReviewStatus ?? ReviewStatuses.Pending,
+                })
+                .ToList();
+
+            recent = rows
                 .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
                 .ThenByDescending(x => x.EventUid)
                 .Take(8)
-                .Select(x => x.EventUid)
+                .Select(x => new
+                {
+                    event_uid = x.EventUid,
+                    occurred_at_utc = x.OccurredAtUtc,
+                    site_id = x.SiteId,
+                    camera_id = x.CameraId,
+                    class_name = x.ClassName,
+                    direction = x.Direction,
+                    review_status = x.ReviewStatus ?? ReviewStatuses.Pending,
+                })
+                .Cast<object>()
                 .ToList();
-
-            if (orderedEventUids.Count == 0)
-            {
-                recent = [];
-            }
-            else
-            {
-                var rows = await filtered
-                    .Where(x => orderedEventUids.Contains(x.EventUid))
-                    .Select(x => new
-                    {
-                        event_uid = x.EventUid,
-                        occurred_at_utc = x.OccurredAtUtc,
-                        site_id = x.SiteId,
-                        camera_id = x.CameraId,
-                        class_name = x.ClassName,
-                        direction = x.Direction,
-                        review_status = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                    })
-                    .ToListAsync(ct);
-
-                var rowMap = rows.ToDictionary(x => x.event_uid, StringComparer.Ordinal);
-                recent = orderedEventUids
-                    .Where(rowMap.ContainsKey)
-                    .Select(eventUid => (object)rowMap[eventUid])
-                    .ToList();
-            }
         }
+
+        var reviewed = qualified + notQualified;
+        var trend = DashboardTrendBuilder.Build(trendRows, selectedSingleDate, TimeZoneInfo.Local);
 
         return Ok(new
         {
@@ -135,5 +150,16 @@ public sealed class DashboardController(PortalDbContext db) : ControllerBase
             },
             recent,
         });
+    }
+
+    private sealed class DashboardSummaryRow
+    {
+        public string EventUid { get; set; } = string.Empty;
+        public DateTimeOffset? OccurredAtUtc { get; set; }
+        public string SiteId { get; set; } = string.Empty;
+        public string CameraId { get; set; } = string.Empty;
+        public string? ClassName { get; set; }
+        public string? Direction { get; set; }
+        public string? ReviewStatus { get; set; }
     }
 }

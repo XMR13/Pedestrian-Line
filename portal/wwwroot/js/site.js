@@ -22,7 +22,6 @@
 
   const statusInput = document.getElementById("review-status");
   const actionButtons = form.querySelectorAll("button[data-review-status]");
-  const detailLink = document.querySelector("[data-open-detail]");
   const queueLinks = Array.from(document.querySelectorAll("[data-queue-link]"));
 
   const submitWithStatus = (status) => {
@@ -102,9 +101,5 @@
       return;
     }
 
-    if (key === "enter" && detailLink instanceof HTMLAnchorElement) {
-      event.preventDefault();
-      window.location.assign(detailLink.href);
-    }
   });
 })();

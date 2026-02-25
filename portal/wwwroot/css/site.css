@@ -775,8 +775,8 @@ input[type="text"] {
 }
 
 .btn.btn-compact {
-  min-height: 34px;
-  padding: 7px 10px;
+  min-height: 44px;
+  padding: 9px 12px;
   border-radius: 10px;
   font-size: 12px;
   font-weight: 700;
@@ -1007,7 +1007,8 @@ input[type="text"] {
   color: inherit;
   border: 1px solid rgba(45, 55, 72, 0.11);
   border-radius: 12px;
-  padding: 8px 10px;
+  min-height: 44px;
+  padding: 10px 12px;
   background: rgba(255, 255, 255, 0.66);
   display: flex;
   justify-content: space-between;
@@ -1500,7 +1501,7 @@ form.filters .btn {
 /* Event Browser: keep filters visually balanced across the row. */
 form.filters.event-browser-filters {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) auto;
   align-items: end;
   gap: 10px 12px;
 }

@@ -5,6 +5,8 @@ public sealed class EventQueryRequest
     public string? SiteId { get; set; }
     public string? CameraId { get; set; }
     public DateTime? Date { get; set; }
+    public DateTime? DateFrom { get; set; }
+    public DateTime? DateTo { get; set; }
     public string? Direction { get; set; }
     public string? ClassName { get; set; }
     public string? ReviewStatus { get; set; }

@@ -67,6 +67,36 @@ public sealed class PortalWorkflowTests
     }
 
     [Fact]
+    public async Task EventsIndex_DateAndDateRangeFilters_ReturnExpectedTotals()
+    {
+        await using var app = new PortalTestApp();
+        await app.InitializeAsync();
+        using var client = app.CreatePortalClient();
+        await PostLoginAsync(client);
+
+        var seededEventLocalDate = DateTimeOffset.Parse("2026-02-23T00:00:00+00:00")
+            .AddMinutes(-25)
+            .ToLocalTime()
+            .ToString("yyyy-MM-dd");
+
+        var singleDateResponse = await client.GetAsync($"/Events?date={seededEventLocalDate}");
+        Assert.Equal(HttpStatusCode.OK, singleDateResponse.StatusCode);
+        var singleDateHtml = await singleDateResponse.Content.ReadAsStringAsync();
+        Assert.Contains("3 total event(s) matched", singleDateHtml, StringComparison.Ordinal);
+
+        var rangeResponse = await client.GetAsync($"/Events?dateFrom={seededEventLocalDate}&dateTo={seededEventLocalDate}");
+        Assert.Equal(HttpStatusCode.OK, rangeResponse.StatusCode);
+        var rangeHtml = await rangeResponse.Content.ReadAsStringAsync();
+        Assert.Contains("3 total event(s) matched", rangeHtml, StringComparison.Ordinal);
+
+        var missingDate = DateTime.Parse(seededEventLocalDate).AddDays(2).ToString("yyyy-MM-dd");
+        var missingRangeResponse = await client.GetAsync($"/Events?dateFrom={missingDate}&dateTo={missingDate}");
+        Assert.Equal(HttpStatusCode.OK, missingRangeResponse.StatusCode);
+        var missingRangeHtml = await missingRangeResponse.Content.ReadAsStringAsync();
+        Assert.Contains("0 total event(s) matched", missingRangeHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReviewQueue_SubmitQualifiedYes_UpdatesReviewAndRedirects()
     {
         await using var app = new PortalTestApp();

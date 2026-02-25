@@ -25,12 +25,14 @@ public sealed class EventsController(
         var pageOffset = (page - 1) * pageSize;
         var isSqlServer = db.Database.IsSqlServer();
 
-        var filtered = db.Events.PortalQueryable().ApplyEventFilters(request);
-        var total = await filtered.CountAsync(ct);
+        var filtered = db.Events.PortalQueryable()
+            .ApplyEventFilters(request, includeDateFilter: isSqlServer);
 
         List<EventListItemViewModel> items;
+        int total;
         if (isSqlServer)
         {
+            total = await filtered.CountAsync(ct);
             items = await filtered
                 .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
                 .ThenByDescending(x => x.EventUid)
@@ -55,47 +57,33 @@ public sealed class EventsController(
         }
         else
         {
-            var orderedEventUids = (await filtered
-                .Select(x => new
+            var rows = (await filtered
+                .Select(x => new EventListItemViewModel
                 {
-                    x.EventUid,
-                    x.OccurredAtUtc,
+                    EventUid = x.EventUid,
+                    RunUid = x.RunUid,
+                    SiteId = x.SiteId,
+                    CameraId = x.CameraId,
+                    OccurredAtUtc = x.OccurredAtUtc,
+                    Direction = x.Direction ?? "-",
+                    ClassName = x.ClassName ?? "unknown",
+                    ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
+                    Notes = x.Review != null ? x.Review.Notes : null,
+                    ThumbnailUrl = x.ScenePath != null
+                        ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
+                        : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
                 })
                 .ToListAsync(ct))
+                .ApplyLocalDateRangeInMemory(request, x => x.OccurredAtUtc)
+                .ToList();
+
+            total = rows.Count;
+            items = rows
                 .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
                 .ThenByDescending(x => x.EventUid)
                 .Skip(pageOffset)
                 .Take(pageSize)
-                .Select(x => x.EventUid)
                 .ToList();
-
-            if (orderedEventUids.Count == 0)
-            {
-                items = [];
-            }
-            else
-            {
-                var rows = await filtered
-                    .Where(x => orderedEventUids.Contains(x.EventUid))
-                    .Select(x => new EventListItemViewModel
-                    {
-                        EventUid = x.EventUid,
-                        RunUid = x.RunUid,
-                        SiteId = x.SiteId,
-                        CameraId = x.CameraId,
-                        OccurredAtUtc = x.OccurredAtUtc,
-                        Direction = x.Direction ?? "-",
-                        ClassName = x.ClassName ?? "unknown",
-                        ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                        Notes = x.Review != null ? x.Review.Notes : null,
-                        ThumbnailUrl = x.ScenePath != null
-                            ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
-                            : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
-                    })
-                    .ToListAsync(ct);
-
-                items = OrderByEventUids(rows, orderedEventUids, x => x.EventUid);
-            }
         }
 
         var vm = new EventListPageViewModel
@@ -103,6 +91,8 @@ public sealed class EventsController(
             SiteId = request.SiteId,
             CameraId = request.CameraId,
             Date = request.Date,
+            DateFrom = request.DateFrom,
+            DateTo = request.DateTo,
             Direction = request.Direction,
             ClassName = request.ClassName,
             ReviewStatus = request.ReviewStatus,
@@ -303,11 +293,13 @@ public sealed class EventsController(
     public async Task<IActionResult> ExportCsv([FromQuery] EventQueryRequest request, CancellationToken ct)
     {
         request.ReviewStatus ??= string.Empty;
+        var isSqlServer = db.Database.IsSqlServer();
 
-        var filtered = db.Events.PortalQueryable().ApplyEventFilters(request)
+        var filtered = db.Events.PortalQueryable()
+            .ApplyEventFilters(request, includeDateFilter: isSqlServer)
             .Where(x => x.Review != null && x.Review.ReviewStatus != ReviewStatuses.Pending);
 
-        var rows = await filtered
+        var rows = (await filtered
             .Select(x => new
             {
                 x.EventUid,
@@ -323,7 +315,9 @@ public sealed class EventsController(
                 x.Review!.ReviewedBy,
                 x.Review!.Notes,
             })
-            .ToListAsync(ct);
+            .ToListAsync(ct))
+            .ApplyLocalDateRangeInMemory(request, x => x.OccurredAtUtc)
+            .ToList();
 
         var orderedRows = rows
             .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)

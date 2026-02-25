@@ -5,6 +5,8 @@ public sealed class DashboardViewModel
     public string? SiteId { get; set; }
     public string? CameraId { get; set; }
     public DateTime? Date { get; set; }
+    public DateTime? DateFrom { get; set; }
+    public DateTime? DateTo { get; set; }
 
     public int TotalAToB { get; set; }
     public int TotalBToA { get; set; }

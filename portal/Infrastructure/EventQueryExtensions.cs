@@ -6,7 +6,10 @@ namespace Portal.Web.Infrastructure;
 
 public static class EventQueryExtensions
 {
-    public static IQueryable<EventRecord> ApplyEventFilters(this IQueryable<EventRecord> query, EventQueryRequest req)
+    public static IQueryable<EventRecord> ApplyEventFilters(
+        this IQueryable<EventRecord> query,
+        EventQueryRequest req,
+        bool includeDateFilter = true)
     {
         if (!string.IsNullOrWhiteSpace(req.SiteId))
         {
@@ -20,11 +23,11 @@ public static class EventQueryExtensions
             query = query.Where(x => x.CameraId == cameraId);
         }
 
-        if (req.Date.HasValue)
+        if (includeDateFilter && TryResolveLocalDateRange(req, out var localStartDate, out var localEndDateExclusive))
         {
-            var start = req.Date.Value.Date;
-            var end = start.AddDays(1);
-            query = query.Where(x => x.OccurredAtUtc >= start && x.OccurredAtUtc < end);
+            var startUtc = LocalDateStartToUtc(localStartDate);
+            var endUtc = LocalDateStartToUtc(localEndDateExclusive);
+            query = query.Where(x => x.OccurredAtUtc >= startUtc && x.OccurredAtUtc < endUtc);
         }
 
         if (!string.IsNullOrWhiteSpace(req.Direction))
@@ -48,6 +51,44 @@ public static class EventQueryExtensions
         return query;
     }
 
+    public static DateTime? ResolveSingleLocalDate(this EventQueryRequest req)
+    {
+        if (req.Date.HasValue)
+        {
+            return req.Date.Value.Date;
+        }
+
+        if (req.DateFrom.HasValue && req.DateTo.HasValue)
+        {
+            var from = req.DateFrom.Value.Date;
+            var to = req.DateTo.Value.Date;
+            return from == to ? from : null;
+        }
+
+        return null;
+    }
+
+    public static IEnumerable<T> ApplyLocalDateRangeInMemory<T>(
+        this IEnumerable<T> source,
+        EventQueryRequest req,
+        Func<T, DateTimeOffset?> occurredAtSelector)
+    {
+        if (!TryResolveLocalDateRange(req, out var localStartDate, out var localEndDateExclusive))
+        {
+            return source;
+        }
+
+        var startUtc = LocalDateStartToUtc(localStartDate);
+        var endUtc = LocalDateStartToUtc(localEndDateExclusive);
+        return source.Where(x =>
+        {
+            var occurredAtUtc = occurredAtSelector(x);
+            return occurredAtUtc.HasValue
+                && occurredAtUtc.Value >= startUtc
+                && occurredAtUtc.Value < endUtc;
+        });
+    }
+
     public static string? ToThumbnailUrl(this EventRecord e)
     {
         if (!string.IsNullOrWhiteSpace(e.ScenePath))
@@ -68,5 +109,43 @@ public static class EventQueryExtensions
         return events
             .AsNoTracking()
             .AsQueryable();
+    }
+
+    private static bool TryResolveLocalDateRange(
+        EventQueryRequest req,
+        out DateTime localStartDate,
+        out DateTime localEndDateExclusive)
+    {
+        if (req.DateFrom.HasValue || req.DateTo.HasValue)
+        {
+            var start = (req.DateFrom ?? req.DateTo)!.Value.Date;
+            var end = (req.DateTo ?? req.DateFrom)!.Value.Date;
+            if (end < start)
+            {
+                (start, end) = (end, start);
+            }
+
+            localStartDate = start;
+            localEndDateExclusive = end.AddDays(1);
+            return true;
+        }
+
+        if (req.Date.HasValue)
+        {
+            localStartDate = req.Date.Value.Date;
+            localEndDateExclusive = localStartDate.AddDays(1);
+            return true;
+        }
+
+        localStartDate = default;
+        localEndDateExclusive = default;
+        return false;
+    }
+
+    private static DateTimeOffset LocalDateStartToUtc(DateTime localDate)
+    {
+        var localUnspecified = DateTime.SpecifyKind(localDate.Date, DateTimeKind.Unspecified);
+        var utc = TimeZoneInfo.ConvertTimeToUtc(localUnspecified, TimeZoneInfo.Local);
+        return new DateTimeOffset(utc, TimeSpan.Zero);
     }
 }

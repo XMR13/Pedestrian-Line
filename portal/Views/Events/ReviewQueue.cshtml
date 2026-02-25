@@ -65,7 +65,7 @@ else
         <div class="big-thumb queue-thumb" aria-label="Event thumbnail">
             @if (!string.IsNullOrWhiteSpace(Model.Current.ThumbnailUrl))
             {
-                <img src="@Model.Current.ThumbnailUrl" alt="event thumbnail" class="big-thumb-image" />
+                <img src="@Model.Current.ThumbnailUrl" alt="@($"Thumbnail for event {Model.Current.EventUid} ({Model.Current.ClassName}, {Model.Current.Direction})")" class="big-thumb-image" />
             }
             <div style="position:absolute; left:14px; top:14px; display:flex; gap:10px; flex-wrap: wrap;">
                 <span class="pill @(Model.Current.Direction == "A_TO_B" ? "dir-a" : "dir-b")">@Model.Current.Direction</span>
