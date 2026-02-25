@@ -298,6 +298,11 @@ python3 -m pedestrian_line_counter.main \
   --portal-upload-interval-s 10
 ```
 
+Untuk deployment production dengan satu proses (auto-restart + tuning performa + template systemd), pakai runbook:
+
+- `docs/single_loop_production_runbook.md`
+- launcher script: `scripts/run_single_loop_live.sh`
+
 Jika kamu tidak ingin `export` setiap sesi, cukup isi `Portal.ApiKey` sekali di file lokal untracked `portal/appsettings.Local.json`.
 Uploader (`portal_uploader.py`) dan integrated uploader (`main.py --portal-upload`) sekarang akan otomatis fallback ke file tersebut.
 
