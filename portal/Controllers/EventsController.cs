@@ -24,67 +24,33 @@ public sealed class EventsController(
         var page = Math.Max(request.Page, 1);
         var pageOffset = (page - 1) * pageSize;
         var isSqlServer = db.Database.IsSqlServer();
-
-        var filtered = db.Events.PortalQueryable()
+        var baseQuery = isSqlServer
+            ? db.Events.PortalQueryable()
+            : db.Events.ApplySqliteDateRangeFilter(request);
+        var filtered = baseQuery
             .ApplyEventFilters(request, includeDateFilter: isSqlServer);
 
-        List<EventListItemViewModel> items;
-        int total;
-        if (isSqlServer)
-        {
-            total = await filtered.CountAsync(ct);
-            items = await filtered
-                .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
-                .ThenByDescending(x => x.EventUid)
-                .Skip(pageOffset)
-                .Take(pageSize)
-                .Select(x => new EventListItemViewModel
-                {
-                    EventUid = x.EventUid,
-                    RunUid = x.RunUid,
-                    SiteId = x.SiteId,
-                    CameraId = x.CameraId,
-                    OccurredAtUtc = x.OccurredAtUtc,
-                    Direction = x.Direction ?? "-",
-                    ClassName = x.ClassName ?? "unknown",
-                    ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                    Notes = x.Review != null ? x.Review.Notes : null,
-                    ThumbnailUrl = x.ScenePath != null
-                        ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
-                        : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
-                })
-                .ToListAsync(ct);
-        }
-        else
-        {
-            var rows = (await filtered
-                .Select(x => new EventListItemViewModel
-                {
-                    EventUid = x.EventUid,
-                    RunUid = x.RunUid,
-                    SiteId = x.SiteId,
-                    CameraId = x.CameraId,
-                    OccurredAtUtc = x.OccurredAtUtc,
-                    Direction = x.Direction ?? "-",
-                    ClassName = x.ClassName ?? "unknown",
-                    ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                    Notes = x.Review != null ? x.Review.Notes : null,
-                    ThumbnailUrl = x.ScenePath != null
-                        ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
-                        : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
-                })
-                .ToListAsync(ct))
-                .ApplyLocalDateRangeInMemory(request, x => x.OccurredAtUtc)
-                .ToList();
-
-            total = rows.Count;
-            items = rows
-                .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
-                .ThenByDescending(x => x.EventUid)
-                .Skip(pageOffset)
-                .Take(pageSize)
-                .ToList();
-        }
+        var total = await filtered.CountAsync(ct);
+        var items = await filtered
+            .ApplyDefaultSortDesc(isSqlServer)
+            .Skip(pageOffset)
+            .Take(pageSize)
+            .Select(x => new EventListItemViewModel
+            {
+                EventUid = x.EventUid,
+                RunUid = x.RunUid,
+                SiteId = x.SiteId,
+                CameraId = x.CameraId,
+                OccurredAtUtc = x.OccurredAtUtc,
+                Direction = x.Direction ?? "-",
+                ClassName = x.ClassName ?? "unknown",
+                ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
+                Notes = x.Review != null ? x.Review.Notes : null,
+                ThumbnailUrl = x.ThumbPath != null
+                    ? $"/api/events/{x.EventUid}/thumbnail"
+                    : (x.ScenePath != null ? $"/api/events/{x.EventUid}/thumbnail?kind=scene" : null),
+            })
+            .ToListAsync(ct);
 
         var vm = new EventListPageViewModel
         {
@@ -112,83 +78,29 @@ public sealed class EventsController(
         var pendingBaseQuery = db.Events.PortalQueryable()
             .Where(x => x.Review == null || x.Review.ReviewStatus == ReviewStatuses.Pending)
             .AsQueryable();
-
-        var isSqlServer = db.Database.IsSqlServer();
-        List<EventDetailViewModel> pendingRows;
-        if (isSqlServer)
-        {
-            pendingRows = await pendingBaseQuery
-                .OrderBy(x => x.OccurredAtUtc ?? DateTimeOffset.MaxValue)
-                .ThenBy(x => x.EventUid)
-                .Take(7)
-                .Select(x => new EventDetailViewModel
-                {
-                    EventUid = x.EventUid,
-                    RunUid = x.RunUid,
-                    SiteId = x.SiteId,
-                    CameraId = x.CameraId,
-                    OccurredAtUtc = x.OccurredAtUtc,
-                    FrameIndex = x.FrameIndex,
-                    VideoTimeS = x.VideoTimeS,
-                    Direction = x.Direction,
-                    TrackId = x.TrackId,
-                    ClassName = x.ClassName,
-                    Confidence = x.Confidence,
-                    ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                    Notes = x.Review != null ? x.Review.Notes : null,
-                    ThumbnailUrl = x.ScenePath != null
-                        ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
-                        : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
-                })
-                .ToListAsync(ct);
-        }
-        else
-        {
-            var orderedPendingUids = (await pendingBaseQuery
-                .Select(x => new
-                {
-                    x.EventUid,
-                    x.OccurredAtUtc,
-                })
-                .ToListAsync(ct))
-                .OrderBy(x => x.OccurredAtUtc ?? DateTimeOffset.MaxValue)
-                .ThenBy(x => x.EventUid)
-                .Take(7)
-                .Select(x => x.EventUid)
-                .ToList();
-
-            if (orderedPendingUids.Count == 0)
+        var pendingRows = await pendingBaseQuery
+            .ApplyDefaultSortAsc(db.Database.IsSqlServer())
+            .Take(7)
+            .Select(x => new EventDetailViewModel
             {
-                pendingRows = [];
-            }
-            else
-            {
-                var rows = await pendingBaseQuery
-                    .Where(x => orderedPendingUids.Contains(x.EventUid))
-                    .Select(x => new EventDetailViewModel
-                    {
-                        EventUid = x.EventUid,
-                        RunUid = x.RunUid,
-                        SiteId = x.SiteId,
-                        CameraId = x.CameraId,
-                        OccurredAtUtc = x.OccurredAtUtc,
-                        FrameIndex = x.FrameIndex,
-                        VideoTimeS = x.VideoTimeS,
-                        Direction = x.Direction,
-                        TrackId = x.TrackId,
-                        ClassName = x.ClassName,
-                        Confidence = x.Confidence,
-                        ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                        Notes = x.Review != null ? x.Review.Notes : null,
-                        ThumbnailUrl = x.ScenePath != null
-                            ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
-                            : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
-                    })
-                    .ToListAsync(ct);
-
-                pendingRows = OrderByEventUids(rows, orderedPendingUids, x => x.EventUid);
-            }
-        }
+                EventUid = x.EventUid,
+                RunUid = x.RunUid,
+                SiteId = x.SiteId,
+                CameraId = x.CameraId,
+                OccurredAtUtc = x.OccurredAtUtc,
+                FrameIndex = x.FrameIndex,
+                VideoTimeS = x.VideoTimeS,
+                Direction = x.Direction,
+                TrackId = x.TrackId,
+                ClassName = x.ClassName,
+                Confidence = x.Confidence,
+                ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
+                Notes = x.Review != null ? x.Review.Notes : null,
+                ThumbnailUrl = x.ScenePath != null
+                    ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
+                    : (x.ThumbPath != null ? $"/api/events/{x.EventUid}/thumbnail" : null),
+            })
+            .ToListAsync(ct);
 
         var current = pendingRows.FirstOrDefault();
 
@@ -294,12 +206,15 @@ public sealed class EventsController(
     {
         request.ReviewStatus ??= string.Empty;
         var isSqlServer = db.Database.IsSqlServer();
+        var baseQuery = isSqlServer
+            ? db.Events.PortalQueryable()
+            : db.Events.ApplySqliteDateRangeFilter(request);
 
-        var filtered = db.Events.PortalQueryable()
+        var filtered = baseQuery
             .ApplyEventFilters(request, includeDateFilter: isSqlServer)
             .Where(x => x.Review != null && x.Review.ReviewStatus != ReviewStatuses.Pending);
 
-        var rows = (await filtered
+        var rows = await filtered
             .Select(x => new
             {
                 x.EventUid,
@@ -315,9 +230,7 @@ public sealed class EventsController(
                 x.Review!.ReviewedBy,
                 x.Review!.Notes,
             })
-            .ToListAsync(ct))
-            .ApplyLocalDateRangeInMemory(request, x => x.OccurredAtUtc)
-            .ToList();
+            .ToListAsync(ct);
 
         var orderedRows = rows
             .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
@@ -387,18 +300,4 @@ public sealed class EventsController(
         return escaped;
     }
 
-    private static List<T> OrderByEventUids<T>(IEnumerable<T> rows, IReadOnlyList<string> orderedEventUids, Func<T, string> getEventUid)
-    {
-        var rowMap = rows.ToDictionary(getEventUid, StringComparer.Ordinal);
-        var ordered = new List<T>(orderedEventUids.Count);
-        foreach (var eventUid in orderedEventUids)
-        {
-            if (rowMap.TryGetValue(eventUid, out var row))
-            {
-                ordered.Add(row);
-            }
-        }
-
-        return ordered;
-    }
 }

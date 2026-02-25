@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Portal.Web.Contracts;
 using Portal.Web.Models;
+using System.Globalization;
 
 namespace Portal.Web.Infrastructure;
 
@@ -111,6 +112,55 @@ public static class EventQueryExtensions
             .AsQueryable();
     }
 
+    public static IQueryable<EventRecord> ApplySqliteDateRangeFilter(
+        this DbSet<EventRecord> events,
+        EventQueryRequest req)
+    {
+        if (!TryResolveLocalDateRange(req, out var localStartDate, out var localEndDateExclusive))
+        {
+            return events.PortalQueryable();
+        }
+
+        var startUtc = LocalDateStartToUtc(localStartDate);
+        var endUtc = LocalDateStartToUtc(localEndDateExclusive);
+        var startUtcText = ToSqliteSortableTimestamp(startUtc);
+        var endUtcText = ToSqliteSortableTimestamp(endUtc);
+
+        return events
+            .FromSqlInterpolated($@"
+                SELECT *
+                FROM events
+                WHERE occurred_at_utc IS NOT NULL
+                  AND occurred_at_utc >= {startUtcText}
+                  AND occurred_at_utc < {endUtcText}
+            ")
+            .AsNoTracking();
+    }
+
+    public static IOrderedQueryable<EventRecord> ApplyDefaultSortDesc(
+        this IQueryable<EventRecord> query,
+        bool isSqlServer)
+    {
+        return isSqlServer
+            ? query
+                .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
+                .ThenByDescending(x => x.EventUid)
+            : query
+                .OrderByDescending(x => x.EventUid);
+    }
+
+    public static IOrderedQueryable<EventRecord> ApplyDefaultSortAsc(
+        this IQueryable<EventRecord> query,
+        bool isSqlServer)
+    {
+        return isSqlServer
+            ? query
+                .OrderBy(x => x.OccurredAtUtc ?? DateTimeOffset.MaxValue)
+                .ThenBy(x => x.EventUid)
+            : query
+                .OrderBy(x => x.EventUid);
+    }
+
     private static bool TryResolveLocalDateRange(
         EventQueryRequest req,
         out DateTime localStartDate,
@@ -147,5 +197,10 @@ public static class EventQueryExtensions
         var localUnspecified = DateTime.SpecifyKind(localDate.Date, DateTimeKind.Unspecified);
         var utc = TimeZoneInfo.ConvertTimeToUtc(localUnspecified, TimeZoneInfo.Local);
         return new DateTimeOffset(utc, TimeSpan.Zero);
+    }
+
+    private static string ToSqliteSortableTimestamp(DateTimeOffset utcValue)
+    {
+        return utcValue.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture);
     }
 }

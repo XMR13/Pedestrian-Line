@@ -305,7 +305,7 @@
                                 <td>
                                     @if (!string.IsNullOrWhiteSpace(item.ThumbnailUrl))
                                     {
-                                        <img src="@item.ThumbnailUrl" alt="@($"Thumbnail for event {item.EventUid} ({item.ClassName}, {item.Direction})")" class="thumb-inline" loading="lazy" />
+                                        <img src="@item.ThumbnailUrl" alt="@($"Thumbnail for event {item.EventUid} ({item.ClassName}, {item.Direction})")" class="thumb-inline" loading="lazy" decoding="async" fetchpriority="low" width="44" height="34" />
                                     }
                                     else
                                     {

@@ -303,67 +303,33 @@ public sealed class EventsController(
         var page = Math.Max(request.Page, 1);
         var pageOffset = (page - 1) * pageSize;
         var isSqlServer = db.Database.IsSqlServer();
-
-        var baseQuery = db.Events.PortalQueryable()
+        var querySource = isSqlServer
+            ? db.Events.PortalQueryable()
+            : db.Events.ApplySqliteDateRangeFilter(request);
+        var baseQuery = querySource
             .ApplyEventFilters(request, includeDateFilter: isSqlServer);
 
-        List<EventListRow> rows;
-        int total;
-        if (isSqlServer)
-        {
-            total = await baseQuery.CountAsync(ct);
-            rows = await baseQuery
-                .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
-                .ThenByDescending(x => x.EventUid)
-                .Skip(pageOffset)
-                .Take(pageSize)
-                .Select(x => new EventListRow
-                {
-                    EventUid = x.EventUid,
-                    RunUid = x.RunUid,
-                    SiteId = x.SiteId,
-                    CameraId = x.CameraId,
-                    OccurredAtUtc = x.OccurredAtUtc,
-                    Direction = x.Direction,
-                    ClassName = x.ClassName,
-                    TrackId = x.TrackId,
-                    ThumbPath = x.ThumbPath,
-                    ScenePath = x.ScenePath,
-                    ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                    Notes = x.Review != null ? x.Review.Notes : null,
-                })
-                .ToListAsync(ct);
-        }
-        else
-        {
-            rows = (await baseQuery
-                .Select(x => new EventListRow
-                {
-                    EventUid = x.EventUid,
-                    RunUid = x.RunUid,
-                    SiteId = x.SiteId,
-                    CameraId = x.CameraId,
-                    OccurredAtUtc = x.OccurredAtUtc,
-                    Direction = x.Direction,
-                    ClassName = x.ClassName,
-                    TrackId = x.TrackId,
-                    ThumbPath = x.ThumbPath,
-                    ScenePath = x.ScenePath,
-                    ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
-                    Notes = x.Review != null ? x.Review.Notes : null,
-                })
-                .ToListAsync(ct))
-                .ApplyLocalDateRangeInMemory(request, x => x.OccurredAtUtc)
-                .ToList();
-
-            total = rows.Count;
-            rows = rows
-                .OrderByDescending(x => x.OccurredAtUtc ?? DateTimeOffset.MinValue)
-                .ThenByDescending(x => x.EventUid)
-                .Skip(pageOffset)
-                .Take(pageSize)
-                .ToList();
-        }
+        var total = await baseQuery.CountAsync(ct);
+        var rows = await baseQuery
+            .ApplyDefaultSortDesc(isSqlServer)
+            .Skip(pageOffset)
+            .Take(pageSize)
+            .Select(x => new EventListRow
+            {
+                EventUid = x.EventUid,
+                RunUid = x.RunUid,
+                SiteId = x.SiteId,
+                CameraId = x.CameraId,
+                OccurredAtUtc = x.OccurredAtUtc,
+                Direction = x.Direction,
+                ClassName = x.ClassName,
+                TrackId = x.TrackId,
+                ThumbPath = x.ThumbPath,
+                ScenePath = x.ScenePath,
+                ReviewStatus = x.Review != null ? x.Review.ReviewStatus : ReviewStatuses.Pending,
+                Notes = x.Review != null ? x.Review.Notes : null,
+            })
+            .ToListAsync(ct);
 
         return Ok(new
         {
@@ -382,9 +348,9 @@ public sealed class EventsController(
                 track_id = x.TrackId,
                 review_status = x.ReviewStatus,
                 notes = x.Notes,
-                thumbnail_url = !string.IsNullOrWhiteSpace(x.ScenePath)
-                    ? $"/api/events/{x.EventUid}/thumbnail?kind=scene"
-                    : (string.IsNullOrWhiteSpace(x.ThumbPath) ? null : $"/api/events/{x.EventUid}/thumbnail"),
+                thumbnail_url = !string.IsNullOrWhiteSpace(x.ThumbPath)
+                    ? $"/api/events/{x.EventUid}/thumbnail"
+                    : (string.IsNullOrWhiteSpace(x.ScenePath) ? null : $"/api/events/{x.EventUid}/thumbnail?kind=scene"),
             }),
         });
     }
@@ -418,6 +384,7 @@ public sealed class EventsController(
             var absolutePath = Path.Combine(root, rel.Replace('/', Path.DirectorySeparatorChar));
             if (System.IO.File.Exists(absolutePath))
             {
+                Response.Headers.CacheControl = "private, max-age=300";
                 return PhysicalFile(absolutePath, "image/jpeg", enableRangeProcessing: true);
             }
         }
@@ -439,21 +406,6 @@ public sealed class EventsController(
 
         Directory.CreateDirectory(path);
         return path;
-    }
-
-    private static List<T> OrderByEventUids<T>(IEnumerable<T> rows, IReadOnlyList<string> orderedEventUids, Func<T, string> getEventUid)
-    {
-        var rowMap = rows.ToDictionary(getEventUid, StringComparer.Ordinal);
-        var ordered = new List<T>(orderedEventUids.Count);
-        foreach (var eventUid in orderedEventUids)
-        {
-            if (rowMap.TryGetValue(eventUid, out var row))
-            {
-                ordered.Add(row);
-            }
-        }
-
-        return ordered;
     }
 
     private sealed class EventListRow
