@@ -24,6 +24,7 @@
     var xAxisMeaning = Model.TrendBucket == "hour"
         ? "Hour of selected date (local time)"
         : "Date (local time)";
+    var headless = Model.HeadlessStatus;
     var aSeriesPoints = new List<string>(trendCount);
     var bSeriesPoints = new List<string>(trendCount);
     for (var i = 0; i < trendCount; i++)
@@ -267,6 +268,65 @@
                 </div>
             </div>
         </div>
+
+        <div class="card">
+            <div class="pad">
+                <div class="kpi-top">
+                    <div>
+                        <div class="kpi-label">Headless runtime status</div>
+                        <div class="kpi-hint">Live run output/health heartbeat from edge.</div>
+                    </div>
+                    @if (headless is null)
+                    {
+                        <span class="pill">no data</span>
+                    }
+                    else if (headless.IsRunning && !headless.IsStale)
+                    {
+                        <span class="pill dir-a">running</span>
+                    }
+                    else if (headless.IsStale)
+                    {
+                        <span class="pill no">stale</span>
+                    }
+                    else
+                    {
+                        <span class="pill ink">stopped</span>
+                    }
+                </div>
+                @if (headless is null)
+                {
+                    <p style="margin-top: 12px; color: var(--muted);">No run status found for this filter.</p>
+                }
+                else
+                {
+                    <div class="meta" style="margin-top: 12px;">
+                        <div class="row"><div class="key">Run</div><div class="val">@headless.RunUid</div></div>
+                        <div class="row"><div class="key">Site/Camera</div><div class="val">@headless.SiteId / @headless.CameraId</div></div>
+                        <div class="row"><div class="key">State</div><div class="val">@headless.LifecycleStatus</div></div>
+                        <div class="row"><div class="key">Status at</div><div class="val">@headless.StatusUpdatedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div></div>
+                        <div class="row"><div class="key">Portal sync</div><div class="val">@headless.PortalUpdatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div></div>
+                        <div class="row"><div class="key">Frames</div><div class="val">@headless.FramesProcessed / @headless.FramesTotal</div></div>
+                        <div class="row"><div class="key">Events</div><div class="val">@headless.EventsEmittedTotal (A→B @headless.CountAToB, B→A @headless.CountBToA)</div></div>
+                        <div class="row"><div class="key">FPS</div><div class="val">proc @FmtSafe(headless.ProcessedFps), eff @FmtSafe(headless.EffectiveFps)</div></div>
+                        <div class="row"><div class="key">Reconnect</div><div class="val">@headless.ReconnectCycles cycle(s), dropped @headless.ReaderDroppedFrames</div></div>
+                        <div class="row"><div class="key">Queue</div><div class="val">@headless.QueuePolicy / @headless.QueueSize</div></div>
+                        <div class="row">
+                            <div class="key">Uploader</div>
+                            <div class="val">
+                                @if (string.IsNullOrWhiteSpace(headless.PortalUploadLastError))
+                                {
+                                    @($"last success {headless.PortalUploadLastSuccessAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-"}")
+                                }
+                                else
+                                {
+                                    @($"error: {headless.PortalUploadLastError}")
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
     </section>
 
     <section class="card">
@@ -355,6 +415,13 @@
     private static string Fmt(double value)
     {
         return value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string FmtSafe(double? value)
+    {
+        return value.HasValue
+            ? value.Value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+            : "-";
     }
 
     private static string StatusClass(string? status)

@@ -29,6 +29,8 @@ PLC_PORTAL_API_BASE_URL="${PLC_PORTAL_API_BASE_URL:-http://127.0.0.1:5000}"
 PLC_PORTAL_UPLOAD_INTERVAL_S="${PLC_PORTAL_UPLOAD_INTERVAL_S:-10}"
 PLC_PORTAL_UPLOAD_MAX_RUNS_PER_PASS="${PLC_PORTAL_UPLOAD_MAX_RUNS_PER_PASS:-2}"
 PLC_PORTAL_UPLOAD_EVENTS_BATCH_SIZE="${PLC_PORTAL_UPLOAD_EVENTS_BATCH_SIZE:-200}"
+PLC_HEADLESS_STATUS_EVERY_S="${PLC_HEADLESS_STATUS_EVERY_S:-10}"
+PLC_HEADLESS_STATUS_JSON="${PLC_HEADLESS_STATUS_JSON:-}"
 PLC_MAX_SECONDS="${PLC_MAX_SECONDS:-}"
 PLC_MAX_FRAMES="${PLC_MAX_FRAMES:-}"
 
@@ -69,6 +71,7 @@ args=(
   --portal-upload-events-batch-size "$PLC_PORTAL_UPLOAD_EVENTS_BATCH_SIZE"
   --portal-upload-thumbnails
   --no-portal-upload-scene-thumbnails
+  --headless-status-every-seconds "$PLC_HEADLESS_STATUS_EVERY_S"
   --no-write
 )
 
@@ -84,6 +87,10 @@ fi
 
 if [[ -n "$PLC_MAX_FRAMES" ]]; then
   args+=(--max-frames "$PLC_MAX_FRAMES")
+fi
+
+if [[ -n "$PLC_HEADLESS_STATUS_JSON" ]]; then
+  args+=(--headless-status-json "$PLC_HEADLESS_STATUS_JSON")
 fi
 
 exec "$UV_BIN" run python "${args[@]}"

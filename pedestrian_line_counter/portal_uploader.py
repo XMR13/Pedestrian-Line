@@ -220,6 +220,8 @@ def process_single_run(
     run_payload = build_run_upsert_payload(run_meta)
     event_payloads = [build_event_upsert_payload(ev) for ev in events]
     run_is_closed = bool(str(run_payload.get("ended_at_utc") or "").strip())
+    run_meta_updated_at = str(run_meta.get("updated_at_utc") or "").strip() or None
+    prev_run_meta_updated_at = str(state.get("run_meta_updated_at_utc") or "").strip() or None
 
     if dry_run:
         print(
@@ -230,22 +232,29 @@ def process_single_run(
         return "completed"
 
     try:
-        if force or not state.get("run_upserted_at_utc"):
+        should_upsert_run = bool(force or not state.get("run_upserted_at_utc"))
+        if run_is_closed and not state.get("run_finalized_at_utc"):
+            should_upsert_run = True
+        if (not run_is_closed) and run_meta_updated_at and (run_meta_updated_at != prev_run_meta_updated_at):
+            should_upsert_run = True
+
+        if should_upsert_run:
+            what = (
+                f"upsert_run_finalize({run_payload['run_uid']})"
+                if run_is_closed and state.get("run_upserted_at_utc")
+                else f"upsert_run({run_payload['run_uid']})"
+            )
             _retry_with_backoff(
                 lambda: client.upsert_run(run_payload),
                 cfg.retry,
-                what=f"upsert_run({run_payload['run_uid']})",
+                what=what,
             )
             state["run_upserted_at_utc"] = _utcnow_iso()
-            _save_state(run_dir, cfg.state_filename, state)
-        elif run_is_closed and not state.get("run_finalized_at_utc"):
-            # Ensure final metadata (ended_at_utc + health summary) is pushed once the run ends.
-            _retry_with_backoff(
-                lambda: client.upsert_run(run_payload),
-                cfg.retry,
-                what=f"upsert_run_finalize({run_payload['run_uid']})",
-            )
-            state["run_finalized_at_utc"] = _utcnow_iso()
+            state["run_meta_updated_at_utc"] = run_meta_updated_at
+            if run_is_closed:
+                state["run_finalized_at_utc"] = _utcnow_iso()
+            else:
+                state.pop("run_finalized_at_utc", None)
             _save_state(run_dir, cfg.state_filename, state)
 
         prev_event_count = _state_int(state, "events_uploaded_count")

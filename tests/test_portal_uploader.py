@@ -144,6 +144,7 @@ def test_process_single_run_in_progress_uploads_only_new_events(tmp_path) -> Non
 
     status_1 = process_single_run(run_dir, cfg=cfg, client=fake, force=False, dry_run=False)
     assert status_1 == "completed"
+    assert fake.run_calls == 2
     assert fake.events_calls == 1
     assert fake.events_batch_sizes == [1]
 
@@ -193,12 +194,23 @@ def test_process_single_run_in_progress_uploads_only_new_events(tmp_path) -> Non
 
     status_2 = process_single_run(run_dir, cfg=cfg, client=fake, force=False, dry_run=False)
     assert status_2 == "completed"
+    assert fake.run_calls == 2
     assert fake.events_calls == 2
     assert fake.events_batch_sizes == [1, 1]
 
     state = json.loads((run_dir / ".state.json").read_text(encoding="utf-8"))
     assert state["events_uploaded_count"] == 2
     assert "completed_at_utc" not in state
+
+    run_meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    run_meta["updated_at_utc"] = "2026-02-20T00:00:06Z"
+    run_meta["health_summary"] = {"lifecycle_status": "running", "events_emitted_total": 2}
+    (run_dir / "run.json").write_text(json.dumps(run_meta), encoding="utf-8")
+
+    status_3 = process_single_run(run_dir, cfg=cfg, client=fake, force=False, dry_run=False)
+    assert status_3 == "completed"
+    assert fake.run_calls == 3
+    assert fake.events_calls == 2
 
 
 def test_resolve_portal_api_key_prefers_direct_value(monkeypatch, tmp_path) -> None:

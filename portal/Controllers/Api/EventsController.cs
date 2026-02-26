@@ -157,7 +157,8 @@ public sealed class EventsController(
     [HttpPost("{eventUid}/thumbnail")]
     [ApiKeyAuthorize]
     [RequestSizeLimit(20_000_000)]
-    public async Task<IActionResult> UploadThumbnail(string eventUid, [FromForm] IFormFile file, CancellationToken ct)
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> UploadThumbnail(string eventUid, IFormFile file, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(eventUid))
         {

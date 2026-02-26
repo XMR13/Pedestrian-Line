@@ -49,6 +49,7 @@ public sealed class PortalWorkflowTests
         using var doc = JsonDocument.Parse(json);
         var totals = doc.RootElement.GetProperty("totals");
         var trend = doc.RootElement.GetProperty("trend");
+        var headless = doc.RootElement.GetProperty("headless_status");
 
         Assert.Equal(2, totals.GetProperty("a_to_b").GetInt32());
         Assert.Equal(1, totals.GetProperty("b_to_a").GetInt32());
@@ -64,6 +65,11 @@ public sealed class PortalWorkflowTests
         Assert.Equal(1, points.Sum(x => x.GetProperty("b_to_a").GetInt32()));
         Assert.Equal(2, points.Sum(x => x.GetProperty("reviewed").GetInt32()));
         Assert.Equal(1, points.Sum(x => x.GetProperty("pending").GetInt32()));
+
+        Assert.Equal("run-001", headless.GetProperty("run_uid").GetString());
+        Assert.Equal("STOPPED", headless.GetProperty("lifecycle_status").GetString());
+        Assert.False(headless.GetProperty("is_running").GetBoolean());
+        Assert.Equal(3, headless.GetProperty("events_emitted_total").GetInt32());
     }
 
     [Fact]
@@ -302,6 +308,27 @@ public sealed class PortalWorkflowTests
                 CameraId = "cam_01",
                 StartedAtUtc = now.AddMinutes(-30),
                 EndedAtUtc = now.AddMinutes(-1),
+                HealthSummaryJson = JsonSerializer.Serialize(new
+                {
+                    lifecycle_status = "stopped",
+                    status_updated_at_utc = now.ToString("O"),
+                    frames_total = 1000,
+                    frames_processed = 750,
+                    events_emitted_total = 3,
+                    count_a_to_b = 2,
+                    count_b_to_a = 1,
+                    effective_fps = 29.5,
+                    processed_fps = 12.5,
+                    reconnect_cycles = 1,
+                    reader_dropped_frames = 4,
+                    queue_policy = "drop_oldest",
+                    queue_size = 3,
+                    portal_upload_runtime = new
+                    {
+                        last_success_at_utc = now.ToString("O"),
+                        last_error = (string?)null,
+                    },
+                }),
                 UpdatedAtUtc = now,
             });
 

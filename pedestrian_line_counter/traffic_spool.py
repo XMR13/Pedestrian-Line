@@ -27,6 +27,15 @@ def _safe_mkdir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+def _write_json_atomic(path: Path, payload: Mapping[str, Any], *, indent: Optional[int] = None) -> None:
+    parent = path.parent
+    _safe_mkdir(parent)
+    tmp = parent / f".{path.name}.tmp"
+    text = json.dumps(dict(payload), indent=indent, ensure_ascii=True)
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
 def _clip_box(x1: int, y1: int, x2: int, y2: int, w: int, h: int) -> Optional[Tuple[int, int, int, int]]:
     x1c = max(0, min(int(x1), w - 1))
     y1c = max(0, min(int(y1), h - 1))
@@ -129,6 +138,7 @@ class TrafficSpoolWriter:
             "frame_height": int(frame_size[1]),
         }
         self._run_meta_path = self.run_dir / "run.json"
+        self._status_path = self.run_dir / "status.json"
         self._run_meta: Dict[str, Any] = dict(run_meta)
         self._write_run_meta()
 
@@ -228,7 +238,22 @@ class TrafficSpoolWriter:
         return written
 
     def _write_run_meta(self) -> None:
-        self._run_meta_path.write_text(json.dumps(self._run_meta, indent=2), encoding="utf-8")
+        self._run_meta["updated_at_utc"] = _iso_utc(time.time())
+        _write_json_atomic(self._run_meta_path, self._run_meta, indent=2)
+
+    def write_headless_status(self, status: Mapping[str, Any]) -> None:
+        if not isinstance(status, Mapping):
+            raise TypeError("status must be a mapping")
+        payload: Dict[str, Any] = {
+            "contract_version": PORTAL_CONTRACT_VERSION,
+            "run_uid": self.run_uid,
+            "site_id": self.cfg.site_id,
+            "camera_id": self.cfg.camera_id,
+            "started_at_utc": self.started_at_utc,
+            "updated_at_utc": _iso_utc(time.time()),
+        }
+        payload.update(dict(status))
+        _write_json_atomic(self._status_path, payload, indent=2)
 
     def _build_scene_thumbnail(self, frame_bgr: np.ndarray, ev: CrossingEvent) -> Optional[np.ndarray]:
         """

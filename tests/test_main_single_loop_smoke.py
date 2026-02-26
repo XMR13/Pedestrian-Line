@@ -149,6 +149,13 @@ def test_live_single_loop_integrated_upload_smoke(monkeypatch, tmp_path, capsys)
     run_meta = json.loads(run_jsons[0].read_text(encoding="utf-8"))
     assert run_meta.get("ended_at_utc")
     assert isinstance(run_meta.get("health_summary"), dict)
+    assert run_meta["health_summary"].get("lifecycle_status") == "stopped"
+
+    status_json = run_jsons[0].parent / "status.json"
+    assert status_json.exists()
+    status_meta = json.loads(status_json.read_text(encoding="utf-8"))
+    assert status_meta.get("run_uid") == run_meta.get("run_uid")
+    assert status_meta.get("lifecycle_status") == "stopped"
 
     out = capsys.readouterr().out
     assert "[main][portal] integrated uploader enabled" in out

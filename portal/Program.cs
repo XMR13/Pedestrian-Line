@@ -16,6 +16,8 @@ builder.Services
         options.JsonSerializerOptions.DictionaryKeyPolicy = JsonNamingPolicy.SnakeCaseLower;
         options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
     });
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 builder.Services.AddHttpContextAccessor();
 
 builder.Services.Configure<PortalOptions>(builder.Configuration.GetSection("Portal"));
@@ -80,6 +82,13 @@ app.UseRouting();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.UseSwagger();
+app.UseSwaggerUI(options =>
+{
+    options.RoutePrefix = "docs";
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Portal API v1");
+});
 
 app.MapControllers();
 app.MapControllerRoute(

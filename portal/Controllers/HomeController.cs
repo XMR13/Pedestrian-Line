@@ -32,6 +32,61 @@ public sealed class HomeController(PortalDbContext db) : Controller
             DateTo = request.DateTo,
         };
 
+        var runQuery = db.Runs.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(request.SiteId))
+        {
+            runQuery = runQuery.Where(x => x.SiteId == request.SiteId);
+        }
+        if (!string.IsNullOrWhiteSpace(request.CameraId))
+        {
+            runQuery = runQuery.Where(x => x.CameraId == request.CameraId);
+        }
+        RunRecord? latestRun;
+        if (isSqlServer)
+        {
+            latestRun = await runQuery
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .ThenByDescending(x => x.StartedAtUtc)
+                .FirstOrDefaultAsync(ct);
+        }
+        else
+        {
+            latestRun = (await runQuery.ToListAsync(ct))
+                .OrderByDescending(x => x.UpdatedAtUtc.UtcDateTime)
+                .ThenByDescending(x => x.StartedAtUtc?.UtcDateTime)
+                .FirstOrDefault();
+        }
+        var headlessStatus = HeadlessStatusSnapshotMapper.Build(latestRun, DateTimeOffset.UtcNow);
+        if (headlessStatus is not null)
+        {
+            vm.HeadlessStatus = new DashboardHeadlessStatusViewModel
+            {
+                RunUid = headlessStatus.RunUid,
+                SiteId = headlessStatus.SiteId,
+                CameraId = headlessStatus.CameraId,
+                LifecycleStatus = headlessStatus.LifecycleStatus,
+                IsRunning = headlessStatus.IsRunning,
+                IsStale = headlessStatus.IsStale,
+                StartedAtUtc = headlessStatus.StartedAtUtc,
+                EndedAtUtc = headlessStatus.EndedAtUtc,
+                StatusUpdatedAtUtc = headlessStatus.StatusUpdatedAtUtc,
+                PortalUpdatedAtUtc = headlessStatus.PortalUpdatedAtUtc,
+                FramesTotal = headlessStatus.FramesTotal,
+                FramesProcessed = headlessStatus.FramesProcessed,
+                EventsEmittedTotal = headlessStatus.EventsEmittedTotal,
+                CountAToB = headlessStatus.CountAToB,
+                CountBToA = headlessStatus.CountBToA,
+                EffectiveFps = headlessStatus.EffectiveFps,
+                ProcessedFps = headlessStatus.ProcessedFps,
+                ReconnectCycles = headlessStatus.ReconnectCycles,
+                ReaderDroppedFrames = headlessStatus.ReaderDroppedFrames,
+                QueuePolicy = headlessStatus.QueuePolicy,
+                QueueSize = headlessStatus.QueueSize,
+                PortalUploadLastSuccessAtUtc = headlessStatus.PortalUploadLastSuccessAtUtc,
+                PortalUploadLastError = headlessStatus.PortalUploadLastError,
+            };
+        }
+
         var totals = await filtered
             .GroupBy(_ => 1)
             .Select(g => new

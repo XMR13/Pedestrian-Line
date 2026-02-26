@@ -42,6 +42,32 @@ public sealed class DashboardController(PortalDbContext db) : ControllerBase
         var qualified = totals?.Qualified ?? 0;
         var notQualified = totals?.NotQualified ?? 0;
 
+        var runQuery = db.Runs.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(request.SiteId))
+        {
+            runQuery = runQuery.Where(x => x.SiteId == request.SiteId);
+        }
+        if (!string.IsNullOrWhiteSpace(request.CameraId))
+        {
+            runQuery = runQuery.Where(x => x.CameraId == request.CameraId);
+        }
+        RunRecord? latestRun;
+        if (isSqlServer)
+        {
+            latestRun = await runQuery
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .ThenByDescending(x => x.StartedAtUtc)
+                .FirstOrDefaultAsync(ct);
+        }
+        else
+        {
+            latestRun = (await runQuery.ToListAsync(ct))
+                .OrderByDescending(x => x.UpdatedAtUtc.UtcDateTime)
+                .ThenByDescending(x => x.StartedAtUtc?.UtcDateTime)
+                .FirstOrDefault();
+        }
+        var headlessStatus = HeadlessStatusSnapshotMapper.Build(latestRun, DateTimeOffset.UtcNow);
+
         var trendRows = await DashboardTrendBuilder.QueryRowsAsync(filtered, selectedSingleDate, ct);
         var recent = (await filtered
             .ApplyDefaultSortDesc(isSqlServer)
@@ -89,6 +115,32 @@ public sealed class DashboardController(PortalDbContext db) : ControllerBase
                     reviewed = x.Reviewed,
                     pending = x.Pending,
                 }),
+            },
+            headless_status = headlessStatus is null ? null : new
+            {
+                run_uid = headlessStatus.RunUid,
+                site_id = headlessStatus.SiteId,
+                camera_id = headlessStatus.CameraId,
+                lifecycle_status = headlessStatus.LifecycleStatus,
+                is_running = headlessStatus.IsRunning,
+                is_stale = headlessStatus.IsStale,
+                started_at_utc = headlessStatus.StartedAtUtc,
+                ended_at_utc = headlessStatus.EndedAtUtc,
+                status_updated_at_utc = headlessStatus.StatusUpdatedAtUtc,
+                portal_updated_at_utc = headlessStatus.PortalUpdatedAtUtc,
+                frames_total = headlessStatus.FramesTotal,
+                frames_processed = headlessStatus.FramesProcessed,
+                events_emitted_total = headlessStatus.EventsEmittedTotal,
+                count_a_to_b = headlessStatus.CountAToB,
+                count_b_to_a = headlessStatus.CountBToA,
+                effective_fps = headlessStatus.EffectiveFps,
+                processed_fps = headlessStatus.ProcessedFps,
+                reconnect_cycles = headlessStatus.ReconnectCycles,
+                reader_dropped_frames = headlessStatus.ReaderDroppedFrames,
+                queue_policy = headlessStatus.QueuePolicy,
+                queue_size = headlessStatus.QueueSize,
+                portal_upload_last_success_at_utc = headlessStatus.PortalUploadLastSuccessAtUtc,
+                portal_upload_last_error = headlessStatus.PortalUploadLastError,
             },
             recent,
         });

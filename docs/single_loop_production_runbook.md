@@ -40,6 +40,7 @@ Default profile used by this script:
 - Output video disabled (`--no-write`) to save CPU and disk I/O.
 - Scene thumbnails disabled (keeps uploader lighter).
 - Integrated portal upload enabled with periodic pass.
+- Headless status snapshots written periodically (`run.json` + `status.json`) for portal health visibility.
 
 Run duration:
 
@@ -76,6 +77,8 @@ export PLC_SPOOL_DIR="/var/lib/pedline/traffic_runs"
 export PLC_PORTAL_UPLOAD_INTERVAL_S="10"
 export PLC_PORTAL_UPLOAD_MAX_RUNS_PER_PASS="2"
 export PLC_PORTAL_UPLOAD_EVENTS_BATCH_SIZE="200"
+export PLC_HEADLESS_STATUS_EVERY_S="10"
+# export PLC_HEADLESS_STATUS_JSON="/var/lib/pedline/status/cam_01.json"
 # export PLC_MAX_SECONDS="30"
 # export PLC_MAX_FRAMES="300"
 ```
@@ -132,6 +135,8 @@ Check these continuously:
 - Spool output exists and keeps growing under:
   - `<spool_dir>/<yyyy-mm-dd>/<run_uid>/run.json`
   - `<spool_dir>/<yyyy-mm-dd>/<run_uid>/events.jsonl`
+  - `<spool_dir>/<yyyy-mm-dd>/<run_uid>/status.json`
+- Portal dashboard "Headless runtime status" card updates for active run health.
 
 After a graceful stop, confirm `run.json` has:
 

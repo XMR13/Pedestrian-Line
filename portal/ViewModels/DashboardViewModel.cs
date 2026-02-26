@@ -21,4 +21,5 @@ public sealed class DashboardViewModel
     public List<DashboardTrendPointViewModel> TrendPoints { get; set; } = [];
 
     public List<EventListItemViewModel> RecentEvents { get; set; } = new();
+    public DashboardHeadlessStatusViewModel? HeadlessStatus { get; set; }
 }

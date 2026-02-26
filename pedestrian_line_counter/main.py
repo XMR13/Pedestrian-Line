@@ -8,7 +8,7 @@ import difflib
 import math
 import os
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Mapping, Optional, Tuple
 import threading
 import time
 
@@ -308,6 +308,24 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="Print current totals every N seconds (useful in headless live mode).",
+    )
+    parser.add_argument(
+        "--headless-status-every-seconds",
+        type=float,
+        default=10.0,
+        help=(
+            "Write periodic runtime health snapshots for headless monitoring "
+            "(run.json health_summary + status.json when spool is enabled)."
+        ),
+    )
+    parser.add_argument(
+        "--headless-status-json",
+        type=str,
+        default=None,
+        help=(
+            "Optional explicit path for standalone headless status JSON output. "
+            "If omitted and spool is enabled, status is written to <run_dir>/status.json."
+        ),
     )
     parser.add_argument(
         "--open-timeout-ms",
@@ -979,6 +997,8 @@ def main() -> None:
     ):
         if value is not None and value <= 0:
             raise SystemExit(f"{flag} must be > 0")
+    if args.headless_status_every_seconds is not None and float(args.headless_status_every_seconds) < 0:
+        raise SystemExit("--headless-status-every-seconds must be >= 0")
     if args.rtsp_latency_ms is not None and args.rtsp_latency_ms < 0:
         raise SystemExit("--rtsp-latency-ms must be >= 0")
     for flag, value in (
@@ -1186,6 +1206,12 @@ def main() -> None:
         print(f"[main] Wrote resolved config JSON: {dump_path}")
         return
 
+    standalone_headless_status_path: Optional[Path] = None
+    if args.headless_status_json is not None:
+        standalone_headless_status_path = _normalize_cli_path(args.headless_status_json)
+        if not standalone_headless_status_path.is_absolute():
+            standalone_headless_status_path = ROOT_DIR / standalone_headless_status_path
+
     if not is_live and not input_path.exists():
         hint = _missing_path_hint(input_path)
         msg = f"Input video not found: {input_path}"
@@ -1356,6 +1382,23 @@ def main() -> None:
     portal_uploader_max_runs: Optional[int] = args.portal_upload_max_runs_per_pass
     portal_uploader_stop_event: Optional[threading.Event] = None
     portal_uploader_thread: Optional[threading.Thread] = None
+    portal_upload_lock = threading.Lock()
+    portal_upload_runtime: Dict[str, object] = {
+        "watch_passes_total": 0,
+        "discovered_runs_total": 0,
+        "completed_runs_total": 0,
+        "skipped_runs_total": 0,
+        "failed_runs_total": 0,
+        "last_pass_reason": None,
+        "last_pass_at_utc": None,
+        "last_success_at_utc": None,
+        "last_error": None,
+        "last_error_at_utc": None,
+    }
+    headless_status_every_s = float(args.headless_status_every_seconds or 0.0)
+    next_headless_status_s = time.time() + max(headless_status_every_s, 0.0)
+    standalone_status_target: Optional[Path] = standalone_headless_status_path
+    spool_events_written_total = 0
     spool_dir = Path(args.spool_dir) if args.spool_dir else cfg.spool.root_dir
     if spool_dir is not None:
         cam_id = args.camera_id or cfg.spool.camera_id or (args.camera if args.camera else "camera")
@@ -1421,6 +1464,8 @@ def main() -> None:
             frame_size=(int(width), int(height)),
             class_names=class_names_map,
         )
+        if standalone_status_target is None:
+            standalone_status_target = spool.run_dir / "status.json"
     if args.portal_upload:
         if spool is None or spool_dir is None:
             raise SystemExit(
@@ -1605,6 +1650,14 @@ def main() -> None:
             f"max_delay={cfg.io.rtsp_reconnect_max_delay_s:.2f}s, backoff={cfg.io.rtsp_reconnect_backoff_factor:.2f}, "
             f"stall_timeout={cfg.io.rtsp_stall_timeout_s:.2f}s)"
         )
+    if spool is not None or standalone_status_target is not None:
+        if headless_status_every_s > 0:
+            print(
+                f"[main] Headless status: enabled every {headless_status_every_s:.1f}s "
+                f"(target={standalone_status_target if standalone_status_target is not None else 'spool-only'})"
+            )
+        else:
+            print("[main] Headless status: snapshots on startup/shutdown only.")
 
     # Prepare progress bar
     progress_total = None
@@ -1671,9 +1724,13 @@ def main() -> None:
         )
         reader.start()
 
+    def _utcnow_iso() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
     def _portal_upload_pass(reason: str) -> None:
         if portal_uploader_cfg is None:
             return
+        now_iso = _utcnow_iso()
         try:
             summary = process_pending_runs(
                 portal_uploader_cfg,
@@ -1681,13 +1738,108 @@ def main() -> None:
                 dry_run=False,
                 max_runs=portal_uploader_max_runs,
             )
+            with portal_upload_lock:
+                portal_upload_runtime["watch_passes_total"] = int(portal_upload_runtime["watch_passes_total"]) + 1
+                portal_upload_runtime["discovered_runs_total"] = int(portal_upload_runtime["discovered_runs_total"]) + int(summary.discovered_runs)
+                portal_upload_runtime["completed_runs_total"] = int(portal_upload_runtime["completed_runs_total"]) + int(summary.completed_runs)
+                portal_upload_runtime["skipped_runs_total"] = int(portal_upload_runtime["skipped_runs_total"]) + int(summary.skipped_runs)
+                portal_upload_runtime["failed_runs_total"] = int(portal_upload_runtime["failed_runs_total"]) + int(summary.failed_runs)
+                portal_upload_runtime["last_pass_reason"] = str(reason)
+                portal_upload_runtime["last_pass_at_utc"] = now_iso
+                if int(summary.failed_runs) == 0:
+                    portal_upload_runtime["last_success_at_utc"] = now_iso
+                    portal_upload_runtime["last_error"] = None
+                    portal_upload_runtime["last_error_at_utc"] = None
             if summary.completed_runs > 0 or summary.failed_runs > 0:
                 print(
                     f"[main][portal] {reason}: discovered={summary.discovered_runs} "
                     f"completed={summary.completed_runs} skipped={summary.skipped_runs} failed={summary.failed_runs}"
                 )
         except Exception as exc:
+            with portal_upload_lock:
+                portal_upload_runtime["watch_passes_total"] = int(portal_upload_runtime["watch_passes_total"]) + 1
+                portal_upload_runtime["last_pass_reason"] = str(reason)
+                portal_upload_runtime["last_pass_at_utc"] = now_iso
+                portal_upload_runtime["last_error"] = str(exc)
+                portal_upload_runtime["last_error_at_utc"] = now_iso
             print(f"[main][portal] {reason} upload pass failed: {exc}")
+
+    def _build_health_summary(
+        *,
+        lifecycle_status: str,
+        ended_at_utc: Optional[str] = None,
+    ) -> Dict[str, object]:
+        elapsed_s = max(time.perf_counter() - run_started_perf_s, 1e-9)
+        current_reader_frames = int(getattr(reader, "read_frames", 0)) if reader is not None else 0
+        current_reader_dropped = int(getattr(reader, "dropped", 0)) if reader is not None else 0
+        current_reader_failures = int(getattr(reader, "read_failures", 0)) if reader is not None else 0
+        with portal_upload_lock:
+            portal_runtime_snapshot = dict(portal_upload_runtime)
+
+        summary: Dict[str, object] = {
+            "lifecycle_status": str(lifecycle_status),
+            "status_updated_at_utc": _utcnow_iso(),
+            "started_at_utc": spool.started_at_utc if spool is not None else None,
+            "ended_at_utc": str(ended_at_utc) if ended_at_utc else None,
+            "frames_total": int(t_frames),
+            "frames_processed": int(t_processed),
+            "events_emitted_total": int(spool_events_written_total),
+            "count_a_to_b": int(line_counter.count_a_to_b),
+            "count_b_to_a": int(line_counter.count_b_to_a),
+            "effective_fps": float(t_frames) / elapsed_s if t_frames > 0 else 0.0,
+            "processed_fps": float(t_processed) / elapsed_s if t_processed > 0 else 0.0,
+            "reconnect_cycles": int(reconnect_cycle_count),
+            "reconnect_attempts_total": int(reconnect_attempt_total),
+            "reconnect_reason_counts": dict(reconnect_reason_counts),
+            "stall_timeout_count": int(stall_timeout_count),
+            "reader_read_frames": int(live_reader_read_frames_total) + current_reader_frames,
+            "reader_dropped_frames": int(live_reader_dropped_total) + current_reader_dropped,
+            "reader_read_failures": int(live_reader_read_failures_total) + current_reader_failures,
+            "queue_policy": queue_policy,
+            "queue_size": int(args.queue_size),
+            "target_fps": float(args.target_fps) if args.target_fps else None,
+            "rtsp_capture_backend": rtsp_capture_backend if is_live else None,
+            "rtsp_transport": rtsp_transport if is_live else None,
+            "rtsp_codec": rtsp_codec if is_live else None,
+            "portal_upload_runtime": portal_runtime_snapshot if portal_uploader_cfg is not None else None,
+        }
+        return summary
+
+    def _write_standalone_status(status_payload: Mapping[str, object]) -> None:
+        if standalone_status_target is None:
+            return
+        target = Path(standalone_status_target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = target.with_suffix(target.suffix + ".tmp")
+        temp_path.write_text(json.dumps(dict(status_payload), indent=2, ensure_ascii=True), encoding="utf-8")
+        temp_path.replace(target)
+
+    def _publish_headless_status(*, lifecycle_status: str, ended_at_utc: Optional[str] = None) -> None:
+        health_summary = _build_health_summary(
+            lifecycle_status=str(lifecycle_status),
+            ended_at_utc=ended_at_utc,
+        )
+        run_status = {
+            "lifecycle_status": str(lifecycle_status),
+            "ended_at_utc": ended_at_utc,
+            "health_summary": health_summary,
+        }
+        if spool is not None:
+            spool.update_run_metadata(run_status)
+            spool.write_headless_status(run_status)
+            if standalone_status_target is not None and Path(standalone_status_target) == (spool.run_dir / "status.json"):
+                return
+        standalone_payload: Dict[str, object] = dict(run_status)
+        if spool is not None:
+            standalone_payload.update(
+                {
+                    "run_uid": spool.run_uid,
+                    "site_id": spool.cfg.site_id,
+                    "camera_id": spool.cfg.camera_id,
+                    "started_at_utc": spool.started_at_utc,
+                }
+            )
+        _write_standalone_status(standalone_payload)
 
     if portal_uploader_cfg is not None:
         if is_live:
@@ -1711,6 +1863,9 @@ def main() -> None:
             )
         else:
             print("[main][portal] integrated uploader enabled (single final upload pass at end).")
+
+    if spool is not None or standalone_status_target is not None:
+        _publish_headless_status(lifecycle_status="running")
 
     try:
         def refresh_realtime_fps(
@@ -1975,7 +2130,7 @@ def main() -> None:
                         occurred_at_source = "video_start"
                     event_records = [] if (spool is not None and report_writer is not None) else None
                     if spool is not None:
-                        spool.record_events(
+                        written_events = spool.record_events(
                             events,
                             frame_bgr=frame,
                             occurred_at_ts=float(occurred_at_ts),
@@ -1983,6 +2138,7 @@ def main() -> None:
                             occurred_at_local_tz=video_start_local_tz,
                             capture_records=event_records,
                         )
+                        spool_events_written_total += int(written_events)
                     if report_writer is not None:
                         report_writer.record_events(events, event_records=event_records)
 
@@ -2096,6 +2252,12 @@ def main() -> None:
                     )
                     last_log_time_s = now
 
+            if (spool is not None or standalone_status_target is not None) and headless_status_every_s > 0:
+                now_status = time.time()
+                if now_status >= next_headless_status_s:
+                    _publish_headless_status(lifecycle_status="running")
+                    next_headless_status_s = now_status + headless_status_every_s
+
             if args.benchmark and t_frames > 0 and (t_frames % max(args.benchmark_every, 1) == 0):
                 fps_eff = float(t_frames) / max(t_total, 1e-9)
                 det_avg = (1000 * t_detect / t_processed) if t_processed > 0 else 0.0
@@ -2127,29 +2289,9 @@ def main() -> None:
         cap.release()
     if writer is not None:
         writer.release()
+    if spool is not None or standalone_status_target is not None:
+        _publish_headless_status(lifecycle_status="stopped", ended_at_utc=_utcnow_iso())
     if spool is not None:
-        elapsed_s = max(time.perf_counter() - run_started_perf_s, 1e-9)
-        ended_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        health_summary = {
-            "ended_at_utc": ended_at_utc,
-            "frames_total": int(t_frames),
-            "frames_processed": int(t_processed),
-            "effective_fps": float(t_frames) / elapsed_s if t_frames > 0 else 0.0,
-            "processed_fps": float(t_processed) / elapsed_s if t_processed > 0 else 0.0,
-            "reconnect_cycles": int(reconnect_cycle_count),
-            "reconnect_attempts_total": int(reconnect_attempt_total),
-            "reconnect_reason_counts": reconnect_reason_counts,
-            "stall_timeout_count": int(stall_timeout_count),
-            "reader_read_frames": int(live_reader_read_frames_total),
-            "reader_dropped_frames": int(live_reader_dropped_total),
-            "reader_read_failures": int(live_reader_read_failures_total),
-            "queue_policy": queue_policy,
-            "queue_size": int(args.queue_size),
-            "rtsp_capture_backend": rtsp_capture_backend if is_live else None,
-            "rtsp_transport": rtsp_transport if is_live else None,
-            "rtsp_codec": rtsp_codec if is_live else None,
-        }
-        spool.update_run_metadata({"ended_at_utc": ended_at_utc, "health_summary": health_summary})
         spool.close()
     if report_writer is not None:
         report_writer.close()
