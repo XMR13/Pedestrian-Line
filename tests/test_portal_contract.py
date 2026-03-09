@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 from pedestrian_line_counter.portal_contract import (

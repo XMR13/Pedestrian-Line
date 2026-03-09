@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pedestrian_line_counter.line_counter import TwoLineGateCounter
 from pedestrian_line_counter.structures import Track
 

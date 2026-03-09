@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 from pedestrian_line_counter.line_counter import LineCounter, TwoLineGateCounter

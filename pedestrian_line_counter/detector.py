@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, List, Optional
 
 import cv2
 import numpy as np
 
-from .config import ModelConfig
+from .config import ModelConfig, ROOT_DIR
 from .structures import Detection
 
 
@@ -82,8 +83,14 @@ class Detector:
                 )
             from .tensorrt_runner import TensorRTRunner
 
-            self._trt_runner = TensorRTRunner(self.config.model_path,
-                                              input_size=self.config.input_size)
+            trt_model_path = Path(self.config.model_path)
+            if not trt_model_path.is_absolute() and not trt_model_path.exists():
+                trt_model_path = ROOT_DIR / trt_model_path
+
+            self._trt_runner = TensorRTRunner(
+                trt_model_path,
+                input_size=self.config.input_size,
+            )
 
             from yolo_kitv2 import LetterboxConfig, YoloPipeline  # type: ignore
 
@@ -265,12 +272,20 @@ class Detector:
             if not outputs:
                 raise RuntimeError("TensorRT backend returned no outputs.")
 
-            # Prefer YOLO-like output (1, ..., ...) when multiple outputs exist.
-            best = outputs[0]
-            for out in outputs:
-                if getattr(out, "ndim", 0) == 3 and out.shape[0] == 1:
-                    best = out
-                    break
-            return np.asarray(best)
+            yolo_like = [
+                out
+                for out in outputs
+                if getattr(out, "ndim", 0) == 3 and len(getattr(out, "shape", ())) >= 1 and out.shape[0] == 1
+            ]
+            if len(yolo_like) == 1:
+                return np.asarray(yolo_like[0])
+            if len(outputs) == 1:
+                return np.asarray(outputs[0])
+
+            shapes = [tuple(int(dim) for dim in getattr(out, "shape", ())) for out in outputs]
+            raise RuntimeError(
+                "TensorRT backend could not identify a unique YOLO-style output tensor. "
+                f"Engine outputs: {shapes}. Use a single-output raw YOLO engine for this backend."
+            )
 
         return infer

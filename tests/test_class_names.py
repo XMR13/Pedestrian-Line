@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 
 from pedestrian_line_counter.config import infer_track_class_ids_from_class_names, load_class_names

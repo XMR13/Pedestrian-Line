@@ -34,6 +34,39 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover - safe fallback
     tqdm = None
 
+
+def _add_bool_arg(
+    parser: argparse.ArgumentParser,
+    option: str,
+    *,
+    dest: str,
+    default: Optional[bool],
+    help: Optional[str] = None,
+) -> None:
+    """Add a --foo/--no-foo flag pair with a Python 3.8-compatible fallback."""
+
+    if hasattr(argparse, "BooleanOptionalAction"):
+        parser.add_argument(
+            option,
+            dest=dest,
+            action=argparse.BooleanOptionalAction,
+            default=default,
+            help=help,
+        )
+        return
+
+    if not option.startswith("--"):
+        raise ValueError(f"Expected long option starting with '--', got: {option}")
+
+    parser.set_defaults(**{dest: default})
+    parser.add_argument(option, dest=dest, action="store_true", help=help)
+    parser.add_argument(
+        f"--no-{option[2:]}",
+        dest=dest,
+        action="store_false",
+        help=argparse.SUPPRESS,
+    )
+
 # mendefinisikan command terlebih dahulu (later integration
 # bisa langsung dijadikan argumen dari command
 def _parse_args() -> argparse.Namespace:
@@ -372,10 +405,10 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Live mode only: full custom GStreamer pipeline string (advanced override).",
     )
-    parser.add_argument(
+    _add_bool_arg(
+        parser,
         "--rtsp-reconnect",
         dest="rtsp_reconnect",
-        action=argparse.BooleanOptionalAction,
         default=None,
         help="Enable/disable RTSP reconnect policy in live mode.",
     )
@@ -424,32 +457,32 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Camera ID for traffic spool metadata (defaults to --camera if set).",
     )
-    parser.add_argument(
+    _add_bool_arg(
+        parser,
         "--spool-thumbnails",
         dest="spool_thumbnails",
-        action=argparse.BooleanOptionalAction,
         default=None,
         help="Enable/disable writing thumbnails for crossing events (default: enabled).",
     )
     parser.add_argument("--spool-thumb-pad", type=int, default=None, help="Padding (pixels) around bbox when saving thumbnails.")
     parser.add_argument("--spool-thumb-max-side", type=int, default=None, help="Max side (pixels) for saved thumbnails.")
 
-    parser.add_argument(
+    _add_bool_arg(
+        parser,
         "--spool-scene-thumbnails",
         dest="spool_scene_thumbnails",
-        action=argparse.BooleanOptionalAction,
         default=None,
         help="Enable/disable writing scene-context thumbnails (default: enabled).",
     )
     parser.add_argument("--spool-scene-thumb-max-side", type=int, default=None, help="Max side (pixels) for scene thumbnails.")
     parser.add_argument("--spool-scene-thumb-quality", type=int, default=None, help="JPEG quality (10..100) for scene thumbnails.")
     
-    parser.add_argument(
+    _add_bool_arg(
+        parser,
         "--report-csv",
         dest="report_csv",
-        action=argparse.BooleanOptionalAction,
         default=None,
-        help="Enable/disable per-run report csv output (default: enabled when spool is enabled)."
+        help="Enable/disable per-run report csv output (default: enabled when spool is enabled).",
     )
     parser.add_argument(
         "--report-name",
@@ -457,17 +490,17 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Report CSV Filename inside each run directory (default: report.csv)"
     )
-    parser.add_argument(
+    _add_bool_arg(
+        parser,
         "--report-include-extra-cols",
         dest="report_include_extra_cols",
-        action=argparse.BooleanOptionalAction,
         default=None,
-        help="Include technical columns (track_id), frame_index, class_id, confidence, thumb path)."
+        help="Include technical columns (track_id), frame_index, class_id, confidence, thumb path).",
     )
-    parser.add_argument(
+    _add_bool_arg(
+        parser,
         "--portal-upload",
         dest="portal_upload",
-        action=argparse.BooleanOptionalAction,
         default=False,
         help=(
             "Enable integrated portal uploader in this same process. "
@@ -525,17 +558,17 @@ def _parse_args() -> argparse.Namespace:
         default=200,
         help="Integrated uploader batch size for /api/events/upsert.",
     )
-    parser.add_argument(
+    _add_bool_arg(
+        parser,
         "--portal-upload-thumbnails",
         dest="portal_upload_thumbnails",
-        action=argparse.BooleanOptionalAction,
         default=True,
         help="Integrated uploader: enable/disable event thumbnail upload.",
     )
-    parser.add_argument(
+    _add_bool_arg(
+        parser,
         "--portal-upload-scene-thumbnails",
         dest="portal_upload_scene_thumbnails",
-        action=argparse.BooleanOptionalAction,
         default=False,
         help="Integrated uploader: enable/disable scene thumbnail upload.",
     )

@@ -20,11 +20,16 @@ def _try_import_tensorrt():
 def _try_import_cudart():
     try:
         from cuda.bindings import runtime as cudart  # type: ignore
-    except Exception as exc:  # pragma: no cover - depends on env
-        raise RuntimeError(
-            "TensorRT backend requires CUDA runtime bindings. Install 'cuda-python' (pip) on the target device."
-        ) from exc
-    return cudart
+        return cudart
+    except Exception:
+        try:
+            from cuda import cudart  # type: ignore
+            return cudart
+        except Exception as exc:  # pragma: no cover - depends on env
+            raise RuntimeError(
+                "TensorRT backend requires CUDA runtime bindings. "
+                "Install a compatible 'cuda-python' package on the target device."
+            ) from exc
 
 
 def _cuda_call(cudart, result):
@@ -295,6 +300,12 @@ class TensorRTRunner:
 
         if not self._inputs:
             raise RuntimeError("TensorRT engine has no inputs")
+        if len(self._inputs) != 1:
+            names = [binding.name for binding in self._inputs]
+            raise RuntimeError(
+                "TensorRT backend currently supports only single-input engines. "
+                f"Engine inputs: {names}"
+            )
         if not self._outputs:
             raise RuntimeError("TensorRT engine has no outputs")
 

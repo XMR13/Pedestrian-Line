@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 
 from yolo_kitv2 import YoloPostConfig, YoloPostprocessor

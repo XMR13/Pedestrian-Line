@@ -35,6 +35,39 @@ class RetryableUploadError(UploadError):
     """Raised for transient failures that should be retried."""
 
 
+def _add_bool_arg(
+    parser: argparse.ArgumentParser,
+    option: str,
+    *,
+    dest: str,
+    default: Optional[bool],
+    help: Optional[str] = None,
+) -> None:
+    """Add a --foo/--no-foo flag pair with a Python 3.8-compatible fallback."""
+
+    if hasattr(argparse, "BooleanOptionalAction"):
+        parser.add_argument(
+            option,
+            dest=dest,
+            action=argparse.BooleanOptionalAction,
+            default=default,
+            help=help,
+        )
+        return
+
+    if not option.startswith("--"):
+        raise ValueError(f"Expected long option starting with '--', got: {option}")
+
+    parser.set_defaults(**{dest: default})
+    parser.add_argument(option, dest=dest, action="store_true", help=help)
+    parser.add_argument(
+        f"--no-{option[2:]}",
+        dest=dest,
+        action="store_false",
+        help=argparse.SUPPRESS,
+    )
+
+
 @dataclass
 class RetryConfig:
     max_attempts: int = 8
@@ -533,11 +566,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--events-batch-size", type=int, default=200, help="Batch size for /api/events/upsert.")
     parser.add_argument("--state-filename", type=str, default=".portal_upload_state.json", help="Per-run state marker file.")
 
-    parser.add_argument("--upload-thumbnails", dest="upload_thumbnails", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument(
+    _add_bool_arg(
+        parser,
+        "--upload-thumbnails",
+        dest="upload_thumbnails",
+        default=True,
+    )
+    _add_bool_arg(
+        parser,
         "--upload-scene-thumbnails",
         dest="upload_scene_thumbnails",
-        action=argparse.BooleanOptionalAction,
         default=False,
         help="Upload scene thumbnails (scene/*.jpg) as extra evidence.",
     )
