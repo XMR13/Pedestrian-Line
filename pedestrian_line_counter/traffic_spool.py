@@ -11,7 +11,7 @@ import uuid
 import cv2
 import numpy as np
 
-from .portal_contract import PORTAL_CONTRACT_VERSION
+from .event_contract import EVENT_CONTRACT_VERSION
 from .structures import CrossingEvent
 
 
@@ -76,7 +76,7 @@ class TrafficSpoolWriter:
     """
     Filesystem-first spool for traffic counting runs.
 
-    The portal uploader can later read:
+    The delivery worker can later read:
     - `run.json`
     - `events.jsonl`
     - thumbnails under `thumbs/`
@@ -115,7 +115,7 @@ class TrafficSpoolWriter:
         self._events_f = self._events_path.open("a", encoding="utf-8")
 
         run_meta = {
-            "contract_version": PORTAL_CONTRACT_VERSION,
+            "contract_version": EVENT_CONTRACT_VERSION,
             "run_uid": self.run_uid,
             "site_id": cfg.site_id,
             "camera_id": cfg.camera_id,
@@ -203,7 +203,7 @@ class TrafficSpoolWriter:
                     scene_rel = f"scene/{scene_path.name}"
 
             rec = {
-                "contract_version": PORTAL_CONTRACT_VERSION,
+                "contract_version": EVENT_CONTRACT_VERSION,
                 "event_uid": event_uid,
                 "run_uid": self.run_uid,
                 "site_id": self.cfg.site_id,
@@ -245,7 +245,7 @@ class TrafficSpoolWriter:
         if not isinstance(status, Mapping):
             raise TypeError("status must be a mapping")
         payload: Dict[str, Any] = {
-            "contract_version": PORTAL_CONTRACT_VERSION,
+            "contract_version": EVENT_CONTRACT_VERSION,
             "run_uid": self.run_uid,
             "site_id": self.cfg.site_id,
             "camera_id": self.cfg.camera_id,

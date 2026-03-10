@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 import pedestrian_line_counter.main as main_module
-from pedestrian_line_counter.portal_uploader import SyncSummary
+from pedestrian_line_counter.event_uploader import SyncSummary
 from pedestrian_line_counter.stream_reader import ReaderPoll
 
 

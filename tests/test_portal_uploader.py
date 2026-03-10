@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pedestrian_line_counter.portal_uploader import (
+from pedestrian_line_counter import portal_uploader
+from pedestrian_line_counter.event_uploader import (
     RetryConfig,
     RetryableUploadError,
     UploaderConfig,
@@ -239,3 +240,9 @@ def test_resolve_portal_api_key_uses_local_settings_fallback(monkeypatch, tmp_pa
         appsettings_local_path=str(settings_path),
     )
     assert key == "file-secret"
+
+
+def test_portal_uploader_module_remains_compatible() -> None:
+    assert portal_uploader.PortalApiClient is not None
+    assert callable(portal_uploader.process_pending_runs)
+    assert callable(portal_uploader.resolve_portal_api_key)

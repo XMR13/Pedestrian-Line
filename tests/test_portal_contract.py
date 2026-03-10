@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from pedestrian_line_counter.portal_contract import (
+from pedestrian_line_counter import portal_contract
+from pedestrian_line_counter.event_contract import (
     PortalContractError,
     build_event_upsert_payload,
     build_run_upsert_payload,
@@ -76,3 +77,17 @@ def test_iter_event_records_ignores_trailing_partial_line(tmp_path) -> None:
 
     assert len(rows) == 1
     assert rows[0]["ok"] == 1
+
+
+def test_portal_contract_module_remains_compatible() -> None:
+    payload = portal_contract.build_event_upsert_payload(
+        {
+            "event_uid": "ev_compat",
+            "run_uid": "run_compat",
+            "site_id": "site_a",
+            "camera_id": "cam_01",
+            "bbox": [1, 2, 3, 4],
+        }
+    )
+    assert payload["event_uid"] == "ev_compat"
+    assert portal_contract.PORTAL_CONTRACT_VERSION == "v1"

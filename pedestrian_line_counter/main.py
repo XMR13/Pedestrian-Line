@@ -22,7 +22,7 @@ from .config_io import apply_config_overrides, load_config_overrides, split_over
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
-from .portal_uploader import RetryConfig, UploaderConfig, process_pending_runs, resolve_portal_api_key
+from .event_uploader import RetryConfig, UploaderConfig, process_pending_runs, resolve_portal_api_key
 from .report_writer import ReportWriter, ReportWriterConfig
 from .stream_reader import StreamReader
 from .traffic_spool import TrafficSpoolConfig, TrafficSpoolWriter
