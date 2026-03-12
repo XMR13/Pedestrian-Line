@@ -239,6 +239,23 @@ class IOConfig:
     source_fps_override: Optional[float] = None
 
 @dataclass
+class SpoolRetentionConfig:
+    """
+    Konfigurasi retensi untuk folder spool lokal.
+
+    V1 sengaja conservative:
+    - default 90 hari,
+    - hanya hapus whole run directory,
+    - run tanpa state upload yang valid dianggap protected.
+    """
+
+    enabled: bool = False
+    max_age_days: int = 90
+    protect_incomplete_runs: bool = True
+    state_filename: str = ".portal_upload_state.json"
+
+
+@dataclass
 class SpoolConfig:
     """
     Konfigurasi untuk filesystem-first traffic spool (events.jsonl + thumbnails).
@@ -255,6 +272,7 @@ class SpoolConfig:
     thumb_max_side: int = 320
     scene_thumb_max_side: int = 640
     scene_thumb_quality: int = 85
+    retention: SpoolRetentionConfig = field(default_factory=SpoolRetentionConfig)
 
 
 @dataclass

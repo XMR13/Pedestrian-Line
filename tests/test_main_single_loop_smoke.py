@@ -23,6 +23,9 @@ class _FakeCap:
     def get(self, _prop: int) -> float:
         return 30.0
 
+    def set(self, _prop: int, _value: float) -> bool:
+        return True
+
     def release(self) -> None:
         self.released = True
 
@@ -181,5 +184,41 @@ def test_live_startup_fails_when_camera_has_no_first_frame(monkeypatch) -> None:
                 "--no-write",
                 "--no-draw",
                 "--no-progress",
+            ],
+        )
+
+
+def test_main_fails_fast_when_ffmpeg_output_is_requested_but_missing(monkeypatch, tmp_path) -> None:
+    fake_cap = _FakeCap()
+    frame0 = np.zeros((16, 16, 3), dtype=np.uint8)
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+
+    def _open_impl(source, **_kwargs):
+        _ = source
+        return fake_cap, frame0, 30.0, 16, 16, "FAKE"
+
+    monkeypatch.setattr(main_module, "_open_source_with_first_frame", _open_impl)
+    monkeypatch.setattr(main_module, "Detector", _FakeDetector)
+    monkeypatch.setattr(main_module, "Tracker", _FakeTracker)
+    monkeypatch.setattr(main_module, "LineCounter", _FakeLineCounter)
+    monkeypatch.setattr(main_module, "is_ffmpeg_available", lambda: False)
+
+    with pytest.raises(SystemExit, match="ffmpeg executable is not available"):
+        _run_main(
+            monkeypatch,
+            [
+                "--backend",
+                "motion",
+                "--input",
+                str(input_path),
+                "--output",
+                "media/output_test.mp4",
+                "--output-encoder",
+                "ffmpeg",
+                "--no-draw",
+                "--no-progress",
+                "--max-frames",
+                "1",
             ],
         )

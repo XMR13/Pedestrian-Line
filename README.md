@@ -189,6 +189,9 @@ uv run python main.py \
   --class-ids 0,1,2 \
   --input media/input.mp4 \
   --output media/output_test.mp4 \
+  --output-encoder ffmpeg \
+  --output-crf 28 \
+  --output-preset slow \
   --show
 ```
 
@@ -199,6 +202,15 @@ Apa yang dilakukan:
 -  Menggambar bounding box, garis virtual, dan secara live A→B / B→A.
 -  Menyimpan video hasil anotasi ke `media/output_test.mp4`.
 -  Memprint hasil ketika sudah selesai menjalankan program (video sudah terselesaikan)
+
+Catatan ukuran output video:
+
+- Jika `ffmpeg` tersedia di machine, gunakan `--output-encoder ffmpeg` agar ukuran video output jauh lebih kecil daripada writer OpenCV lama (`mp4v`).
+- Default rekomendasi:
+  - `--output-encoder ffmpeg`
+  - `--output-crf 28`
+  - `--output-preset slow`
+- Jika `ffmpeg` tidak tersedia, gunakan `--output-encoder auto` agar program fallback ke OpenCV.
 
 Logging per-crossing (filesystem-first)
 --------------------------------------

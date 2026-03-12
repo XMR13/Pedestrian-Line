@@ -16,6 +16,7 @@ from .config import (
     TrackerConfig,
     get_default_config,
 )
+from .api import create_app
 from .detector import Detector  
 from .line_counter import LineCounter  
 from .structures import Detection, Track  

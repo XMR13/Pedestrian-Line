@@ -23,7 +23,9 @@ from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
 from .event_uploader import RetryConfig, UploaderConfig, process_pending_runs, resolve_portal_api_key
+from .output_writer import OutputWriterConfig, create_video_writer, is_ffmpeg_available
 from .report_writer import ReportWriter, ReportWriterConfig
+from .spool_retention import apply_retention_policy, format_retention_summary
 from .stream_reader import StreamReader
 from .traffic_spool import TrafficSpoolConfig, TrafficSpoolWriter
 from .tracker import Tracker
@@ -97,6 +99,25 @@ def _parse_args() -> argparse.Namespace:
         "--output",
         type=str,
         help="Path ke output yang ingin disimpan (jika kosong default ke I/O setting).",
+    )
+    parser.add_argument(
+        "--output-encoder",
+        type=str,
+        choices=["auto", "ffmpeg", "opencv"],
+        default="auto",
+        help="Output video encoder: prefer ffmpeg for smaller files, with OpenCV fallback in auto mode.",
+    )
+    parser.add_argument(
+        "--output-crf",
+        type=int,
+        default=28,
+        help="FFmpeg constant rate factor (lower = bigger/better quality, higher = smaller files).",
+    )
+    parser.add_argument(
+        "--output-preset",
+        type=str,
+        default="slow",
+        help="FFmpeg x264 preset for compression efficiency, e.g. veryfast/medium/slow.",
     )
     parser.add_argument(
         "--config",
@@ -476,6 +497,35 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--spool-scene-thumb-max-side", type=int, default=None, help="Max side (pixels) for scene thumbnails.")
     parser.add_argument("--spool-scene-thumb-quality", type=int, default=None, help="JPEG quality (10..100) for scene thumbnails.")
+    _add_bool_arg(
+        parser,
+        "--spool-retention-enabled",
+        dest="spool_retention_enabled",
+        default=None,
+        help="Enable/disable spool retention policy in resolved config.",
+    )
+    parser.add_argument(
+        "--spool-retention-max-age-days",
+        type=int,
+        default=None,
+        help="Delete only completed spool runs older than this many days (default: 90).",
+    )
+    parser.add_argument(
+        "--spool-retention-state-file",
+        type=str,
+        default=None,
+        help="Per-run uploader state filename used to prove delivery completion.",
+    )
+    parser.add_argument(
+        "--spool-retention-run",
+        action="store_true",
+        help="Run spool retention once, print a summary, and exit without starting detection.",
+    )
+    parser.add_argument(
+        "--spool-retention-dry-run",
+        action="store_true",
+        help="Preview spool retention decisions without deleting any run directories.",
+    )
     
     _add_bool_arg(
         parser,
@@ -1063,6 +1113,8 @@ def main() -> None:
         raise SystemExit("--portal-upload-retry-max-delay-s must be >= --portal-upload-retry-initial-delay-s")
     if args.portal_upload_events_batch_size is not None and int(args.portal_upload_events_batch_size) <= 0:
         raise SystemExit("--portal-upload-events-batch-size must be > 0")
+    if args.spool_retention_max_age_days is not None and int(args.spool_retention_max_age_days) < 0:
+        raise SystemExit("--spool-retention-max-age-days must be >= 0")
 
     if args.config:
         cfg_before = copy.deepcopy(cfg)
@@ -1157,6 +1209,12 @@ def main() -> None:
         cfg.io.video_start = str(args.video_start)
     if args.source_fps_override is not None:
         cfg.io.source_fps_override = float(args.source_fps_override)
+    if args.spool_retention_enabled is not None:
+        cfg.spool.retention.enabled = bool(args.spool_retention_enabled)
+    if args.spool_retention_max_age_days is not None:
+        cfg.spool.retention.max_age_days = int(args.spool_retention_max_age_days)
+    if args.spool_retention_state_file is not None:
+        cfg.spool.retention.state_filename = str(args.spool_retention_state_file)
     if args.class_vote_mode is not None:
         cfg.tracker.class_vote_mode = str(args.class_vote_mode)
     if args.class_vote_min_frames is not None:
@@ -1202,6 +1260,10 @@ def main() -> None:
     queue_policy = str(cfg.io.live_queue_policy).strip().lower()
     if queue_policy not in {"drop_oldest", "block"}:
         raise SystemExit("config io.live_queue_policy must be 'drop_oldest' or 'block'")
+    if int(cfg.spool.retention.max_age_days) < 0:
+        raise SystemExit("config spool.retention.max_age_days must be >= 0")
+    if not str(cfg.spool.retention.state_filename).strip():
+        raise SystemExit("config spool.retention.state_filename must be non-empty")
     rtsp_gst_pipeline = None
     if cfg.io.rtsp_gst_pipeline is not None:
         rtsp_gst_pipeline = str(cfg.io.rtsp_gst_pipeline).strip() or None
@@ -1238,6 +1300,39 @@ def main() -> None:
         write_app_config_json(dump_path, cfg)
         print(f"[main] Wrote resolved config JSON: {dump_path}")
         return
+
+    spool_root_for_retention: Optional[Path] = None
+    if args.spool_dir:
+        spool_root_for_retention = _normalize_cli_path(args.spool_dir)
+    elif cfg.spool.root_dir is not None:
+        spool_root_for_retention = Path(cfg.spool.root_dir)
+
+    if args.spool_retention_run:
+        if spool_root_for_retention is None:
+            raise SystemExit(
+                "--spool-retention-run requires --spool-dir or app.spool.root_dir in config."
+            )
+        summary = apply_retention_policy(
+            spool_root_for_retention,
+            max_age_days=int(cfg.spool.retention.max_age_days),
+            state_filename=str(cfg.spool.retention.state_filename),
+            protect_incomplete_runs=bool(cfg.spool.retention.protect_incomplete_runs),
+            dry_run=bool(args.spool_retention_dry_run),
+        )
+        for line in format_retention_summary(summary):
+            print(line)
+        return
+
+    if bool(cfg.spool.retention.enabled) and spool_root_for_retention is not None:
+        startup_retention = apply_retention_policy(
+            spool_root_for_retention,
+            max_age_days=int(cfg.spool.retention.max_age_days),
+            state_filename=str(cfg.spool.retention.state_filename),
+            protect_incomplete_runs=bool(cfg.spool.retention.protect_incomplete_runs),
+            dry_run=False,
+        )
+        for line in format_retention_summary(startup_retention):
+            print(line)
 
     standalone_headless_status_path: Optional[Path] = None
     if args.headless_status_json is not None:
@@ -1342,7 +1437,6 @@ def main() -> None:
         p1, p2 = _build_line_points(cfg, width, height)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = None
     if is_live and args.output is None and not args.no_write and max_end_time_s is None and max_frames is None:
         print(
@@ -1351,7 +1445,35 @@ def main() -> None:
         )
         args.no_write = True
     if not args.no_write:
-        writer = cv2.VideoWriter(str(output_path), fourcc, writer_fps, (width, height))
+        ffmpeg_available = is_ffmpeg_available()
+        if args.output_encoder == "ffmpeg" and not ffmpeg_available:
+            raise SystemExit(
+                "Requested --output-encoder ffmpeg but ffmpeg executable is not available in PATH."
+            )
+        if args.output_encoder == "auto":
+            chosen = "ffmpeg" if ffmpeg_available else "opencv"
+        else:
+            chosen = str(args.output_encoder)
+        if chosen == "ffmpeg":
+            print(
+                f"[main] Output writer: ffmpeg codec=libx264 preset={args.output_preset} crf={int(args.output_crf)}"
+            )
+        else:
+            print("[main] Output writer: opencv fourcc=mp4v")
+        writer = create_video_writer(
+            OutputWriterConfig(
+                path=output_path,
+                fps=writer_fps,
+                width=width,
+                height=height,
+                encoder=str(args.output_encoder),
+                ffmpeg_crf=int(args.output_crf),
+                ffmpeg_preset=str(args.output_preset),
+                ffmpeg_codec="libx264",
+                ffmpeg_pix_fmt="yuv420p",
+                opencv_fourcc="mp4v",
+            )
+        )
 
     class_names_map = None
     if cfg.model.class_names_path is not None:
@@ -1432,7 +1554,7 @@ def main() -> None:
     next_headless_status_s = time.time() + max(headless_status_every_s, 0.0)
     standalone_status_target: Optional[Path] = standalone_headless_status_path
     spool_events_written_total = 0
-    spool_dir = Path(args.spool_dir) if args.spool_dir else cfg.spool.root_dir
+    spool_dir = _normalize_cli_path(args.spool_dir) if args.spool_dir else cfg.spool.root_dir
     if spool_dir is not None:
         cam_id = args.camera_id or cfg.spool.camera_id or (args.camera if args.camera else "camera")
         site_id = str(args.site_id) if args.site_id is not None else str(cfg.spool.site_id)
