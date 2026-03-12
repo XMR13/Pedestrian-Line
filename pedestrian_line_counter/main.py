@@ -1355,6 +1355,7 @@ def main() -> None:
         raise SystemExit("--select-line is not supported together with --resize-to. Use line_picker.py to save the line JSON.")
 
     source_label = rtsp_url if is_live else str(input_path)
+    interrupted = False
     try:
         cap, frame0, fps, reported_w, reported_h, backend_name = _open_source_with_first_frame(
             rtsp_url if is_live else input_path,
@@ -2428,6 +2429,7 @@ def main() -> None:
                     f"write={1000*t_write/t_frames:.1f}ms"
                 )
     except KeyboardInterrupt:
+        interrupted = True
         print("[main] Interrupted (Ctrl-C). Shutting down...")
 
     if portal_uploader_stop_event is not None:
@@ -2443,7 +2445,7 @@ def main() -> None:
     else:
         cap.release()
     if writer is not None:
-        writer.release()
+        writer.release(interrupted=interrupted)
     if spool is not None or standalone_status_target is not None:
         _publish_headless_status(lifecycle_status="stopped", ended_at_utc=_utcnow_iso())
     if spool is not None:

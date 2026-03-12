@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from yolo_kitv2 import YoloPostConfig, YoloPostprocessor
+from yolo_kitv2 import LetterboxConfig, YoloPipeline, YoloPostConfig, YoloPostprocessor
+from yolo_kitv2.letterbox import letterbox
 
 
 def _make_post() -> YoloPostprocessor:
@@ -114,3 +115,39 @@ def test_postprocess_generic_5_plus_c_layout() -> None:
     assert len(dets) == 2
     assert [d.class_id for d in dets] == [1, 2]
     assert np.allclose([d.score for d in dets], [0.8 * 0.9, 0.5 * 1.0])
+
+
+def test_preprocess_blobfromimage_matches_previous_blob_layout() -> None:
+    image = np.array(
+        [
+            [[0, 10, 20], [30, 40, 50], [60, 70, 80]],
+            [[90, 100, 110], [120, 130, 140], [150, 160, 170]],
+        ],
+        dtype=np.uint8,
+    )
+
+    pipeline = YoloPipeline(
+        lambda blob: blob,
+        letterbox_cfg=LetterboxConfig(new_shape=(4, 4), auto=False, scale_fill=False, scaleup=True, stride=32),
+    )
+
+    prep = pipeline.preprocess(image)
+
+    img, ratio, pad = letterbox(
+        image,
+        new_shape=(4, 4),
+        color=(114, 114, 114),
+        auto=False,
+        scale_fill=False,
+        scaleup=True,
+        stride=32,
+    )
+    expected = img[:, :, ::-1].astype(np.float32) / 255.0
+    expected = np.transpose(expected, (2, 0, 1))[None, ...]
+
+    assert prep.blob.shape == expected.shape
+    assert prep.blob.dtype == np.float32
+    assert prep.orig_size == (3, 2)
+    assert prep.ratio == ratio
+    assert prep.pad == pad
+    assert np.allclose(prep.blob, expected, atol=1e-7)

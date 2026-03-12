@@ -67,6 +67,20 @@ class _Binding:
     device_ptr: int
 
 
+def _select_default_primary_output_name(outputs: Sequence[_Binding]) -> Optional[str]:
+    if len(outputs) == 1:
+        return outputs[0].name
+
+    yolo_like = [
+        binding.name
+        for binding in outputs
+        if len(binding.shape) == 3 and len(binding.shape) >= 1 and int(binding.shape[0]) == 1
+    ]
+    if len(yolo_like) == 1:
+        return yolo_like[0]
+    return None
+
+
 class TensorRTRunner:
     """
     Minimal TensorRT engine runner untuk model seperti YOLO
@@ -127,6 +141,7 @@ class TensorRTRunner:
         self._bindings: List[_Binding] = []
         self._inputs: List[_Binding] = []
         self._outputs: List[_Binding] = []
+        self._output_by_name: Dict[str, _Binding] = {}
         self._host_outputs: Dict[str, np.ndarray] = {}
 
         self._use_v3 = hasattr(self._context, "execute_async_v3") and hasattr(self._context, "set_tensor_address")
@@ -138,6 +153,7 @@ class TensorRTRunner:
 
         self.input_name = self._inputs[0].name if self._inputs else ""
         self.output_names = [b.name for b in self._outputs]
+        self.primary_output_name = _select_default_primary_output_name(self._outputs)
         self.input_hw = self._infer_input_hw(self._inputs[0].shape if self._inputs else ())
         self.input_dtype = self._inputs[0].dtype if self._inputs else np.dtype(np.float32)
 
@@ -296,6 +312,7 @@ class TensorRTRunner:
                 self._inputs.append(binding)
             else:
                 self._outputs.append(binding)
+                self._output_by_name[binding.name] = binding
                 self._host_outputs[binding.name] = np.empty(binding.shape, dtype=binding.dtype)
 
         if not self._inputs:
@@ -325,7 +342,57 @@ class TensorRTRunner:
         Mengembalikan view ke output buffer, yang akan di overwrite 
         di panggilan selanjutnya.
         """
+        self._execute(input_array)
 
+        cudart = self._cudart
+        stream = self._stream
+        for out in self._outputs:
+            host = self._host_outputs[out.name]
+            _cuda_call(
+                cudart,
+                cudart.cudaMemcpyAsync(
+                    int(host.ctypes.data),
+                    out.device_ptr,
+                    int(out.nbytes),
+                    cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
+                    stream,
+                ),
+            )
+
+        _cuda_call(cudart, cudart.cudaStreamSynchronize(stream))
+        return [self._host_outputs[name] for name in self.output_names]
+
+    def infer_primary(self, input_array: np.ndarray) -> np.ndarray:
+        if self.primary_output_name is None:
+            shapes = {
+                binding.name: tuple(int(dim) for dim in binding.shape)
+                for binding in self._outputs
+            }
+            raise RuntimeError(
+                "TensorRT primary output is ambiguous. "
+                f"Available outputs: {shapes}"
+            )
+
+        self._execute(input_array)
+
+        out = self._output_by_name[self.primary_output_name]
+        host = self._host_outputs[out.name]
+        cudart = self._cudart
+        stream = self._stream
+        _cuda_call(
+            cudart,
+            cudart.cudaMemcpyAsync(
+                int(host.ctypes.data),
+                out.device_ptr,
+                int(out.nbytes),
+                cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
+                stream,
+            ),
+        )
+        _cuda_call(cudart, cudart.cudaStreamSynchronize(stream))
+        return host
+
+    def _execute(self, input_array: np.ndarray) -> None:
         if not isinstance(input_array, np.ndarray):
             raise TypeError("input_array must be a numpy array")
         inp = self._inputs[0]
@@ -370,22 +437,6 @@ class TensorRTRunner:
 
         if not ok:
             raise RuntimeError("TensorRT execution failed")
-
-        for out in self._outputs:
-            host = self._host_outputs[out.name]
-            _cuda_call(
-                cudart,
-                cudart.cudaMemcpyAsync(
-                    int(host.ctypes.data),
-                    out.device_ptr,
-                    int(out.nbytes),
-                    cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
-                    stream,
-                ),
-            )
-
-        _cuda_call(cudart, cudart.cudaStreamSynchronize(stream))
-        return [self._host_outputs[name] for name in self.output_names]
 
     def close(self) -> None:
         cudart = self._cudart

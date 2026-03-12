@@ -14,7 +14,7 @@ class VideoFrameWriter(Protocol):
     def write(self, frame: np.ndarray) -> None:
         ...
 
-    def release(self) -> None:
+    def release(self, *, interrupted: bool = False) -> None:
         ...
 
 
@@ -54,7 +54,8 @@ class OpenCvVideoWriter:
     def write(self, frame: np.ndarray) -> None:
         self._writer.write(frame)
 
-    def release(self) -> None:
+    def release(self, *, interrupted: bool = False) -> None:
+        _ = interrupted
         self._writer.release()
 
 
@@ -83,23 +84,17 @@ class FFmpegVideoWriter:
         except BrokenPipeError as exc:
             raise RuntimeError(_read_ffmpeg_error(self._proc)) from exc
 
-    def release(self) -> None:
-        stderr_text = ""
-        if self._proc.stdin is not None:
-            try:
-                self._proc.stdin.close()
-            except Exception:
-                pass
-        try:
-            stderr_bytes = self._proc.stderr.read() if self._proc.stderr is not None else b""
-        except Exception:
-            stderr_bytes = b""
-        try:
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-        except Exception:
-            stderr_text = ""
-        return_code = self._proc.wait()
+    def release(self, *, interrupted: bool = False) -> None:
+        _close_subprocess_stdin(self._proc)
+        if interrupted:
+            return_code, stderr_text, forced_stop = _finalize_interrupted_process(self._proc)
+            if forced_stop:
+                return
+        else:
+            return_code, stderr_text = _collect_process_result(self._proc)
         if return_code != 0:
+            if interrupted and _is_expected_ffmpeg_interrupt(return_code, stderr_text):
+                return
             msg = stderr_text.strip() or f"ffmpeg exited with code {return_code}"
             raise RuntimeError(msg)
 
@@ -172,6 +167,79 @@ def _read_ffmpeg_error(proc: subprocess.Popen[bytes]) -> str:
         return raw.decode("utf-8", errors="replace").strip() or "ffmpeg pipe failed."
     except Exception:
         return "ffmpeg pipe failed."
+
+
+def _close_subprocess_stdin(proc: subprocess.Popen[bytes]) -> None:
+    if proc.stdin is None:
+        return
+    try:
+        proc.stdin.close()
+    except Exception:
+        pass
+    finally:
+        proc.stdin = None
+
+
+def _collect_process_result(
+    proc: subprocess.Popen[bytes],
+    *,
+    timeout_s: Optional[float] = None,
+) -> tuple[int, str]:
+    try:
+        _stdout, stderr_bytes = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        raise
+    except Exception:
+        stderr_bytes = b""
+        return_code = proc.wait()
+    else:
+        return_code = proc.returncode if proc.returncode is not None else proc.wait()
+
+    try:
+        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+    except Exception:
+        stderr_text = ""
+    return return_code, stderr_text
+
+
+def _finalize_interrupted_process(proc: subprocess.Popen[bytes]) -> tuple[int, str, bool]:
+    forced_stop = False
+    try:
+        return_code, stderr_text = _collect_process_result(proc, timeout_s=1.0)
+        return return_code, stderr_text, forced_stop
+    except subprocess.TimeoutExpired:
+        forced_stop = True
+
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    try:
+        return_code, stderr_text = _collect_process_result(proc, timeout_s=1.0)
+        return return_code, stderr_text, forced_stop
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    try:
+        return_code, stderr_text = _collect_process_result(proc, timeout_s=1.0)
+    except Exception:
+        return_code = proc.wait()
+        stderr_text = ""
+    return return_code, stderr_text, forced_stop
+
+
+def _is_expected_ffmpeg_interrupt(return_code: int, stderr_text: str) -> bool:
+    text = str(stderr_text or "").lower()
+    if "received signal 2" in text:
+        return True
+    if "signal 2" in text and "exiting normally" in text:
+        return True
+    # ffmpeg commonly exits 255 after SIGINT on CLI-driven shutdown.
+    return return_code in {-2, 130, 255} and "signal" in text and "normal" in text
 
 
 __all__ = [

@@ -63,6 +63,14 @@ class _FakeLineCounter:
         return None
 
 
+class _InterruptingDetector:
+    def __init__(self, _cfg) -> None:
+        pass
+
+    def detect(self, _frame):
+        raise KeyboardInterrupt()
+
+
 class _FakeStreamReader:
     def __init__(self, cap, *, queue_size: int = 3, overflow_policy: str = "drop_oldest") -> None:
         _ = queue_size
@@ -222,3 +230,65 @@ def test_main_fails_fast_when_ffmpeg_output_is_requested_but_missing(monkeypatch
                 "1",
             ],
         )
+
+
+def test_main_releases_writer_with_interrupt_flag_after_ctrl_c(monkeypatch, tmp_path) -> None:
+    fake_cap = _FakeCap()
+    frame0 = np.zeros((16, 16, 3), dtype=np.uint8)
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+
+    class _SingleFrameCap(_FakeCap):
+        def __init__(self, frame):
+            super().__init__()
+            self._frame = frame
+            self._served = False
+
+        def read(self):
+            if self._served:
+                return False, None
+            self._served = True
+            return True, self._frame.copy()
+
+    class _FakeWriter:
+        def __init__(self) -> None:
+            self.interrupted_arg = None
+
+        def write(self, _frame) -> None:
+            return None
+
+        def release(self, *, interrupted: bool = False) -> None:
+            self.interrupted_arg = interrupted
+
+    fake_writer = _FakeWriter()
+
+    def _open_impl(source, **_kwargs):
+        _ = source
+        return _SingleFrameCap(frame0), frame0, 30.0, 16, 16, "FAKE"
+
+    monkeypatch.setattr(main_module, "_open_source_with_first_frame", _open_impl)
+    monkeypatch.setattr(main_module, "Detector", _InterruptingDetector)
+    monkeypatch.setattr(main_module, "Tracker", _FakeTracker)
+    monkeypatch.setattr(main_module, "LineCounter", _FakeLineCounter)
+    monkeypatch.setattr(main_module, "create_video_writer", lambda _cfg: fake_writer)
+    monkeypatch.setattr(main_module, "is_ffmpeg_available", lambda: True)
+
+    _run_main(
+        monkeypatch,
+        [
+            "--backend",
+            "motion",
+            "--input",
+            str(input_path),
+            "--output",
+            str(tmp_path / "out.mp4"),
+            "--output-encoder",
+            "ffmpeg",
+            "--no-draw",
+            "--no-progress",
+            "--max-frames",
+            "1",
+        ],
+    )
+
+    assert fake_writer.interrupted_arg is True

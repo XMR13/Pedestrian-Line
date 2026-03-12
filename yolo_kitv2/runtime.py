@@ -118,9 +118,22 @@ class YoloPipeline:
             stride=self.letterbox_cfg.stride,
         )
 
-        # BGR -> RGB, normalize, HWC -> CHW, add batch
-        blob = img[:, :, ::-1].astype(np.float32) / 255.0
-        blob = np.transpose(blob, (2, 0, 1))[None, ...]
+        # Let OpenCV fuse channel swap, normalization, layout transform, and
+        # batch-dimension creation in optimized native code.
+        try:
+            import cv2  # type: ignore
+        except Exception as exc:  # pragma: no cover - OpenCV is already required by letterbox()
+            raise ImportError("OpenCV is required for preprocess().") from exc
+
+        blob = cv2.dnn.blobFromImage(
+            img,
+            scalefactor=1.0 / 255.0,
+            size=(img.shape[1], img.shape[0]),
+            mean=(0.0, 0.0, 0.0),
+            swapRB=True,
+            crop=False,
+            ddepth=cv2.CV_32F,
+        )
 
         return PreprocessResult(blob=blob, orig_size=(orig_w, orig_h), ratio=ratio, pad=pad)
 

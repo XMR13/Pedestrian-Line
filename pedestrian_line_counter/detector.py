@@ -268,6 +268,12 @@ class Detector:
     @staticmethod
     def _build_trt_infer_fn(trt_runner: object) -> Callable[[np.ndarray], np.ndarray]:
         def infer(blob: np.ndarray) -> np.ndarray:
+            if (
+                getattr(trt_runner, "primary_output_name", None) is not None
+                and hasattr(trt_runner, "infer_primary")
+            ):
+                return np.asarray(trt_runner.infer_primary(blob))
+
             outputs = trt_runner.infer(blob)
             if not outputs:
                 raise RuntimeError("TensorRT backend returned no outputs.")

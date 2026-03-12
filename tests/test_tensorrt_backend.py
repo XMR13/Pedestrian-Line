@@ -9,7 +9,7 @@ import pytest
 
 from pedestrian_line_counter.config import ModelConfig
 from pedestrian_line_counter.detector import Detector
-from pedestrian_line_counter.tensorrt_runner import _try_import_cudart
+from pedestrian_line_counter.tensorrt_runner import _Binding, _select_default_primary_output_name, _try_import_cudart
 
 
 def test_tensorrt_backend_reports_missing_deps(monkeypatch, tmp_path: Path) -> None:
@@ -60,6 +60,63 @@ def test_tensorrt_infer_fn_rejects_ambiguous_multi_output() -> None:
 
     with pytest.raises(RuntimeError, match="could not identify a unique YOLO-style output tensor"):
         infer_fn(np.zeros((1, 3, 640, 640), dtype=np.float32))
+
+
+def test_tensorrt_infer_fn_prefers_primary_output_fast_path() -> None:
+    class _FakeRunner:
+        primary_output_name = "output0"
+
+        def infer_primary(self, _blob):
+            return np.zeros((1, 84, 8400), dtype=np.float32)
+
+        def infer(self, _blob):
+            raise AssertionError("infer() should not be called when infer_primary() is available")
+
+    infer_fn = Detector._build_trt_infer_fn(_FakeRunner())
+    output = infer_fn(np.zeros((1, 3, 640, 640), dtype=np.float32))
+
+    assert output.shape == (1, 84, 8400)
+
+
+def test_select_default_primary_output_name_prefers_single_output() -> None:
+    outputs = [
+        _Binding(
+            name="output0",
+            index=1,
+            is_input=False,
+            dtype=np.dtype(np.float32),
+            shape=(1, 84, 8400),
+            nbytes=1,
+            device_ptr=1,
+        )
+    ]
+
+    assert _select_default_primary_output_name(outputs) == "output0"
+
+
+def test_select_default_primary_output_name_returns_none_for_ambiguous_outputs() -> None:
+    outputs = [
+        _Binding(
+            name="boxes",
+            index=1,
+            is_input=False,
+            dtype=np.dtype(np.float32),
+            shape=(1, 84, 8400),
+            nbytes=1,
+            device_ptr=1,
+        ),
+        _Binding(
+            name="proto",
+            index=2,
+            is_input=False,
+            dtype=np.dtype(np.float32),
+            shape=(1, 32, 160),
+            nbytes=1,
+            device_ptr=2,
+        ),
+    ]
+
+    assert _select_default_primary_output_name(outputs) is None
 
 
 def test_try_import_cudart_falls_back_to_legacy_cuda_python_import(monkeypatch) -> None:
