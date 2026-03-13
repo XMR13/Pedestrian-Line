@@ -394,6 +394,19 @@ def _parse_args() -> argparse.Namespace:
         help="VideoCapture read timeout in ms (best-effort; mainly for RTSP).",
     )
     parser.add_argument(
+        "--input-capture-backend",
+        type=str,
+        choices=["opencv", "gstreamer"],
+        default=None,
+        help="File mode only: capture backend for local video input open.",
+    )
+    parser.add_argument(
+        "--input-gst-pipeline",
+        type=str,
+        default=None,
+        help="File mode only: full custom GStreamer pipeline string (advanced override).",
+    )
+    parser.add_argument(
         "--rtsp-capture-backend",
         type=str,
         choices=["opencv", "gstreamer"],
@@ -801,6 +814,8 @@ def _open_source_with_first_frame(
     read_timeout_ms: Optional[int] = None,
     source_label: Optional[str] = None,
     is_live: bool = False,
+    input_capture_backend: str = "opencv",
+    input_gst_pipeline: Optional[str] = None,
     rtsp_capture_backend: str = "opencv",
     rtsp_transport: str = "tcp",
     rtsp_latency_ms: int = 200,
@@ -814,6 +829,10 @@ def _open_source_with_first_frame(
         source,
         open_timeout_ms=open_timeout_ms,
         read_timeout_ms=read_timeout_ms,
+        input_capture_backend=(input_capture_backend if not is_live else "opencv"),
+        input_gst_pipeline=input_gst_pipeline,
+        input_appsink_drop=False,
+        input_appsink_max_buffers=4,
         rtsp_capture_backend=(rtsp_capture_backend if is_live else "opencv"),
         rtsp_transport=rtsp_transport,
         rtsp_latency_ms=int(rtsp_latency_ms),
@@ -1195,6 +1214,8 @@ def main() -> None:
         cfg.io.rtsp_stall_timeout_s = float(args.rtsp_stall_timeout)
     if args.rtsp_capture_backend is not None:
         cfg.io.rtsp_capture_backend = str(args.rtsp_capture_backend)
+    if args.input_capture_backend is not None:
+        cfg.io.input_capture_backend = str(args.input_capture_backend)
     if args.rtsp_transport is not None:
         cfg.io.rtsp_transport = str(args.rtsp_transport)
     if args.rtsp_latency_ms is not None:
@@ -1203,6 +1224,8 @@ def main() -> None:
         cfg.io.rtsp_codec = str(args.rtsp_codec)
     if args.rtsp_gst_pipeline is not None:
         cfg.io.rtsp_gst_pipeline = str(args.rtsp_gst_pipeline)
+    if args.input_gst_pipeline is not None:
+        cfg.io.input_gst_pipeline = str(args.input_gst_pipeline)
     if args.queue_policy is not None:
         cfg.io.live_queue_policy = str(args.queue_policy)
     if args.video_start is not None:
@@ -1248,6 +1271,9 @@ def main() -> None:
     if int(cfg.io.rtsp_latency_ms) < 0:
         raise SystemExit("config io.rtsp_latency_ms must be >= 0")
 
+    input_capture_backend = str(cfg.io.input_capture_backend).strip().lower()
+    if input_capture_backend not in {"opencv", "gstreamer"}:
+        raise SystemExit("config io.input_capture_backend must be 'opencv' or 'gstreamer'")
     rtsp_capture_backend = str(cfg.io.rtsp_capture_backend).strip().lower()
     if rtsp_capture_backend not in {"opencv", "gstreamer"}:
         raise SystemExit("config io.rtsp_capture_backend must be 'opencv' or 'gstreamer'")
@@ -1264,6 +1290,9 @@ def main() -> None:
         raise SystemExit("config spool.retention.max_age_days must be >= 0")
     if not str(cfg.spool.retention.state_filename).strip():
         raise SystemExit("config spool.retention.state_filename must be non-empty")
+    input_gst_pipeline = None
+    if cfg.io.input_gst_pipeline is not None:
+        input_gst_pipeline = str(cfg.io.input_gst_pipeline).strip() or None
     rtsp_gst_pipeline = None
     if cfg.io.rtsp_gst_pipeline is not None:
         rtsp_gst_pipeline = str(cfg.io.rtsp_gst_pipeline).strip() or None
@@ -1363,6 +1392,8 @@ def main() -> None:
             read_timeout_ms=args.read_timeout_ms,
             source_label=source_label,
             is_live=is_live,
+            input_capture_backend=input_capture_backend,
+            input_gst_pipeline=input_gst_pipeline,
             rtsp_capture_backend=rtsp_capture_backend,
             rtsp_transport=rtsp_transport,
             rtsp_latency_ms=int(cfg.io.rtsp_latency_ms),
@@ -1806,6 +1837,15 @@ def main() -> None:
             f"max_delay={cfg.io.rtsp_reconnect_max_delay_s:.2f}s, backoff={cfg.io.rtsp_reconnect_backoff_factor:.2f}, "
             f"stall_timeout={cfg.io.rtsp_stall_timeout_s:.2f}s)"
         )
+    else:
+        print(f"[main] File capture: backend={input_capture_backend}")
+        if input_capture_backend == "gstreamer":
+            backend_upper = str(backend_name).upper() if backend_name else ""
+            if "GSTREAMER" not in backend_upper:
+                print(
+                    "[main] Warning: requested GStreamer file capture, "
+                    "but OpenCV did not open with the GSTREAMER backend. Using fallback backend."
+                )
     if spool is not None or standalone_status_target is not None:
         if headless_status_every_s > 0:
             print(

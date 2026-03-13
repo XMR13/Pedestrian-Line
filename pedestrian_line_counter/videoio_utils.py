@@ -47,12 +47,39 @@ def build_jetson_rtsp_gstreamer_pipeline(
         f"appsink sync=false max-buffers={max_buf} drop={sink_drop}"
     )
 
+def build_jetson_file_gstreamer_pipeline(
+        video_path: Union[str, Path],
+        *,
+        appsink_drop: bool = False,
+        appsink_max_buffers: int = 4,
+) -> str:
+    """
+    Build a Jetson local-file Gstreamer pipeline for OpenCV CAP_GSTREAMER.
+
+    Uses 'uridecodebin' so GStreamer can resolve the container/demux/decoder chain
+    for the file. On Jetson this gives the runtime a chacne to select accelerated 
+    decode plugins when available, while python keeps a fallback path if it fails.
+    """
+
+    video_uri = Path(video_path).expanduser().resolve().as_url()
+    sink_drop = "true" if appsink_drop else "false"
+    max_buf = max(int(appsink_max_buffers), 1)
+    return (
+        f'uricodebin uri"={video_uri}"  ! queue ! nvvidconv ! '
+        "video/x-raw,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! "
+        f"appsink sync=false max-buffers={max_buf} drop={sink_drop}"
+    )
+
 
 def open_video_capture(
     source: Union[str, Path],
     *,
     open_timeout_ms: Optional[int] = None,
     read_timeout_ms: Optional[int] = None,
+    input_capture_backend: str = "opencv",
+    input_gst_pipeline: Optional[str] = None,
+    input_appsink_drop: bool = False,
+    input_appsink_max_buffers: int = 4,
     rtsp_capture_backend: str = "opencv",
     rtsp_transport: str = "tcp",
     rtsp_latency_ms: int = 200,
@@ -75,7 +102,10 @@ def open_video_capture(
     """
 
     source_str = str(source)
+    file_backend_norm = str(input_capture_backend).strip().lower()
     backend_norm = str(rtsp_capture_backend).strip().lower()
+    if file_backend_norm not in {"opencv", "gstreamer"}:
+        raise ValueError("input_capture_backend must be 'opencv' or 'gstreamer'")
     if backend_norm not in {"opencv", "gstreamer"}:
         raise ValueError("rtsp_capture_backend must be 'opencv' or 'gstreamer'")
 
@@ -101,6 +131,18 @@ def open_video_capture(
                 latency_ms=int(rtsp_latency_ms),
                 appsink_drop=bool(rtsp_appsink_drop),
                 appsink_max_buffers=int(rtsp_appsink_max_buffers),
+            )
+        cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        if cap.isOpened():
+            return cap
+        cap.release()
+    elif (not is_rtsp_source(source_str)) and file_backend_norm == "gstreamer":
+        pipeline = str(input_gst_pipeline).strip() if input_gst_pipeline else ""
+        if pipeline == "":
+            pipeline = build_jetson_file_gstreamer_pipeline(
+                source_str,
+                appsink_drop=bool(input_appsink_drop),
+                appsink_max_buffers=int(input_appsink_max_buffers),
             )
         cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
         if cap.isOpened():

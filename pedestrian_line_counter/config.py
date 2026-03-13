@@ -229,6 +229,11 @@ class IOConfig:
 
     # Dapat di ovveride dengan menggunakan Command Line Interfae.
     input_path: Path = ROOT_DIR / "media" / "input.mp4"
+    # Offline file capture backend configuration.
+    # - "opencv": default OpenCV/FFmpeg path (portable).
+    # - "gstreamer": OpenCV CAP_GSTREAMER pipeline for local file input.
+    input_capture_backend: str = "opencv"
+    input_gst_pipeline: Optional[str] = None
     output_path: Path = ROOT_DIR / "output.mp4"
 
     # Offline video timing (optional).

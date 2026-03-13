@@ -150,16 +150,6 @@ uv run python -m yolo_kitv2 coco prune \
   --in-place
 ```
 
-Untuk visualisasi label mirip dashboard (distribusi class, histogram box, dan sample overlay berlabel):
-
-```bash
-uv run python -m yolo_kitv2 dataset viz \
-  --dataset-dir data/auto_labels/merged \
-  --format coco \
-  --output-dir data/auto_labels/merged_viz
-```
-
-Hasilnya ada di folder output: `summary.json`, `report.md`, chart PNG, dan folder `samples/`.
 
 Kalau hanya punya `annotations.json` (tanpa struktur dataset lengkap) dan ingin **distribusi label saja**:
 
@@ -243,38 +233,6 @@ stall counts, reader dropped frames, reader read failures, and effective FPS) fo
 `report.csv` berisi 1 baris untuk setiap crossing event (default kolom utama: `event_no`, `timestamp_s`,
 `vehicle_type`, `direction`, `notes`; plus kolom teknis opsional seperti `track_id`, `frame_index`,
 `confidence`, dan `thumb_relpath`).
-
-Portal uploader (Phase 7.2)
----------------------------
-
-Setelah spool runs tersedia di disk, upload ke portal API dengan proses terpisah:
-
-```bash
-python3 -m pedestrian_line_counter.portal_uploader \
-  --spool-dir data/traffic_runs \
-  --api-base-url http://portal.local:5000 \
-  --api-key "$PORTAL_API_KEY" \
-  --events-batch-size 200
-```
-
-Mode daemon/polling:
-
-```bash
-python3 -m pedestrian_line_counter.portal_uploader \
-  --spool-dir data/traffic_runs \
-  --api-base-url http://portal.local:5000 \
-  --api-key "$PORTAL_API_KEY" \
-  --watch \
-  --poll-interval-s 10
-```
-
-Catatan penting:
-
-- Upload bersifat idempotent (run by `run_uid`, event by `event_uid`).
-- Retry/backoff aktif untuk error transient (network / 5xx / 429).
-- Progress sinkronisasi per-run disimpan di `.portal_upload_state.json` pada folder run.
-- Contract normalisasi edge→portal ada di `pedestrian_line_counter/portal_contract.py`.
-- API key uploader dapat diambil otomatis dari `portal/appsettings.Local.json` (`Portal.ApiKey`) jika `--api-key` / env tidak diset.
 
 One-command mode (single process: detect + spool + upload)
 -----------------------------------------------------------
@@ -425,61 +383,6 @@ python3 -m pedestrian_line_counter.portal_uploader \
   --api-key "$PORTAL_API_KEY"
 ```
 
-
-Menentukan garis virtual untuk setiap kamera yang ada
----------------------------------------
-
-Apabila terdapat lebih dari 1 buah kamera yang akan digunakan, pastinya garis - garis yang digunakan berpotensi terletak di tempat yang berbeda, maka dair itu, project ini juga bisa mengakomodir user untuk menentukan garisnya sendiri, dan menyimpannya kek dalam JSON
-
-1. Pilih garis yang diigninakkn dan save:
-
-```bash
-uv run python -m pedestrian_line_counter.line_picker \
-  --input media/input.mp4 \
-  --lines 1 \
-  --save config/line.json
-```
-
-Controls:
-
-- Klik kiri: add points.
-- `R` atau `C`: Reset titik.
-- `Enter` / `Space`: Menyimpan titik dan garis yang telah ditentukan.
-- `Esc` / `Q`: cancel.
-
-2. Jalankan aplikasi tersebut dengan garis tadi:
-
-```bash
-uv run python main.py \
-  --backend onnx \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --input media/input.mp4 \
-  --output media/output_with_line.mp4 \
-  --line-json config/line.json \
-  --show
-```
-
-Untuk menggunakan beberapa camera/multi camera
-terutama yang disimpan di `config/camera/<line>`:
-
-```bash
-uv run python main.py \
-  --backend onnx \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --input media/road_a.mp4 \
-  --output media/road_a_out.mp4 \
-  --camera road_a
-```
-
-
-Backend dari pytorch ini mengininkan model dengan dimensi `(1, 3, H, W)` float tensor dengan range nilai berada di `[0,1]` dan akan mengembalikan output dengan shape `(N, 6)`. dengan `[x1, y1, x2, y2, score, class_id]`.
-
-Jika model yang digunakan memiliki format yang berbeda, maka bisa diadaptasi dengan memodifikasi `pedestrian_line_counter/torch_detector.py`.
-
-
-
 Live RTSP Mode (Experimental)
 -----------------------------
 
@@ -518,6 +421,31 @@ Notes:
 - `--queue-policy block` prioritizes completeness but can increase delay over time.
 - `--rtsp-gst-pipeline` can override the generated pipeline (advanced tuning/debug).
 - If GStreamer open fails, the app automatically falls back to OpenCV RTSP capture.
+
+Jetson Optimized File Input Path (Preliminary)
+----------------------------------------------
+
+For offline video files on Jetson, you can now also ask OpenCV to try a
+GStreamer file-input pipeline first:
+
+```bash
+uv run python main.py \
+  --input media/testing_video2.mp4 \
+  --camera road_a \
+  --backend tensorrt \
+  --model Models/model_fp16.engine \
+  --class-names Models/metadata_vehicle.yaml \
+  --input-capture-backend gstreamer \
+  --write-processed-only \
+  --fast-skip \
+  --output media/output_contoh_v2.mp4
+```
+
+Notes:
+
+- This preliminary file-mode path uses a generated `uridecodebin ... ! nvvidconv ... ! appsink` pipeline.
+- `--input-gst-pipeline` can override the generated file-input pipeline for device-specific tuning.
+- If the GStreamer file open fails, the app automatically falls back to the current OpenCV/FFmpeg file reader.
 
 RTSP Reconnect Behavior
 -----------------------
