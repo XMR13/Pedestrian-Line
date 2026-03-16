@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,7 @@ from .api import DEFAULT_MUTATION_API_KEY_HEADER, MutationAuthConfig, create_app
 from .config import AppConfig, ROOT_DIR, get_default_config
 from .config_io import apply_config_overrides, load_config_overrides, split_overrides
 from .event_uploader import RetryConfig, UploaderConfig, resolve_api_key
+from .ui_auth import UiAuthConfig
 
 
 def _add_bool_arg(
@@ -133,6 +135,24 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_MUTATION_API_KEY_HEADER,
         help="HTTP header name required for state-changing endpoints when a mutation API key is configured.",
     )
+    parser.add_argument(
+        "--ui-username",
+        type=str,
+        default=os.environ.get("EDGE_UI_USERNAME", "admin"),
+        help="Username for the MVP UI login when we enable the UI authentication.",
+    )
+    parser.add_argument(
+        "--ui-password",
+        type=str,
+        default=os.environ.get("EDGE_UI_PASSWORD"),
+        help="Password for the MVP UI login.",
+    )
+    parser.add_argument(
+        "--ui-cookie-name",
+        type=str,
+        default=os.environ.get("EDGE_UI_COOKIE_NAME", "edge_ui_session"),
+        help="Cookie name used for the MVP UI session.",
+    )
     return parser.parse_args()
 
 
@@ -218,6 +238,14 @@ def _build_mutation_auth_cfg(args: argparse.Namespace) -> MutationAuthConfig:
     )
 
 
+def _build_ui_auth_cfg(args: argparse.Namespace) -> UiAuthConfig:
+    return UiAuthConfig(
+        username=str(args.ui_username or "admin"),
+        password=str(args.ui_password or ""),
+        cookie_name=str(args.ui_cookie_name or "edge_ui_session"),
+    )
+
+
 def _validate_mutation_auth_guardrails(host: str, cfg: MutationAuthConfig) -> None:
     header_name = str(cfg.header_name or "").strip()
     if not header_name:
@@ -248,12 +276,14 @@ def main() -> int:
     spool_dir = _resolve_spool_dir(args, cfg=cfg)
     uploader_cfg = _build_uploader_cfg(args, spool_dir=spool_dir)
     mutation_auth_cfg = _build_mutation_auth_cfg(args)
+    ui_auth_cfg = _build_ui_auth_cfg(args)
     _validate_mutation_auth_guardrails(str(args.host), mutation_auth_cfg)
     app = create_app(
         spool_dir=spool_dir,
         uploader_cfg=uploader_cfg,
         retention_cfg=cfg.spool.retention,
         mutation_auth_cfg=mutation_auth_cfg,
+        ui_auth_cfg=ui_auth_cfg,
         title=str(args.title),
     )
 

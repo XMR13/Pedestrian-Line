@@ -10,6 +10,7 @@ import pedestrian_line_counter.service as service_module
 from pedestrian_line_counter.api import MutationAuthConfig, create_app
 from pedestrian_line_counter.config import SpoolRetentionConfig
 from pedestrian_line_counter.event_uploader import RetryConfig, SyncSummary, UploaderConfig
+from pedestrian_line_counter.ui_auth import UiAuthConfig
 
 
 def _write_run(
@@ -396,3 +397,110 @@ def test_sync_endpoints_use_existing_uploader_flow(monkeypatch, tmp_path) -> Non
         "api_base_url": "http://it.local",
         "client_type": "_FakeClient",
     }
+
+
+def test_review_api_and_event_detail_include_sqlite_backed_review_state(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_ui",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    queue_before = client.get("/review/queue")
+    assert queue_before.status_code == 200
+    assert queue_before.json()["queue_total"] == 1
+    assert queue_before.json()["current"]["review_status"] == "pending"
+
+    review_resp = client.post(
+        "/events/run_ui_e1/review",
+        json={"decision": "qualified_yes", "notes": "matches target vehicle"},
+    )
+    assert review_resp.status_code == 200
+    review_payload = review_resp.json()
+    assert review_payload["review"]["decision"] == "qualified_yes"
+    assert review_payload["review"]["notes"] == "matches target vehicle"
+
+    event_resp = client.get("/events/run_ui_e1")
+    assert event_resp.status_code == 200
+    event_payload = event_resp.json()
+    assert event_payload["review_status"] == "qualified_yes"
+    assert event_payload["review"]["notes"] == "matches target vehicle"
+    assert event_payload["timeline"][-1]["description"].startswith("Reviewed as Qualified YES")
+
+
+def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_ui",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    dashboard = client.get("/ui/dashboard")
+    assert dashboard.status_code == 200
+    assert "Traffic Monitoring Dashboard" in dashboard.text
+    assert "Recent events" in dashboard.text
+
+    review = client.get("/ui/review")
+    assert review.status_code == 200
+    assert "Review Queue" in review.text
+    assert "run_ui_e1" in review.text
+
+    detail = client.get("/ui/events/run_ui_e1")
+    assert detail.status_code == 200
+    assert "Event Detail" in detail.text
+    assert "run_ui_e1" in detail.text
+
+    css = client.get("/ui-static/app.css")
+    assert css.status_code == 200
+    assert ".login-shell" in css.text
+
+    js = client.get("/ui-static/app.js")
+    assert js.status_code == 200
+    assert "initReviewActions" in js.text
+
+
+def test_ui_login_gates_pages_and_sets_cookie(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_ui",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            review_db_path=tmp_path / "reviews.sqlite3",
+            ui_auth_cfg=UiAuthConfig(username="admin", password="secret"),
+        )
+    )
+
+    login_page = client.get("/ui/login")
+    assert login_page.status_code == 200
+    assert "Sign In" in login_page.text
+
+    gated = client.get("/ui/dashboard", follow_redirects=False)
+    assert gated.status_code == 307
+    assert gated.headers["location"].startswith("/ui/login")
+
+    failed_login = client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
+    assert failed_login.status_code == 401
+
+    good_login = client.post("/api/auth/login", json={"username": "admin", "password": "secret"})
+    assert good_login.status_code == 200
+    assert "edge_ui_session" in good_login.headers.get("set-cookie", "")
+
+    dashboard = client.get("/ui/dashboard")
+    assert dashboard.status_code == 200
+    assert "Traffic Monitoring Dashboard" in dashboard.text
+
+    review_resp = client.post("/events/run_ui_e1/review", json={"decision": "qualified_no", "notes": "not target"})
+    assert review_resp.status_code == 200
+    assert review_resp.json()["review"]["decision"] == "qualified_no"

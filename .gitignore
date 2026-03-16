@@ -13,6 +13,7 @@ Progress/
 Models/
 media/
 data/
+spool/
 
 # Local config overrides (experiments; not committed)
 config/local/

@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block sidebar_extra %}
+<section class="panel sidebar-note">
+  <h3>UI Direction</h3>
+  <p class="caption">This page now follows the Action_Detection operations-console layout while keeping the traffic data path intact.</p>
+  <div class="timeline compact">
+    <div class="tl-item">
+      <span class="t">Dashboard</span>
+      <span class="d">Live spool totals, queue pressure, and recent runs stay visible on one screen.</span>
+    </div>
+    <div class="tl-item">
+      <span class="t">Trend panel</span>
+      <span class="d">Trend styling matches the reference system; chart data is still placeholder-first.</span>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block topbar_filters %}
+<div class="filters">
+  <div class="field">
+    <label>Source</label>
+    <input type="text" value="{{ latest_run.source_type or 'spool' }}" readonly />
+  </div>
+  <div class="field">
+    <label>Camera set</label>
+    <input type="text" value="{{ cameras|length }} active view(s)" readonly />
+  </div>
+  <div class="field">
+    <label>Review DB</label>
+    <input type="text" value="SQLite" readonly />
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="grid">
+  <section class="mode-banner" aria-label="System pulse">
+    <div class="mode-copy">
+      <div class="mode-eyebrow">OPS PULSE</div>
+      <div class="mode-title">
+        {% if latest_run.run_uid %}
+        Latest run {{ latest_run.run_uid }} is {{ latest_run.lifecycle_status or "active" }}
+        {% else %}
+        UI is online and waiting for spool activity
+        {% endif %}
+      </div>
+      <div class="mode-desc">
+        {% if latest_run.run_uid %}
+        Processed FPS {{ format_float(latest_run.processed_fps, 1) }} with {{ format_count(metrics.events_total) }} captured events in local storage.
+        {% else %}
+        Drop new spool data into the configured directory to populate dashboard cards and evidence panels.
+        {% endif %}
+      </div>
+    </div>
+    <div class="mode-tags">
+      <span class="pill">runs {{ format_count(metrics.runs_total) }}</span>
+      <span class="pill ink">pending {{ format_count(pending_reviews) }}</span>
+      <span class="pill brand">reviewed {{ format_count(review_counts.reviewed_total) }}</span>
+      <span class="pill">date: all</span>
+    </div>
+  </section>
+
+  <section class="kpis">
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">A_TO_B</div><div class="kpi-accent ink">A→B</div></div><div class="kpi-value">{{ format_count(metrics.count_a_to_b_total) }}</div><div class="kpi-hint">Total counted crossings</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">B_TO_A</div><div class="kpi-accent brand">B→A</div></div><div class="kpi-value">{{ format_count(metrics.count_b_to_a_total) }}</div><div class="kpi-hint">Total counted crossings</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Pending reviews</div><div class="kpi-accent">P</div></div><div class="kpi-value">{{ format_count(pending_reviews) }}</div><div class="kpi-hint">Needs manual confirmation</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Qualified YES</div><div class="kpi-accent yes">Y</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_yes) }}</div><div class="kpi-hint">Accepted by reviewer</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Qualified NO</div><div class="kpi-accent no">N</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_no) }}</div><div class="kpi-hint">Rejected by reviewer</div></div></div>
+  </section>
+
+  <section class="row2">
+    <article class="dashboard-trend">
+      <div class="pad">
+        <div class="btn-row">
+          <span class="pill ink">A_TO_B</span>
+          <span class="pill brand">B_TO_A</span>
+          <span class="pill">review backlog</span>
+        </div>
+        <div class="trend-context">
+          <p class="trend-meaning"><b>Traffic Monitoring Dashboard</b> uses the Action_Detection trend card layout while the trend series remains placeholder-first.</p>
+          <p class="caption">Live totals and queue counts are real. Time-series wiring is next.</p>
+          <div class="trend-meta-pills">
+            <span class="trend-key"><span class="trend-key-line dir-a"></span>A_TO_B</span>
+            <span class="trend-key"><span class="trend-key-line dir-b"></span>B_TO_A</span>
+            <span class="trend-key"><span class="trend-key-line no"></span>Pending</span>
+          </div>
+        </div>
+        <div class="trend-chart-wrap">
+          <svg class="trend-svg" viewBox="0 0 760 190" role="img" aria-label="Traffic trend placeholder chart">
+            <line class="trend-grid-line" x1="52" y1="26" x2="720" y2="26"></line>
+            <line class="trend-grid-line" x1="52" y1="84" x2="720" y2="84"></line>
+            <line class="trend-grid-line" x1="52" y1="142" x2="720" y2="142"></line>
+            <text class="trend-grid-value" x="42" y="29">50</text>
+            <text class="trend-grid-value" x="42" y="87">30</text>
+            <text class="trend-grid-value" x="42" y="145">10</text>
+            <path class="trend-line dir-a" d="M60 136 C140 126, 180 116, 240 118 S360 98, 420 86 S560 66, 720 72"></path>
+            <path class="trend-line dir-b" d="M60 154 C132 150, 180 142, 240 140 S360 130, 420 124 S560 116, 720 120"></path>
+            <path class="trend-line no" d="M60 160 C140 160, 220 158, 300 154 S500 150, 720 148"></path>
+            <circle class="trend-focus-dot dir-a" cx="720" cy="72" r="4.5"></circle>
+            <circle class="trend-focus-dot dir-b" cx="720" cy="120" r="4.5"></circle>
+            <circle class="trend-focus-dot no" cx="720" cy="148" r="4.5"></circle>
+            <text class="trend-axis-label" x="100" y="176">06:00</text>
+            <text class="trend-axis-label" x="240" y="176">09:00</text>
+            <text class="trend-axis-label" x="380" y="176">12:00</text>
+            <text class="trend-axis-label" x="520" y="176">15:00</text>
+            <text class="trend-axis-label" x="660" y="176">18:00</text>
+          </svg>
+          <div class="trend-x-title">Time (local)</div>
+        </div>
+        <div class="trend-value-strip">
+          <span class="pill" id="trend-strip-a-to-b">A_TO_B {{ format_count(metrics.count_a_to_b_total) }}</span>
+          <span class="pill" id="trend-strip-b-to-a">B_TO_A {{ format_count(metrics.count_b_to_a_total) }}</span>
+          <span class="pill no" id="trend-strip-pending">pending {{ format_count(pending_reviews) }}</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="section-head">
+        <div>
+          <h3>Review lane</h3>
+          <p class="caption">Compact queue pressure block using the Action_Detection side-panel treatment.</p>
+        </div>
+        <a class="pill" href="{{ ui_base_path }}/review">open queue</a>
+      </div>
+      <div class="queue-status-grid compact-grid">
+        <div class="queue-status-card">
+          <div class="label">Pending</div>
+          <div class="value">{{ format_count(pending_reviews) }}</div>
+        </div>
+        <div class="queue-status-card yes">
+          <div class="label">Qualified YES</div>
+          <div class="value">{{ format_count(review_counts.qualified_yes) }}</div>
+        </div>
+        <div class="queue-status-card no">
+          <div class="label">Qualified NO</div>
+          <div class="value">{{ format_count(review_counts.qualified_no) }}</div>
+        </div>
+        <div class="queue-status-card">
+          <div class="label">Events total</div>
+          <div class="value">{{ format_count(metrics.events_total) }}</div>
+        </div>
+      </div>
+      <div class="queue-next-strip">
+        <div class="queue-next-copy">
+          <span class="head">Next operator action</span>
+          <span class="body">Open Review Queue to confirm pending events against the local evidence store.</span>
+        </div>
+        <a class="btn primary" href="{{ ui_base_path }}/review">Open Review Queue</a>
+      </div>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="pad">
+      <div class="section-head">
+        <div>
+          <h3>Recent events</h3>
+          <p class="caption">Latest evidence captured from the spool.</p>
+        </div>
+        <div class="pill">events.jsonl</div>
+      </div>
+      <div class="table-scroll" style="margin-top: 10px;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Thumb</th>
+              <th scope="col">Occurred</th>
+              <th scope="col">Direction</th>
+              <th scope="col">Class</th>
+              <th scope="col">Review</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in recent_events %}
+            <tr>
+              <td>
+                {% if item.thumb_url %}
+                <img
+                  src="{{ item.thumb_url }}"
+                  alt="Thumbnail for {{ item.event_uid }}"
+                  width="72"
+                  height="52"
+                  loading="lazy"
+                  decoding="async"
+                  fetchpriority="low"
+                  style="width:72px; height:52px; object-fit:cover; border-radius:10px;"
+                />
+                {% else %}
+                <span class="pill">no thumb</span>
+                {% endif %}
+              </td>
+              <td>{{ format_datetime(item.occurred_at_utc) }}</td>
+              <td>{{ item.direction or "Unknown" }}</td>
+              <td>{{ item.class_name or "Unknown" }}</td>
+              <td><span class="pill {{ review_pill_class(item.review_status) }}">{{ review_label(item.review_status) }}</span></td>
+              <td><a class="btn secondary" href="{{ ui_base_path }}/events/{{ item.event_uid }}" style="text-decoration:none;">Inspect</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6">No events found in the configured spool yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="pad">
+      <div class="section-head">
+        <div>
+          <h3>Recent runs</h3>
+          <p class="caption">Operational view of the latest spool sessions.</p>
+        </div>
+        <div class="pill ink">status</div>
+      </div>
+      <div class="table-scroll" style="margin-top: 10px;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Run</th>
+              <th scope="col">Camera</th>
+              <th scope="col">Updated</th>
+              <th scope="col">Lifecycle</th>
+              <th scope="col">Delivery</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in recent_runs %}
+            <tr>
+              <td>{{ run.run_uid }}</td>
+              <td>{{ run.camera_id or "Unknown" }}</td>
+              <td>{{ format_datetime(run.updated_at_utc) }}</td>
+              <td>{{ run.lifecycle_status or "Unknown" }}</td>
+              <td><span class="pill">{{ run.delivery_state }}</span></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5">No runs found yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

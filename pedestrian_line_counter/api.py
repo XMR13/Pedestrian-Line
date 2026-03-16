@@ -5,9 +5,12 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import secrets
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from .config import ROOT_DIR, SpoolRetentionConfig
@@ -18,13 +21,22 @@ from .event_uploader import (
     process_pending_runs,
     process_single_run,
 )
+from .review_store import DECISION_NO, DECISION_YES, ReviewStore
 from .spool_retention import apply_retention_policy
+from .ui_auth import UiAuthConfig, issue_session_token, validate_session_token
 
 
 DEFAULT_STATE_FILENAME = ".portal_upload_state.json"
 DEFAULT_MUTATION_API_KEY_HEADER = "X-API-Key"
 MAX_RUNS_LIMIT = 200
 MAX_EVENTS_LIMIT = 500
+DEFAULT_REVIEW_DB_FILENAME = ".edge_ui_reviews.sqlite3"
+UI_BASE_PATH = "/ui"
+UI_TEMPLATE_DIR = Path(__file__).resolve().parent / "ui_templates"
+UI_STATIC_DIR = Path(__file__).resolve().parent / "ui_static"
+UI_ASSET_DIR = ROOT_DIR / "portal" / "mockups" / "assets"
+REVIEW_STATUS_PENDING = "pending"
+REVIEW_STATUS_ALL = "all"
 
 
 class SyncRequest(BaseModel):
@@ -45,6 +57,16 @@ class RetentionRequest(BaseModel):
     protect_incomplete_runs: Optional[bool] = None
 
 
+class ReviewUpdateRequest(BaseModel):
+    decision: str
+    notes: str = ""
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
 @dataclass
 class MutationAuthConfig:
     api_key: str = ""
@@ -60,6 +82,8 @@ class EdgeApiRuntime:
     uploader_cfg: Optional[UploaderConfig] = None
     retention_cfg: SpoolRetentionConfig = field(default_factory=SpoolRetentionConfig)
     mutation_auth_cfg: MutationAuthConfig = field(default_factory=MutationAuthConfig)
+    ui_auth_cfg: UiAuthConfig = field(default_factory=UiAuthConfig)
+    review_store: ReviewStore = field(default_factory=lambda: ReviewStore(ROOT_DIR / DEFAULT_REVIEW_DB_FILENAME))
     service_started_at_utc: str = field(default_factory=lambda: _utcnow_iso())
 
     def health_payload(self) -> Dict[str, Any]:
@@ -71,11 +95,13 @@ class EdgeApiRuntime:
             "uploader_enabled": self.uploader_cfg is not None,
             "retention_enabled": bool(self.retention_cfg.enabled),
             "mutation_auth_enabled": self.mutation_auth_cfg.enabled(),
+            "ui_auth_enabled": self.ui_auth_cfg.enabled(),
         }
 
     def status_payload(self) -> Dict[str, Any]:
         runs = self.list_recent_runs(limit=1)
         counts = self._collect_delivery_counts()
+        review_counts = self.review_store.summary()
         return {
             "ok": True,
             "service_started_at_utc": self.service_started_at_utc,
@@ -84,6 +110,7 @@ class EdgeApiRuntime:
             "uploader_enabled": self.uploader_cfg is not None,
             "retention_enabled": bool(self.retention_cfg.enabled),
             "mutation_auth_enabled": self.mutation_auth_cfg.enabled(),
+            "ui_auth_enabled": self.ui_auth_cfg.enabled(),
             "runs_total": counts["runs_total"],
             "delivery_state_counts": {
                 "completed": counts["completed"],
@@ -92,11 +119,17 @@ class EdgeApiRuntime:
                 "in_progress": counts["in_progress"],
                 "unknown": counts["unknown"],
             },
+            "review_counts": {
+                "qualified_yes": review_counts[DECISION_YES],
+                "qualified_no": review_counts[DECISION_NO],
+                "reviewed_total": review_counts["reviewed_total"],
+            },
             "latest_run": runs[0] if runs else None,
         }
 
     def metrics_payload(self) -> Dict[str, Any]:
         delivery_counts = self._collect_delivery_counts()
+        review_counts = self.review_store.summary()
         lifecycle_status_counts: Dict[str, int] = {}
         totals = {
             "events_total": 0,
@@ -154,6 +187,7 @@ class EdgeApiRuntime:
             "uploader_enabled": self.uploader_cfg is not None,
             "retention_enabled": bool(self.retention_cfg.enabled),
             "mutation_auth_enabled": self.mutation_auth_cfg.enabled(),
+            "ui_auth_enabled": self.ui_auth_cfg.enabled(),
             "runs_total": delivery_counts["runs_total"],
             "events_total": totals["events_total"],
             "frames_total": totals["frames_total"],
@@ -161,6 +195,11 @@ class EdgeApiRuntime:
             "events_emitted_total": totals["events_emitted_total"],
             "count_a_to_b_total": totals["count_a_to_b_total"],
             "count_b_to_a_total": totals["count_b_to_a_total"],
+            "review_counts": {
+                "qualified_yes": review_counts[DECISION_YES],
+                "qualified_no": review_counts[DECISION_NO],
+                "reviewed_total": review_counts["reviewed_total"],
+            },
             "delivery_state_counts": {
                 "completed": delivery_counts["completed"],
                 "pending": delivery_counts["pending"],
@@ -204,6 +243,11 @@ class EdgeApiRuntime:
             "mutation_auth": {
                 "enabled": self.mutation_auth_cfg.enabled(),
                 "header_name": str(self.mutation_auth_cfg.header_name or DEFAULT_MUTATION_API_KEY_HEADER),
+            },
+            "ui_auth": {
+                "enabled": self.ui_auth_cfg.enabled(),
+                "username": self.ui_auth_cfg.username,
+                "cookie_name": self.ui_auth_cfg.cookie_name,
             },
             "retention": {
                 "enabled": bool(self.retention_cfg.enabled),
@@ -250,9 +294,11 @@ class EdgeApiRuntime:
         *,
         limit: int = 50,
         run_uid: Optional[str] = None,
+        camera_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
         target_run_uid = str(run_uid).strip() if run_uid else None
+        target_camera_id = str(camera_id).strip() if camera_id else None
 
         for run_dir in iter_spool_runs(self.spool_dir):
             run_meta = _load_json_dict(run_dir / "run.json")
@@ -262,10 +308,203 @@ class EdgeApiRuntime:
             if target_run_uid is not None and current_run_uid != target_run_uid:
                 continue
             for event in _iter_jsonl_records(run_dir / "events.jsonl"):
-                items.append(_build_event_summary(run_dir, run_meta, event))
+                summary = _build_event_summary(run_dir, run_meta, event, spool_dir=self.spool_dir)
+                if target_camera_id is not None and _text(summary.get("camera_id")) != target_camera_id:
+                    continue
+                items.append(summary)
 
         items.sort(key=_event_sort_key, reverse=True)
-        return items[: _clamp_limit(limit, MAX_EVENTS_LIMIT)]
+        merged = self._attach_review_data(items[: _clamp_limit(limit, MAX_EVENTS_LIMIT)])
+        return merged
+
+    def get_event(self, event_uid: str) -> Optional[Dict[str, Any]]:
+        target_uid = str(event_uid).strip()
+        if target_uid == "":
+            return None
+
+        for run_dir in iter_spool_runs(self.spool_dir):
+            run_meta = _load_json_dict(run_dir / "run.json")
+            if run_meta is None:
+                continue
+            status_meta = _load_json_dict(run_dir / "status.json")
+            state_meta = _load_json_dict(run_dir / self._state_filename())
+            run_summary = _build_run_summary(run_dir, run_meta, status_meta, state_meta)
+            for event in _iter_jsonl_records(run_dir / "events.jsonl"):
+                if _text(event.get("event_uid")) != target_uid:
+                    continue
+                event_summary = _build_event_summary(run_dir, run_meta, event, spool_dir=self.spool_dir)
+                event_summary["run"] = run_summary
+                event_summary = self._attach_review_data([event_summary])[0]
+                event_summary["timeline"] = self._build_event_timeline(event_summary)
+                return event_summary
+        return None
+
+    def list_review_queue(
+        self,
+        *,
+        limit: int = 100,
+        camera_id: Optional[str] = None,
+        status_filter: str = REVIEW_STATUS_PENDING,
+    ) -> List[Dict[str, Any]]:
+        items = list(self._iter_all_events(camera_id=camera_id))
+        items = self._attach_review_data(items)
+        normalized_status = _normalize_review_filter(status_filter)
+        if normalized_status != REVIEW_STATUS_ALL:
+            items = [item for item in items if _text(item.get("review_status")) == normalized_status]
+
+        items.sort(key=_event_sort_key)
+        return items[: max(1, int(limit))]
+
+    def review_queue_payload(
+        self,
+        *,
+        limit: int = 100,
+        camera_id: Optional[str] = None,
+        status_filter: str = REVIEW_STATUS_PENDING,
+        current_event_uid: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        all_items = self._attach_review_data(list(self._iter_all_events(camera_id=camera_id)))
+        normalized_status = _normalize_review_filter(status_filter)
+        queue = list(all_items)
+        if normalized_status != REVIEW_STATUS_ALL:
+            queue = [item for item in queue if _text(item.get("review_status")) == normalized_status]
+        queue.sort(key=_event_sort_key)
+        queue = queue[: max(1, int(limit))]
+        cameras = self.list_cameras()
+
+        current_index = 0
+        target_uid = _text(current_event_uid)
+        if target_uid is not None:
+            for idx, item in enumerate(queue):
+                if _text(item.get("event_uid")) == target_uid:
+                    current_index = idx
+                    break
+
+        current = queue[current_index] if queue else None
+        upcoming = queue[current_index + 1 : current_index + 5] if queue else []
+        review_counts = self.review_store.summary()
+        pending_count = sum(1 for item in all_items if _text(item.get("review_status")) == REVIEW_STATUS_PENDING)
+
+        return {
+            "current": current,
+            "current_index": current_index + 1 if current is not None else 0,
+            "queue_total": len(queue),
+            "upcoming": upcoming,
+            "camera_id": _text(camera_id),
+            "status_filter": normalized_status,
+            "cameras": cameras,
+            "counts": {
+                "pending": max(0, pending_count),
+                "qualified_yes": review_counts[DECISION_YES],
+                "qualified_no": review_counts[DECISION_NO],
+                "reviewed_total": review_counts["reviewed_total"],
+            },
+        }
+
+    def save_review(self, event_uid: str, *, decision: str, notes: str = "") -> Dict[str, Any]:
+        event = self.get_event(event_uid)
+        if event is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"event_uid not found: {event_uid}")
+
+        record = self.review_store.save_review(
+            event_uid=str(event["event_uid"]),
+            run_uid=_text(event.get("run_uid")),
+            site_id=_text(event.get("site_id")),
+            camera_id=_text(event.get("camera_id")),
+            decision=decision,
+            notes=notes,
+            now_utc=_utcnow_iso(),
+        )
+        updated_event = self.get_event(event_uid)
+        next_pending = self.list_review_queue(
+            limit=1,
+            camera_id=_text(event.get("camera_id")),
+            status_filter=REVIEW_STATUS_PENDING,
+        )
+        return {
+            "ok": True,
+            "event_uid": event_uid,
+            "review": record.to_dict(),
+            "event": updated_event,
+            "next_event_uid": _text(next_pending[0].get("event_uid")) if next_pending else None,
+        }
+
+    def list_cameras(self) -> List[str]:
+        cameras = {_text(item.get("camera_id")) for item in self._iter_all_events()}
+        return sorted(item for item in cameras if item)
+
+    def dashboard_payload(self) -> Dict[str, Any]:
+        metrics = self.metrics_payload()
+        recent_events = self.list_recent_events(limit=8)
+        recent_runs = self.list_recent_runs(limit=5)
+        latest_run = metrics.get("latest_run") or {}
+        review_counts = metrics.get("review_counts") or {}
+        pending_reviews = max(0, int(metrics.get("events_total", 0)) - int(review_counts.get("reviewed_total", 0)))
+        return {
+            "metrics": metrics,
+            "recent_events": recent_events,
+            "recent_runs": recent_runs,
+            "latest_run": latest_run,
+            "pending_reviews": pending_reviews,
+            "review_counts": review_counts,
+            "cameras": self.list_cameras(),
+        }
+
+    def _iter_all_events(self, *, camera_id: Optional[str] = None) -> Iterable[Dict[str, Any]]:
+        target_camera_id = _text(camera_id)
+        for run_dir in iter_spool_runs(self.spool_dir):
+            run_meta = _load_json_dict(run_dir / "run.json")
+            if run_meta is None:
+                continue
+            for event in _iter_jsonl_records(run_dir / "events.jsonl"):
+                summary = _build_event_summary(run_dir, run_meta, event, spool_dir=self.spool_dir)
+                if target_camera_id is not None and _text(summary.get("camera_id")) != target_camera_id:
+                    continue
+                yield summary
+
+    def _attach_review_data(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        review_map = self.review_store.get_reviews(
+            [_text(item.get("event_uid")) or "" for item in items]
+        )
+        merged: List[Dict[str, Any]] = []
+        for item in items:
+            event_uid = _text(item.get("event_uid"))
+            review = review_map.get(event_uid or "")
+            row = dict(item)
+            row["review"] = review.to_dict() if review is not None else None
+            row["review_status"] = review.decision if review is not None else REVIEW_STATUS_PENDING
+            row["review_label"] = _review_label(row["review_status"])
+            row["thumb_url"] = _path_to_public_url(self.spool_dir, row.get("thumb_path"))
+            row["scene_url"] = _path_to_public_url(self.spool_dir, row.get("scene_path"))
+            merged.append(row)
+        return merged
+
+    def _build_event_timeline(self, event: Mapping[str, Any]) -> List[Dict[str, str]]:
+        timeline = [
+            {
+                "time": _text(event.get("occurred_at_utc")) or "Unknown",
+                "description": "Crossing event captured and saved to the local spool.",
+            }
+        ]
+        review = event.get("review")
+        if isinstance(review, Mapping):
+            timeline.append(
+                {
+                    "time": _text(review.get("updated_at_utc")) or "Unknown",
+                    "description": (
+                        f"Reviewed as {_review_label(_text(review.get('decision')))}"
+                        + (f" with notes: {_text(review.get('notes'))}" if _text(review.get("notes")) else ".")
+                    ),
+                }
+            )
+        else:
+            timeline.append(
+                {
+                    "time": "Pending",
+                    "description": "Awaiting reviewer confirmation in the MVP queue.",
+                }
+            )
+        return timeline
 
     def retry_pending_runs(
         self,
@@ -406,6 +645,8 @@ def create_app(
     uploader_cfg: Optional[UploaderConfig] = None,
     retention_cfg: Optional[SpoolRetentionConfig] = None,
     mutation_auth_cfg: Optional[MutationAuthConfig] = None,
+    review_db_path: Optional[Path] = None,
+    ui_auth_cfg: Optional[UiAuthConfig] = None,
     title: str = "Pedestrian Line Edge Service",
 ) -> FastAPI:
     app = FastAPI(title=title, version="0.1.0")
@@ -414,9 +655,76 @@ def create_app(
         uploader_cfg=uploader_cfg,
         retention_cfg=retention_cfg if retention_cfg is not None else SpoolRetentionConfig(),
         mutation_auth_cfg=mutation_auth_cfg if mutation_auth_cfg is not None else MutationAuthConfig(),
+        ui_auth_cfg=ui_auth_cfg if ui_auth_cfg is not None else UiAuthConfig(),
+        review_store=ReviewStore(Path(review_db_path) if review_db_path is not None else Path(spool_dir) / DEFAULT_REVIEW_DB_FILENAME),
     )
+    app.state.templates = Jinja2Templates(directory=str(UI_TEMPLATE_DIR))
+
+    if UI_STATIC_DIR.exists():
+        app.mount("/ui-static", StaticFiles(directory=str(UI_STATIC_DIR)), name="ui-static")
+    if UI_ASSET_DIR.exists():
+        app.mount("/ui-assets", StaticFiles(directory=str(UI_ASSET_DIR)), name="ui-assets")
+    app.mount("/evidence", StaticFiles(directory=str(spool_dir), check_dir=False), name="evidence")
 
     router = APIRouter()
+
+    @router.get("/", include_in_schema=False)
+    def ui_root(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> RedirectResponse:
+        target = f"{UI_BASE_PATH}/login" if runtime.ui_auth_cfg.enabled() else f"{UI_BASE_PATH}/dashboard"
+        return RedirectResponse(url=target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    @router.get(f"{UI_BASE_PATH}", include_in_schema=False)
+    def ui_index(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> RedirectResponse:
+        target = f"{UI_BASE_PATH}/login" if runtime.ui_auth_cfg.enabled() else f"{UI_BASE_PATH}/dashboard"
+        return RedirectResponse(url=target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    @router.post("/api/auth/login", tags=["auth"])
+    def login(
+        payload: LoginRequest,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+    ) -> JSONResponse:
+        cfg = runtime.ui_auth_cfg
+        if not cfg.enabled():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ui_auth_disabled")
+        if payload.username != cfg.username or payload.password != cfg.password:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_credentials")
+
+        token = issue_session_token(cfg=cfg, username=cfg.username)
+        response = JSONResponse({"ok": True})
+        response.set_cookie(
+            key=cfg.cookie_name,
+            value=token,
+            max_age=int(cfg.cookie_max_age_s),
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @router.post("/api/auth/logout", tags=["auth"])
+    def logout(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> JSONResponse:
+        response = JSONResponse({"ok": True})
+        response.delete_cookie(key=runtime.ui_auth_cfg.cookie_name, path="/")
+        return response
+
+    @router.get(f"{UI_BASE_PATH}/login", response_class=HTMLResponse, include_in_schema=False)
+    def login_page(
+        request: Request,
+        next_path: Optional[str] = Query(default=None, alias="next"),
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+    ) -> HTMLResponse:
+        if _is_authenticated(request, runtime=runtime):
+            return RedirectResponse(url=f"{UI_BASE_PATH}/dashboard", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        templates = _get_templates(request)
+        context = _build_ui_context(
+            runtime=runtime,
+            request=request,
+            page_name="login",
+            page_title="Operator Login",
+            page_subtitle="Sign in to open the dashboard, review queue, and event detail pages.",
+        )
+        context["next_path"] = _safe_next_path(next_path) or f"{UI_BASE_PATH}/dashboard"
+        return templates.TemplateResponse(request, "login.html", context)
 
     @router.get("/healthz", tags=["health"])
     def healthz(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
@@ -450,15 +758,122 @@ def create_app(
     def recent_events(
         limit: int = Query(default=50, ge=1, le=MAX_EVENTS_LIMIT),
         run_uid: Optional[str] = Query(default=None),
+        camera_id: Optional[str] = Query(default=None),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
     ) -> Dict[str, Any]:
-        items = runtime.list_recent_events(limit=limit, run_uid=run_uid)
+        items = runtime.list_recent_events(limit=limit, run_uid=run_uid, camera_id=camera_id)
         return {
             "items": items,
             "count": len(items),
             "limit": int(limit),
             "run_uid": run_uid,
+            "camera_id": camera_id,
         }
+
+    @router.get("/events/{event_uid}", tags=["events"])
+    def event_detail_payload(
+        event_uid: str,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+    ) -> Dict[str, Any]:
+        item = runtime.get_event(event_uid)
+        if item is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"event_uid not found: {event_uid}")
+        return item
+
+    @router.get("/review/queue", tags=["review"])
+    def review_queue(
+        limit: int = Query(default=100, ge=1, le=1000),
+        camera_id: Optional[str] = Query(default=None),
+        status_filter: str = Query(default=REVIEW_STATUS_PENDING, alias="status"),
+        event_uid: Optional[str] = Query(default=None),
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
+    ) -> Dict[str, Any]:
+        return runtime.review_queue_payload(
+            limit=limit,
+            camera_id=camera_id,
+            status_filter=status_filter,
+            current_event_uid=event_uid,
+        )
+
+    @router.post("/events/{event_uid}/review", tags=["review"])
+    def save_event_review(
+        event_uid: str,
+        payload: ReviewUpdateRequest,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
+    ) -> Dict[str, Any]:
+        return runtime.save_review(
+            event_uid,
+            decision=payload.decision,
+            notes=payload.notes,
+        )
+
+    @router.get(f"{UI_BASE_PATH}/dashboard", response_class=HTMLResponse, include_in_schema=False)
+    def dashboard_page(
+        request: Request,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_page),
+    ) -> HTMLResponse:
+        templates = _get_templates(request)
+        context = _build_ui_context(
+            runtime=runtime,
+            request=request,
+            page_name="dashboard",
+            page_title="Traffic Monitoring Dashboard",
+            page_subtitle="Live totals from the edge spool plus the current review backlog.",
+        )
+        context.update(runtime.dashboard_payload())
+        return templates.TemplateResponse(request, "dashboard.html", context)
+
+    @router.get(f"{UI_BASE_PATH}/review", response_class=HTMLResponse, include_in_schema=False)
+    def review_page(
+        request: Request,
+        camera_id: Optional[str] = Query(default=None),
+        status_filter: str = Query(default=REVIEW_STATUS_PENDING, alias="status"),
+        event_uid: Optional[str] = Query(default=None),
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_page),
+    ) -> HTMLResponse:
+        templates = _get_templates(request)
+        context = _build_ui_context(
+            runtime=runtime,
+            request=request,
+            page_name="review",
+            page_title="Review Queue",
+            page_subtitle="Rapid YES/NO verification backed by local SQLite review state.",
+        )
+        context.update(
+            runtime.review_queue_payload(
+                camera_id=camera_id,
+                status_filter=status_filter,
+                current_event_uid=event_uid,
+            )
+        )
+        return templates.TemplateResponse(request, "review_queue.html", context)
+
+    @router.get(f"{UI_BASE_PATH}/events/{{event_uid}}", response_class=HTMLResponse, include_in_schema=False)
+    def event_detail_page(
+        request: Request,
+        event_uid: str,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_page),
+    ) -> HTMLResponse:
+        templates = _get_templates(request)
+        item = runtime.get_event(event_uid)
+        if item is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"event_uid not found: {event_uid}")
+
+        context = _build_ui_context(
+            runtime=runtime,
+            request=request,
+            page_name="event_detail",
+            page_title="Event Detail",
+            page_subtitle="Evidence, metadata, and review state for a single crossing.",
+        )
+        context["event"] = item
+        context["review_counts"] = runtime.review_store.summary()
+        return templates.TemplateResponse(request, "event_detail.html", context)
 
     @router.get("/retention/preview", tags=["admin"])
     def retention_preview(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
@@ -511,6 +926,59 @@ def _get_runtime(request: Request) -> EdgeApiRuntime:
     if not isinstance(runtime, EdgeApiRuntime):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Service runtime is not initialized.")
     return runtime
+
+
+def _get_templates(request: Request) -> Jinja2Templates:
+    templates = getattr(request.app.state, "templates", None)
+    if not isinstance(templates, Jinja2Templates):
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="UI templates are not initialized.")
+    return templates
+
+
+def _is_authenticated(request: Request, *, runtime: EdgeApiRuntime) -> bool:
+    cfg = runtime.ui_auth_cfg
+    if not cfg.enabled():
+        return True
+    token = request.cookies.get(cfg.cookie_name, "")
+    return validate_session_token(cfg=cfg, token=token)
+
+
+def _safe_next_path(value: Optional[str]) -> Optional[str]:
+    text = _text(value)
+    if text is None:
+        return None
+    if not text.startswith("/"):
+        return None
+    if text.startswith("//"):
+        return None
+    return text
+
+
+def _require_ui_auth_page(
+    request: Request,
+    runtime: EdgeApiRuntime = Depends(_get_runtime),
+) -> None:
+    if _is_authenticated(request, runtime=runtime):
+        return
+    next_path = _safe_next_path(request.url.path)
+    if request.url.query:
+        next_path = f"{next_path}?{request.url.query}" if next_path else None
+    target = f"{UI_BASE_PATH}/login"
+    if next_path:
+        target += f"?next={next_path}"
+    raise HTTPException(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": target},
+    )
+
+
+def _require_ui_auth_json(
+    request: Request,
+    runtime: EdgeApiRuntime = Depends(_get_runtime),
+) -> None:
+    if _is_authenticated(request, runtime=runtime):
+        return
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="ui_auth_required")
 
 
 def _require_mutation_auth(
@@ -616,6 +1084,8 @@ def _build_event_summary(
     run_dir: Path,
     run_meta: Mapping[str, Any],
     event: Mapping[str, Any],
+    *,
+    spool_dir: Path,
 ) -> Dict[str, Any]:
     thumb_rel = _text(event.get("thumb_relpath"))
     scene_rel = _text(event.get("scene_relpath"))
@@ -636,6 +1106,8 @@ def _build_event_summary(
         "scene_relpath": scene_rel,
         "thumb_path": str(run_dir / thumb_rel) if thumb_rel else None,
         "scene_path": str(run_dir / scene_rel) if scene_rel else None,
+        "thumb_url": _relpath_to_public_url(spool_dir, run_dir / thumb_rel) if thumb_rel else None,
+        "scene_url": _relpath_to_public_url(spool_dir, run_dir / scene_rel) if scene_rel else None,
     }
 
 
@@ -748,6 +1220,95 @@ def _serialize_retention_run_info(info: Any) -> Dict[str, Any]:
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _build_ui_context(
+    *,
+    runtime: EdgeApiRuntime,
+    request: Request,
+    page_name: str,
+    page_title: str,
+    page_subtitle: str,
+) -> Dict[str, Any]:
+    return {
+        "request": request,
+        "runtime": runtime,
+        "page_name": page_name,
+        "page_title": page_title,
+        "page_subtitle": page_subtitle,
+        "ui_base_path": UI_BASE_PATH,
+        "static_base": "/ui-static",
+        "decision_yes": DECISION_YES,
+        "decision_no": DECISION_NO,
+        "format_count": _format_count,
+        "format_float": _format_float,
+        "format_datetime": _format_datetime,
+        "review_pill_class": _review_pill_class,
+        "review_label": _review_label,
+        "status_filter_pending": REVIEW_STATUS_PENDING,
+        "status_filter_all": REVIEW_STATUS_ALL,
+    }
+
+
+def _normalize_review_filter(value: Optional[str]) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {DECISION_YES, DECISION_NO, REVIEW_STATUS_PENDING, REVIEW_STATUS_ALL}:
+        return normalized
+    return REVIEW_STATUS_PENDING
+
+
+def _review_label(value: Optional[str]) -> str:
+    if value == DECISION_YES:
+        return "Qualified YES"
+    if value == DECISION_NO:
+        return "Qualified NO"
+    return "Pending"
+
+
+def _review_pill_class(value: Optional[str]) -> str:
+    if value == DECISION_YES:
+        return "yes"
+    if value == DECISION_NO:
+        return "no"
+    return ""
+
+
+def _path_to_public_url(spool_dir: Path, value: Any) -> Optional[str]:
+    text = _text(value)
+    if text is None:
+        return None
+    return _relpath_to_public_url(spool_dir, Path(text))
+
+
+def _relpath_to_public_url(spool_dir: Path, path: Path) -> Optional[str]:
+    try:
+        relpath = path.resolve().relative_to(spool_dir.resolve())
+    except Exception:
+        return None
+    return "/evidence/" + relpath.as_posix()
+
+
+def _format_count(value: Any) -> str:
+    try:
+        return f"{int(value):,}"
+    except Exception:
+        return "0"
+
+
+def _format_float(value: Any, digits: int = 1) -> str:
+    try:
+        return f"{float(value):.{int(digits)}f}"
+    except Exception:
+        return "0.0"
+
+
+def _format_datetime(value: Any) -> str:
+    text = _text(value)
+    if text is None:
+        return "Unavailable"
+    if "T" in text:
+        return text.replace("T", " ").replace("Z", " UTC")
+    return text
 
 
 app = create_app(spool_dir=ROOT_DIR / "spool")

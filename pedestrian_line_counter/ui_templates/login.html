@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ page_title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Sora:wght@400;500;600;700;800&display=swap"
+    />
+    <link rel="stylesheet" href="/ui-static/app.css" />
+  </head>
+  <body class="page-login">
+    <a class="skip-link" href="#main-content">Skip to Main Content</a>
+    <div class="grain"></div>
+    <main class="login-shell" id="main-content">
+      <section class="login-card login-layout">
+        <div class="login-side login-side-brand">
+          <div class="login-brand">
+            <img
+              src="/ui-assets/indah-kiat-logo.png"
+              alt="Site logo"
+              class="brand-logo large"
+              width="406"
+              height="124"
+              fetchpriority="high"
+            />
+            <p class="login-kicker">PORTAL ACCESS GATE</p>
+            <h1>Traffic Monitoring Portal</h1>
+            <p class="muted">Sign in to access dashboard, review queue, and evidence detail pages with the Action_Detection visual style.</p>
+          </div>
+
+          <div class="login-trust">
+            <div class="login-stat">
+              <strong>Dashboard</strong>
+              <span>Live totals, queue pressure, and recent run visibility from the edge spool.</span>
+            </div>
+            <div class="login-stat">
+              <strong>Review Queue</strong>
+              <span>Fast YES/NO labeling with evidence and SQLite-backed local persistence.</span>
+            </div>
+            <div class="login-stat">
+              <strong>Audit-safe</strong>
+              <span>Machine result, notes, and local override stay attached to the same event UID.</span>
+            </div>
+          </div>
+
+          <div class="login-note">
+            <span class="pill brand">traffic lane</span>
+            <span class="pill">local FastAPI</span>
+            <span class="pill ink">cookie session</span>
+          </div>
+        </div>
+
+        <div class="login-side login-side-form">
+          <div class="login-form-head">
+            <p class="login-kicker">ACCOUNT LOGIN</p>
+            <h2>Sign In</h2>
+            <p class="caption">Use your local operator account to open Dashboard, Review Queue, and Event Detail pages.</p>
+          </div>
+
+          <form class="login-form" id="login-form" data-next-path="{{ next_path }}">
+            <div class="login-preview-note" id="login-status" role="alert" aria-live="polite">
+              <p style="margin:0;">Sign in required to access dashboard, queue, and event evidence.</p>
+            </div>
+
+            <div class="login-field">
+              <label for="username">Username</label>
+              <input id="username" name="username" autocomplete="username" placeholder="Supervisor or reviewer account" />
+            </div>
+
+            <div class="login-field">
+              <label for="password">Password</label>
+              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" />
+            </div>
+
+            <div class="login-actions-row">
+              <span class="hint">Configured username: {{ runtime.ui_auth_cfg.username }}</span>
+              <a class="login-inline-link" href="{{ ui_base_path }}/dashboard">Open dashboard</a>
+            </div>
+
+            <button class="btn primary login-submit" type="submit">Sign In</button>
+
+            <div class="login-foot">
+              <span class="hint">Local cookie session</span>
+              <span class="hint">No cloud auth required</span>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+    <script src="/ui-static/app.js" defer></script>
+  </body>
+</html>

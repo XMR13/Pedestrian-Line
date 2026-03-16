@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block sidebar_extra %}
+<section class="panel sidebar-note">
+  <h3>Review State</h3>
+  <p class="caption">This page is the inspection surface for a single crossing event.</p>
+  <div class="timeline compact">
+    <div class="tl-item">
+      <span class="t">Current status</span>
+      <span class="d"><span class="pill {{ review_pill_class(event.review_status) }}">{{ review_label(event.review_status) }}</span></span>
+    </div>
+    <div class="tl-item">
+      <span class="t">Flow</span>
+      <span class="d">Inspect evidence, confirm decision, then return to queue or advance to the next event.</span>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block topbar_filters %}
+<div class="filters detail-header-tools">
+  <div class="field">
+    <label>Event UID</label>
+    <input type="text" value="{{ event.event_uid }}" readonly />
+  </div>
+  <a class="btn" href="{{ ui_base_path }}/review">Back to Queue</a>
+  <a class="btn primary" href="{{ ui_base_path }}/review?status={{ event.review_status if event.review_status != 'pending' else 'pending' }}">Review Lane</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="status-banner" data-review-feedback></div>
+
+<div class="detail-crumb">
+  <a href="{{ ui_base_path }}/review">Review Queue</a>
+  <span>/</span>
+  <span>{{ event.event_uid }}</span>
+</div>
+
+<section class="detail-overview" aria-label="Event overview">
+  <article class="detail-overview-card">
+    <span class="detail-overview-label">Event UID</span>
+    <strong class="detail-overview-value">{{ event.event_uid }}</strong>
+    <span class="detail-overview-meta">Current event under review.</span>
+  </article>
+  <article class="detail-overview-card">
+    <span class="detail-overview-label">Occurred</span>
+    <strong class="detail-overview-value">{{ format_datetime(event.occurred_at_utc) }}</strong>
+    <span class="detail-overview-meta">Timestamp recorded in the spool.</span>
+  </article>
+  <article class="detail-overview-card">
+    <span class="detail-overview-label">Direction</span>
+    <strong class="detail-overview-value">{{ event.direction or "Unknown" }}</strong>
+    <span class="detail-overview-meta">Detected travel direction for this crossing.</span>
+  </article>
+  <article class="detail-overview-card">
+    <span class="detail-overview-label">Class</span>
+    <strong class="detail-overview-value">{{ event.class_name or "Unknown" }}</strong>
+    <span class="detail-overview-meta">Tracked object class from the detector.</span>
+  </article>
+  <article class="detail-overview-card detail-overview-status status-{{ 'yes' if event.review_status == decision_yes else 'no' if event.review_status == decision_no else 'unknown' }}">
+    <span class="detail-overview-label">Review</span>
+    <strong class="detail-overview-value">{{ review_label(event.review_status) }}</strong>
+    <span class="detail-overview-meta">Latest local operator decision.</span>
+  </article>
+</section>
+
+<section class="detail-shell">
+  <section class="detail-main">
+    <article class="panel detail-evidence-panel">
+      <div class="section-head">
+        <div>
+          <h3>Event evidence</h3>
+          <p class="caption">Primary scene or thumbnail evidence for this traffic crossing.</p>
+        </div>
+        <span class="pill brand">{% if event.scene_url or event.thumb_url %}evidence ready{% else %}no image{% endif %}</span>
+      </div>
+      <div class="big-thumb detail-thumb detail-player" aria-label="Event evidence">
+        {% if event.scene_url %}
+        <img src="{{ event.scene_url }}" alt="Scene evidence for {{ event.event_uid }}" class="evidence-image" decoding="async" fetchpriority="high" />
+        {% elif event.thumb_url %}
+        <img src="{{ event.thumb_url }}" alt="Thumbnail for {{ event.event_uid }}" class="evidence-image" decoding="async" fetchpriority="high" />
+        {% else %}
+        <div class="image-fallback">No evidence image found for this event yet.</div>
+        {% endif %}
+        <div class="frame-overlay">
+          <span class="pill ink">{{ event.direction or "Unknown" }}</span>
+          <span class="pill">{{ event.class_name or "Unknown" }}</span>
+          <span class="pill">frame {{ event.frame_index or "-" }}</span>
+        </div>
+      </div>
+      <div class="detail-evidence-strip">
+        <span class="pill">run {{ event.run_uid or "Unknown" }}</span>
+        <span class="pill">camera {{ event.camera_id or "Unknown" }}</span>
+        <span class="pill">conf {{ format_float(event.confidence, 2) }}</span>
+      </div>
+    </article>
+
+    <div class="detail-lower-grid">
+      <div class="panel">
+        <div class="section-head">
+          <div>
+            <h3>Run context</h3>
+            <p class="caption">Session metadata carried from the spool.</p>
+          </div>
+        </div>
+        <div class="meta">
+          <div class="row"><div class="key">Site</div><div class="val">{{ event.site_id or "Unknown" }}</div></div>
+          <div class="row"><div class="key">Camera</div><div class="val">{{ event.camera_id or "Unknown" }}</div></div>
+          <div class="row"><div class="key">Run</div><div class="val">{{ event.run.run_uid if event.run else event.run_uid or "Unknown" }}</div></div>
+          <div class="row"><div class="key">Line mode</div><div class="val">{{ event.run.line_mode if event.run else "Unknown" }}</div></div>
+          <div class="row"><div class="key">Delivery</div><div class="val">{{ event.run.delivery_state if event.run else "Unknown" }}</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="section-head">
+          <div>
+            <h3>Event metadata</h3>
+            <p class="caption">Detector output and timing values for the selected event.</p>
+          </div>
+        </div>
+        <div class="meta">
+          <div class="row"><div class="key">Occurred</div><div class="val">{{ format_datetime(event.occurred_at_utc) }}</div></div>
+          <div class="row"><div class="key">Video time</div><div class="val">{{ format_float(event.video_time_s, 3) }}s</div></div>
+          <div class="row"><div class="key">Track</div><div class="val">{{ event.track_id or "-" }}</div></div>
+          <div class="row"><div class="key">Class</div><div class="val">{{ event.class_name or "Unknown" }}</div></div>
+          <div class="row"><div class="key">Confidence</div><div class="val">{{ format_float(event.confidence, 2) }}</div></div>
+          <div class="row"><div class="key">Frame index</div><div class="val">{{ event.frame_index or "-" }}</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="detail-rail">
+    <div
+      class="panel detail-decision-panel"
+      data-review-actions
+      data-current-event="{{ event.event_uid }}"
+    >
+      <div class="section-head">
+        <div>
+          <h3>Review</h3>
+          <p class="caption">Apply the manual decision after checking the evidence.</p>
+        </div>
+      </div>
+      <div class="detail-status-row">
+        <span class="pill ink">{{ event.direction or "Unknown" }}</span>
+        <span class="pill {{ review_pill_class(event.review_status) }}">{{ review_label(event.review_status) }}</span>
+        <span class="pill">{% if event.scene_url or event.thumb_url %}image ready{% else %}no image{% endif %}</span>
+      </div>
+      <div class="detail-decision-grid">
+        <button class="btn yes detail-decision-btn" type="button" data-review-submit data-decision="{{ decision_yes }}" data-reload-mode="reload">Qualified YES</button>
+        <button class="btn no detail-decision-btn" type="button" data-review-submit data-decision="{{ decision_no }}" data-reload-mode="reload">Qualified NO</button>
+      </div>
+      <div class="field">
+        <label for="event-detail-notes" style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Notes</label>
+        <textarea id="event-detail-notes" data-review-notes placeholder="Reason for YES/NO.">{{ event.review.notes if event.review else "" }}</textarea>
+      </div>
+      <div class="timeline">
+        {% for item in event.timeline %}
+        <div class="tl-item">
+          <div class="t">{{ item.time }}</div>
+          <div class="d">{{ item.description }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </aside>
+</section>
+{% endblock %}

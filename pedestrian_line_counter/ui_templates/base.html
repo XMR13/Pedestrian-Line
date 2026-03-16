@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ page_title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Sora:wght@400;500;600;700;800&display=swap"
+    />
+    <link rel="stylesheet" href="/ui-static/app.css" />
+  </head>
+  <body class="page-{{ page_name|replace('_', '-') }}">
+    <a class="skip-link" href="#main-content">Skip to Main Content</a>
+    <div class="grain"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-visual">
+            <img
+              class="brand-logo"
+              src="/ui-assets/indah-kiat-logo.png"
+              alt="PT Indah Kiat logo"
+              width="406"
+              height="124"
+              loading="eager"
+              decoding="async"
+              fetchpriority="high"
+              onerror="this.closest('.brand-visual').classList.add('logo-missing');"
+            />
+            <div class="brand-fallback" aria-hidden="true">
+              <div class="mark"></div>
+              <span>logo unavailable</span>
+            </div>
+          </div>
+          <div>
+            <h1>Traffic Monitoring MVP</h1>
+            <p class="sub">Edge-first dashboard and review surface</p>
+            <p class="brand-path">served by FastAPI + SQLite</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <a class="{% if page_name == 'dashboard' %}active{% endif %}" href="{{ ui_base_path }}/dashboard">
+            <strong>Dashboard</strong>
+            <span class="pill ink">LIVE</span>
+          </a>
+          <a class="{% if page_name == 'review' %}active{% endif %}" href="{{ ui_base_path }}/review">
+            <strong>Review Queue</strong>
+            <span class="pill">MVP</span>
+          </a>
+          {% if page_name == 'event_detail' and event %}
+          <a class="active" href="{{ ui_base_path }}/events/{{ event.event_uid }}">
+            <strong>Event Detail</strong>
+            <span class="pill brand">active</span>
+          </a>
+          {% else %}
+          <a href="{{ ui_base_path }}/review">
+            <strong>Event Detail</strong>
+            <span class="pill">open</span>
+          </a>
+          {% endif %}
+          {% if runtime.ui_auth_cfg.enabled() %}
+          <a class="nav-logout" href="{{ ui_base_path }}/login" id="ui-logout-link">
+            <strong>Log Out</strong>
+            <span class="pill no">exit</span>
+          </a>
+          {% endif %}
+        </nav>
+
+        <section class="panel sidebar-note">
+          <h3>Runtime</h3>
+          <p class="caption">Live edge state from the local service and spool.</p>
+          <div class="meta">
+            <div class="row"><div class="key">Spool</div><div class="val">{{ runtime.spool_dir }}</div></div>
+            <div class="row"><div class="key">Retention</div><div class="val">{{ "On" if runtime.retention_cfg.enabled else "Off" }}</div></div>
+            <div class="row"><div class="key">Mutation auth</div><div class="val">{{ "On" if runtime.mutation_auth_cfg.enabled() else "Off" }}</div></div>
+          </div>
+        </section>
+
+        {% block sidebar_extra %}{% endblock %}
+      </aside>
+
+      <main class="content" id="main-content">
+        <div class="topbar">
+          <div class="title">
+            <h2>{{ page_title }}</h2>
+            <p>{{ page_subtitle }}</p>
+          </div>
+          {% block topbar_filters %}{% endblock %}
+        </div>
+
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+
+    {% block scripts %}{% endblock %}
+    <script src="/ui-static/app.js" defer></script>
+  </body>
+</html>
