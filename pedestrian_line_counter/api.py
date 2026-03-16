@@ -4,12 +4,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import secrets
 from typing import Any, Dict, List, Mapping, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from .config import ROOT_DIR
+from .config import ROOT_DIR, SpoolRetentionConfig
 from .event_uploader import (
     DeliveryApiClient,
     UploaderConfig,
@@ -17,9 +18,11 @@ from .event_uploader import (
     process_pending_runs,
     process_single_run,
 )
+from .spool_retention import apply_retention_policy
 
 
 DEFAULT_STATE_FILENAME = ".portal_upload_state.json"
+DEFAULT_MUTATION_API_KEY_HEADER = "X-API-Key"
 MAX_RUNS_LIMIT = 200
 MAX_EVENTS_LIMIT = 500
 
@@ -35,10 +38,28 @@ class SingleRunSyncRequest(BaseModel):
     dry_run: bool = False
 
 
+class RetentionRequest(BaseModel):
+    dry_run: bool = True
+    max_age_days: Optional[int] = Field(default=None, ge=0)
+    state_filename: Optional[str] = None
+    protect_incomplete_runs: Optional[bool] = None
+
+
+@dataclass
+class MutationAuthConfig:
+    api_key: str = ""
+    header_name: str = DEFAULT_MUTATION_API_KEY_HEADER
+
+    def enabled(self) -> bool:
+        return bool(str(self.api_key).strip())
+
+
 @dataclass
 class EdgeApiRuntime:
     spool_dir: Path
     uploader_cfg: Optional[UploaderConfig] = None
+    retention_cfg: SpoolRetentionConfig = field(default_factory=SpoolRetentionConfig)
+    mutation_auth_cfg: MutationAuthConfig = field(default_factory=MutationAuthConfig)
     service_started_at_utc: str = field(default_factory=lambda: _utcnow_iso())
 
     def health_payload(self) -> Dict[str, Any]:
@@ -48,6 +69,8 @@ class EdgeApiRuntime:
             "spool_dir": str(self.spool_dir),
             "spool_exists": self.spool_dir.exists(),
             "uploader_enabled": self.uploader_cfg is not None,
+            "retention_enabled": bool(self.retention_cfg.enabled),
+            "mutation_auth_enabled": self.mutation_auth_cfg.enabled(),
         }
 
     def status_payload(self) -> Dict[str, Any]:
@@ -59,6 +82,8 @@ class EdgeApiRuntime:
             "spool_dir": str(self.spool_dir),
             "spool_exists": self.spool_dir.exists(),
             "uploader_enabled": self.uploader_cfg is not None,
+            "retention_enabled": bool(self.retention_cfg.enabled),
+            "mutation_auth_enabled": self.mutation_auth_cfg.enabled(),
             "runs_total": counts["runs_total"],
             "delivery_state_counts": {
                 "completed": counts["completed"],
@@ -69,6 +94,142 @@ class EdgeApiRuntime:
             },
             "latest_run": runs[0] if runs else None,
         }
+
+    def metrics_payload(self) -> Dict[str, Any]:
+        delivery_counts = self._collect_delivery_counts()
+        lifecycle_status_counts: Dict[str, int] = {}
+        totals = {
+            "events_total": 0,
+            "frames_total": 0,
+            "frames_processed": 0,
+            "events_emitted_total": 0,
+            "count_a_to_b_total": 0,
+            "count_b_to_a_total": 0,
+        }
+        latest_run: Optional[Dict[str, Any]] = None
+        latest_key: tuple[str, str] = ("", "")
+
+        for run_dir in iter_spool_runs(self.spool_dir):
+            run_meta = _load_json_dict(run_dir / "run.json")
+            if run_meta is None:
+                continue
+            status_meta = _load_json_dict(run_dir / "status.json")
+            state_meta = _load_json_dict(run_dir / self._state_filename())
+            summary = _build_run_summary(run_dir, run_meta, status_meta, state_meta)
+            totals["events_total"] += len(_iter_jsonl_records(run_dir / "events.jsonl"))
+            for key in (
+                "frames_total",
+                "frames_processed",
+                "events_emitted_total",
+                "count_a_to_b",
+                "count_b_to_a",
+            ):
+                value = _mapping_get_int(summary, key)
+                if value is not None:
+                    totals[f"{key}_total" if key.startswith("count_") else key] += value
+
+            lifecycle_status = _text(summary.get("lifecycle_status"))
+            if lifecycle_status is not None:
+                lifecycle_status_counts[lifecycle_status] = lifecycle_status_counts.get(lifecycle_status, 0) + 1
+
+            summary_key = _run_sort_key(summary)
+            if summary_key >= latest_key:
+                latest_key = summary_key
+                latest_run = {
+                    "run_uid": summary.get("run_uid"),
+                    "updated_at_utc": summary.get("updated_at_utc"),
+                    "lifecycle_status": summary.get("lifecycle_status"),
+                    "effective_fps": summary.get("effective_fps"),
+                    "processed_fps": summary.get("processed_fps"),
+                    "count_a_to_b": summary.get("count_a_to_b"),
+                    "count_b_to_a": summary.get("count_b_to_a"),
+                    "events_emitted_total": summary.get("events_emitted_total"),
+                }
+
+        return {
+            "ok": True,
+            "service_started_at_utc": self.service_started_at_utc,
+            "spool_dir": str(self.spool_dir),
+            "spool_exists": self.spool_dir.exists(),
+            "uploader_enabled": self.uploader_cfg is not None,
+            "retention_enabled": bool(self.retention_cfg.enabled),
+            "mutation_auth_enabled": self.mutation_auth_cfg.enabled(),
+            "runs_total": delivery_counts["runs_total"],
+            "events_total": totals["events_total"],
+            "frames_total": totals["frames_total"],
+            "frames_processed": totals["frames_processed"],
+            "events_emitted_total": totals["events_emitted_total"],
+            "count_a_to_b_total": totals["count_a_to_b_total"],
+            "count_b_to_a_total": totals["count_b_to_a_total"],
+            "delivery_state_counts": {
+                "completed": delivery_counts["completed"],
+                "pending": delivery_counts["pending"],
+                "failed": delivery_counts["failed"],
+                "in_progress": delivery_counts["in_progress"],
+                "unknown": delivery_counts["unknown"],
+            },
+            "lifecycle_status_counts": lifecycle_status_counts,
+            "latest_run": latest_run,
+        }
+
+    def config_payload(self) -> Dict[str, Any]:
+        uploader_payload: Dict[str, Any] = {
+            "enabled": self.uploader_cfg is not None,
+        }
+        if self.uploader_cfg is not None:
+            uploader_payload.update(
+                {
+                    "api_base_url": self.uploader_cfg.api_base_url,
+                    "timeout_s": float(self.uploader_cfg.timeout_s),
+                    "events_batch_size": int(self.uploader_cfg.events_batch_size),
+                    "state_filename": str(self.uploader_cfg.state_filename),
+                    "upload_thumbnails": bool(self.uploader_cfg.upload_thumbnails),
+                    "upload_scene_thumbnails": bool(self.uploader_cfg.upload_scene_thumbnails),
+                    "api_key_configured": bool(str(self.uploader_cfg.api_key).strip()),
+                    "retry": {
+                        "max_attempts": int(self.uploader_cfg.retry.max_attempts),
+                        "initial_delay_s": float(self.uploader_cfg.retry.initial_delay_s),
+                        "max_delay_s": float(self.uploader_cfg.retry.max_delay_s),
+                        "backoff_factor": float(self.uploader_cfg.retry.backoff_factor),
+                    },
+                }
+            )
+
+        return {
+            "ok": True,
+            "service_started_at_utc": self.service_started_at_utc,
+            "spool_dir": str(self.spool_dir),
+            "spool_exists": self.spool_dir.exists(),
+            "uploader": uploader_payload,
+            "mutation_auth": {
+                "enabled": self.mutation_auth_cfg.enabled(),
+                "header_name": str(self.mutation_auth_cfg.header_name or DEFAULT_MUTATION_API_KEY_HEADER),
+            },
+            "retention": {
+                "enabled": bool(self.retention_cfg.enabled),
+                "max_age_days": int(self.retention_cfg.max_age_days),
+                "protect_incomplete_runs": bool(self.retention_cfg.protect_incomplete_runs),
+                "state_filename": str(self.retention_cfg.state_filename),
+            },
+        }
+
+    def retention_preview_payload(self) -> Dict[str, Any]:
+        return self._retention_payload(dry_run=True)
+
+    def run_retention(
+        self,
+        *,
+        dry_run: bool = True,
+        max_age_days: Optional[int] = None,
+        state_filename: Optional[str] = None,
+        protect_incomplete_runs: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        return self._retention_payload(
+            dry_run=bool(dry_run),
+            max_age_days=max_age_days,
+            state_filename=state_filename,
+            protect_incomplete_runs=protect_incomplete_runs,
+        )
 
     def list_recent_runs(self, *, limit: int = 20) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
@@ -189,7 +350,34 @@ class EdgeApiRuntime:
     def _state_filename(self) -> str:
         if self.uploader_cfg is not None and str(self.uploader_cfg.state_filename).strip():
             return str(self.uploader_cfg.state_filename).strip()
+        if str(self.retention_cfg.state_filename).strip():
+            return str(self.retention_cfg.state_filename).strip()
         return DEFAULT_STATE_FILENAME
+
+    def _retention_payload(
+        self,
+        *,
+        dry_run: bool,
+        max_age_days: Optional[int] = None,
+        state_filename: Optional[str] = None,
+        protect_incomplete_runs: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        resolved_state_filename = _coalesce_text(state_filename, self.retention_cfg.state_filename, DEFAULT_STATE_FILENAME)
+        if resolved_state_filename is None:
+            resolved_state_filename = DEFAULT_STATE_FILENAME
+
+        summary = apply_retention_policy(
+            self.spool_dir,
+            max_age_days=int(max_age_days if max_age_days is not None else self.retention_cfg.max_age_days),
+            state_filename=resolved_state_filename,
+            protect_incomplete_runs=(
+                bool(protect_incomplete_runs)
+                if protect_incomplete_runs is not None
+                else bool(self.retention_cfg.protect_incomplete_runs)
+            ),
+            dry_run=bool(dry_run),
+        )
+        return _serialize_retention_summary(summary)
 
     def _collect_delivery_counts(self) -> Dict[str, int]:
         counts = {
@@ -216,10 +404,17 @@ def create_app(
     *,
     spool_dir: Path,
     uploader_cfg: Optional[UploaderConfig] = None,
+    retention_cfg: Optional[SpoolRetentionConfig] = None,
+    mutation_auth_cfg: Optional[MutationAuthConfig] = None,
     title: str = "Pedestrian Line Edge Service",
 ) -> FastAPI:
     app = FastAPI(title=title, version="0.1.0")
-    app.state.runtime = EdgeApiRuntime(spool_dir=Path(spool_dir), uploader_cfg=uploader_cfg)
+    app.state.runtime = EdgeApiRuntime(
+        spool_dir=Path(spool_dir),
+        uploader_cfg=uploader_cfg,
+        retention_cfg=retention_cfg if retention_cfg is not None else SpoolRetentionConfig(),
+        mutation_auth_cfg=mutation_auth_cfg if mutation_auth_cfg is not None else MutationAuthConfig(),
+    )
 
     router = APIRouter()
 
@@ -230,6 +425,14 @@ def create_app(
     @router.get("/status", tags=["health"])
     def status_view(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
         return runtime.status_payload()
+
+    @router.get("/metrics", tags=["health"])
+    def metrics_view(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
+        return runtime.metrics_payload()
+
+    @router.get("/config", tags=["admin"])
+    def config_view(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
+        return runtime.config_payload()
 
     @router.get("/runs/recent", tags=["runs"])
     def recent_runs(
@@ -257,10 +460,28 @@ def create_app(
             "run_uid": run_uid,
         }
 
+    @router.get("/retention/preview", tags=["admin"])
+    def retention_preview(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
+        return runtime.retention_preview_payload()
+
+    @router.post("/retention/run", tags=["admin"])
+    def retention_run(
+        payload: RetentionRequest,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_mutation_auth),
+    ) -> Dict[str, Any]:
+        return runtime.run_retention(
+            dry_run=bool(payload.dry_run),
+            max_age_days=payload.max_age_days,
+            state_filename=payload.state_filename,
+            protect_incomplete_runs=payload.protect_incomplete_runs,
+        )
+
     @router.post("/sync/retry", tags=["sync"])
     def sync_retry(
         payload: SyncRequest,
         runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_mutation_auth),
     ) -> Dict[str, Any]:
         return runtime.retry_pending_runs(
             force=bool(payload.force),
@@ -273,6 +494,7 @@ def create_app(
         run_uid: str,
         payload: SingleRunSyncRequest,
         runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_mutation_auth),
     ) -> Dict[str, Any]:
         return runtime.retry_single_run(
             run_uid,
@@ -291,17 +513,42 @@ def _get_runtime(request: Request) -> EdgeApiRuntime:
     return runtime
 
 
+def _require_mutation_auth(
+    request: Request,
+    runtime: EdgeApiRuntime = Depends(_get_runtime),
+) -> None:
+    cfg = runtime.mutation_auth_cfg
+    if not cfg.enabled():
+        return
+
+    header_name = _text(cfg.header_name) or DEFAULT_MUTATION_API_KEY_HEADER
+    supplied = (request.headers.get(header_name, "") or "").strip()
+    expected = str(cfg.api_key or "").strip()
+    if not secrets.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid_api_key",
+        )
+
+
 def _load_json_dict(path: Path) -> Optional[Dict[str, Any]]:
+    """Load a json file and return its content
+        into a dictionary. if that saild path does not exist
+        then it will return None    
+     """
     if not path.exists():
         return None
+    
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
     if not isinstance(data, dict):
+        #if the data is not a dict then it will return 
         return None
+    
+    #if all check passed, then return the json loads
     return data
-
 
 def _iter_jsonl_records(path: Path) -> List[Dict[str, Any]]:
     if not path.exists():
@@ -467,20 +714,51 @@ def _clamp_limit(value: int, max_value: int) -> int:
     return max(1, min(int(value), int(max_value)))
 
 
+def _serialize_retention_summary(summary: Any) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "root_dir": str(summary.root_dir),
+        "now_utc": summary.now_utc,
+        "max_age_days": int(summary.max_age_days),
+        "state_filename": str(summary.state_filename),
+        "dry_run": bool(summary.dry_run),
+        "scanned_runs": int(summary.scanned_runs),
+        "deleted_runs": int(summary.deleted_runs),
+        "protected_runs": int(summary.protected_runs),
+        "retained_recent_runs": int(summary.retained_recent_runs),
+        "eligible_runs": int(summary.eligible_runs),
+        "bytes_reclaimable": int(summary.bytes_reclaimable),
+        "bytes_deleted": int(summary.bytes_deleted),
+        "items": [_serialize_retention_run_info(info) for info in summary.runs],
+    }
+
+
+def _serialize_retention_run_info(info: Any) -> Dict[str, Any]:
+    return {
+        "run_uid": info.run_uid,
+        "run_dir": str(info.run_dir),
+        "size_bytes": int(info.size_bytes),
+        "status": str(info.status),
+        "reason": str(info.reason),
+        "ended_at_utc": info.ended_at_utc,
+        "age_days": float(info.age_days) if info.age_days is not None else None,
+        "state_path": str(info.state_path) if info.state_path is not None else None,
+    }
+
+
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _default_spool_dir() -> Path:
-    return ROOT_DIR / "spool"
-
-
-app = create_app(spool_dir=_default_spool_dir())
+app = create_app(spool_dir=ROOT_DIR / "spool")
 
 
 __all__ = [
     "DEFAULT_STATE_FILENAME",
+    "DEFAULT_MUTATION_API_KEY_HEADER",
     "EdgeApiRuntime",
+    "MutationAuthConfig",
+    "RetentionRequest",
     "SingleRunSyncRequest",
     "SyncRequest",
     "app",

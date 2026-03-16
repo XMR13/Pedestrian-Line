@@ -181,6 +181,7 @@ def resolve_api_key(
     *,
     api_key_env: str = "PORTAL_API_KEY",
     appsettings_local_path: Optional[str] = None,
+    section_names: Sequence[str] = ("Delivery", "EdgeDelivery", "Portal"),
 ) -> str:
     """
     Resolve API key with this precedence:
@@ -199,7 +200,7 @@ def resolve_api_key(
             return key
 
     for path in _candidate_local_settings_paths(appsettings_local_path):
-        key = _load_api_key_from_local_settings(path)
+        key = _load_api_key_from_local_settings(path, section_names=section_names)
         if key:
             return key
 
@@ -527,7 +528,7 @@ def _candidate_local_settings_paths(path_arg: Optional[str]) -> List[Path]:
     return uniq
 
 
-def _load_api_key_from_local_settings(path: Path) -> str:
+def _load_api_key_from_local_settings(path: Path, *, section_names: Sequence[str]) -> str:
     if not path.exists():
         return ""
     try:
@@ -537,7 +538,7 @@ def _load_api_key_from_local_settings(path: Path) -> str:
     if not isinstance(obj, dict):
         return ""
 
-    for section_name in ("Delivery", "EdgeDelivery", "Portal"):
+    for section_name in section_names:
         section = obj.get(section_name)
         if not isinstance(section, dict):
             continue
