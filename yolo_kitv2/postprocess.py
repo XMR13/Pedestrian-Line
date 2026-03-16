@@ -52,6 +52,11 @@ class YoloPostprocessor:
 
     def __init__(self, cfg: YoloPostConfig):
         self.cfg = cfg
+        self._class_ids_arr = None
+        self._cached_anchors_box_format: Optional[str] = None
+        self._cached_decoded_box_format: Optional[str] = None
+        if cfg.class_ids is not None:
+            self._class_ids_arr = np.asarray(tuple(int(cid) for cid in cfg.class_ids), dtype=np.int64)
 
     def process(
         self,
@@ -77,8 +82,6 @@ class YoloPostprocessor:
         if boxes_xyxy.size == 0:
             return []
 
-        boxes_xyxy = self._maybe_denormalize_boxes_xyxy(boxes_xyxy, orig_size=orig_size, pad=pad, ratio=ratio)
-
         # Filter by score
         keep = scores >= self.cfg.conf_threshold
         boxes_xyxy, scores, class_ids = boxes_xyxy[keep], scores[keep], class_ids[keep]
@@ -86,11 +89,13 @@ class YoloPostprocessor:
             return []
 
         # Optional class filter
-        if self.cfg.class_ids is not None:
-            mask = np.isin(class_ids, np.array(self.cfg.class_ids))
+        if self._class_ids_arr is not None:
+            mask = np.isin(class_ids, self._class_ids_arr, assume_unique=False)
             boxes_xyxy, scores, class_ids = boxes_xyxy[mask], scores[mask], class_ids[mask]
             if boxes_xyxy.size == 0:
                 return []
+
+        boxes_xyxy = self._maybe_denormalize_boxes_xyxy(boxes_xyxy, orig_size=orig_size, pad=pad, ratio=ratio)
 
         # NMS (optional) / Top-K
         if self.cfg.apply_nms:
@@ -191,46 +196,18 @@ class YoloPostprocessor:
         input_size: Optional[Tuple[float, float]],
     ) -> np.ndarray:
         fmt = self.cfg.anchors_box_format
+        if fmt == "auto":
+            fmt = self._cached_anchors_box_format or self._resolve_auto_box_format(
+                boxes_xywh_raw,
+                input_size=input_size,
+            )
+            self._cached_anchors_box_format = fmt
+
         if fmt == "xyxy":
             return np.array(boxes_xywh_raw, copy=True)
         if fmt == "x1y1wh":
             return self._xywh_topleft_to_xyxy(boxes_xywh_raw)
-        if fmt == "cxcywh":
-            return self._xywh_center_to_xyxy(boxes_xywh_raw)
-
-        # auto
-        raw = boxes_xywh_raw
-        # Detect normalized scale vs pixel scale for scoring.
-        max_val = float(np.nanmax(raw)) if raw.size else 0.0
-        min_val = float(np.nanmin(raw)) if raw.size else 0.0
-        is_normalized = (-1.0 <= min_val and max_val <= 2.0)
-
-        if is_normalized:
-            w = 1.0
-            h = 1.0
-        elif input_size is not None:
-            w = float(input_size[0])
-            h = float(input_size[1])
-        else:
-            # Fallback: infer rough scale from the raw tensor itself.
-            w = max(1.0, max_val)
-            h = max(1.0, max_val)
-
-        # Candidate: already xyxy?
-        cand_xyxy = np.array(raw, copy=True)
-        cand_center = self._xywh_center_to_xyxy(raw)
-        cand_topleft = self._xywh_topleft_to_xyxy(raw)
-
-        score_xyxy = self._boxes_validity_score(cand_xyxy, w=w, h=h)
-        score_center = self._boxes_validity_score(cand_center, w=w, h=h)
-        score_topleft = self._boxes_validity_score(cand_topleft, w=w, h=h)
-
-        best = max(score_xyxy, score_center, score_topleft)
-        if best == score_topleft and score_topleft > score_center:
-            return cand_topleft
-        if best == score_xyxy and score_xyxy > score_center:
-            return cand_xyxy
-        return cand_center
+        return self._xywh_center_to_xyxy(boxes_xywh_raw)
 
     def _decode_decoded_boxes_to_xyxy(
         self,
@@ -239,15 +216,25 @@ class YoloPostprocessor:
         input_size: Optional[Tuple[float, float]],
     ) -> np.ndarray:
         fmt = self.cfg.decoded_box_format
+        if fmt == "auto":
+            fmt = self._cached_decoded_box_format or self._resolve_auto_box_format(
+                boxes_raw,
+                input_size=input_size,
+            )
+            self._cached_decoded_box_format = fmt
+
         if fmt == "xyxy":
             return np.array(boxes_raw, copy=True)
         if fmt == "x1y1wh":
             return self._xywh_topleft_to_xyxy(boxes_raw)
-        if fmt == "cxcywh":
-            return self._xywh_center_to_xyxy(boxes_raw)
+        return self._xywh_center_to_xyxy(boxes_raw)
 
-        # auto
-        raw = boxes_raw
+    def _resolve_auto_box_format(
+        self,
+        raw: np.ndarray,
+        *,
+        input_size: Optional[Tuple[float, float]],
+    ) -> Literal["cxcywh", "x1y1wh", "xyxy"]:
         max_val = float(np.nanmax(raw)) if raw.size else 0.0
         min_val = float(np.nanmin(raw)) if raw.size else 0.0
         is_normalized = (-1.0 <= min_val and max_val <= 2.0)
@@ -272,10 +259,10 @@ class YoloPostprocessor:
 
         best = max(score_xyxy, score_center, score_topleft)
         if best == score_topleft and score_topleft > score_center:
-            return cand_topleft
+            return "x1y1wh"
         if best == score_xyxy and score_xyxy > score_center:
-            return cand_xyxy
-        return cand_center
+            return "xyxy"
+        return "cxcywh"
 
     def _maybe_denormalize_boxes_xyxy(
         self,

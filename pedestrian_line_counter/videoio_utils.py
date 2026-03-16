@@ -48,10 +48,10 @@ def build_jetson_rtsp_gstreamer_pipeline(
     )
 
 def build_jetson_file_gstreamer_pipeline(
-        video_path: Union[str, Path],
-        *,
-        appsink_drop: bool = False,
-        appsink_max_buffers: int = 4,
+    video_path: Union[str, Path],
+    *,
+    appsink_drop: bool = False,
+    appsink_max_buffers: int = 4,
 ) -> str:
     """
     Build a Jetson local-file Gstreamer pipeline for OpenCV CAP_GSTREAMER.
@@ -61,11 +61,11 @@ def build_jetson_file_gstreamer_pipeline(
     decode plugins when available, while python keeps a fallback path if it fails.
     """
 
-    video_uri = Path(video_path).expanduser().resolve().as_url()
+    video_uri = Path(video_path).expanduser().resolve().as_uri()
     sink_drop = "true" if appsink_drop else "false"
     max_buf = max(int(appsink_max_buffers), 1)
     return (
-        f'uricodebin uri"={video_uri}"  ! queue ! nvvidconv ! '
+        f'uridecodebin uri="{video_uri}" ! queue ! nvvidconv ! '
         "video/x-raw,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! "
         f"appsink sync=false max-buffers={max_buf} drop={sink_drop}"
     )

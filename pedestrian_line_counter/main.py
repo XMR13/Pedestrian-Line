@@ -1800,13 +1800,14 @@ def main() -> None:
         (not is_live)
         and bool(args.fast_skip)
         and int(args.frame_stride) > 1
-        and bool(args.write_processed_only)
+        and (bool(args.write_processed_only) or bool(args.no_write))
         and (not args.show)
     )
     if args.fast_skip and not fast_skip_enabled:
         print(
             "[main] fast-skip requested but not enabled. "
-            "Requirements: file input (no --rtsp-url), --frame-stride > 1, --write-processed-only, and no --show."
+            "Requirements: file input (no --rtsp-url), --frame-stride > 1, "
+            "--write-processed-only or --no-write, and no --show."
         )
     if fast_skip_enabled:
         print("[main] fast-skip: enabled (using VideoCapture.grab() for skipped frames)")

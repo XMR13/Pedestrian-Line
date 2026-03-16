@@ -143,6 +143,8 @@ class TensorRTRunner:
         self._outputs: List[_Binding] = []
         self._output_by_name: Dict[str, _Binding] = {}
         self._host_outputs: Dict[str, np.ndarray] = {}
+        self._input_host_buffer: Optional[np.ndarray] = None
+        self._registered_host_ptrs: set[int] = set()
 
         self._use_v3 = hasattr(self._context, "execute_async_v3") and hasattr(self._context, "set_tensor_address")
         self._bindings_meta = self._get_bindings_meta()
@@ -156,6 +158,12 @@ class TensorRTRunner:
         self.primary_output_name = _select_default_primary_output_name(self._outputs)
         self.input_hw = self._infer_input_hw(self._inputs[0].shape if self._inputs else ())
         self.input_dtype = self._inputs[0].dtype if self._inputs else np.dtype(np.float32)
+        if self._inputs:
+            self._input_host_buffer = np.empty(self._inputs[0].shape, dtype=self._inputs[0].dtype)
+            self._try_register_host_buffer(self._input_host_buffer)
+        if self._use_v3:
+            for binding in self._bindings:
+                self._context.set_tensor_address(binding.name, int(binding.device_ptr))
 
     def _get_bindings_meta(self) -> Sequence[Tuple[int, str]]:
         """
@@ -313,7 +321,9 @@ class TensorRTRunner:
             else:
                 self._outputs.append(binding)
                 self._output_by_name[binding.name] = binding
-                self._host_outputs[binding.name] = np.empty(binding.shape, dtype=binding.dtype)
+                host_output = np.empty(binding.shape, dtype=binding.dtype)
+                self._host_outputs[binding.name] = host_output
+                self._try_register_host_buffer(host_output)
 
         if not self._inputs:
             raise RuntimeError("TensorRT engine has no inputs")
@@ -396,17 +406,19 @@ class TensorRTRunner:
         if not isinstance(input_array, np.ndarray):
             raise TypeError("input_array must be a numpy array")
         inp = self._inputs[0]
-        if input_array.dtype != inp.dtype:
-            # Common case: preprocessing generates float32 but FP16 engines expect float16.
-            try:
-                input_array = input_array.astype(inp.dtype, copy=False)
-            except Exception as exc:
-                raise TypeError(f"Expected {inp.dtype} input, got {input_array.dtype}") from exc
-        if not input_array.flags["C_CONTIGUOUS"]:
-            input_array = np.ascontiguousarray(input_array)
-
         if tuple(int(x) for x in input_array.shape) != inp.shape:
             raise ValueError(f"Input shape mismatch: got {input_array.shape}, expected {inp.shape}")
+
+        host_input = input_array
+        if input_array.dtype != inp.dtype or not input_array.flags["C_CONTIGUOUS"]:
+            if self._input_host_buffer is None:
+                self._input_host_buffer = np.empty(inp.shape, dtype=inp.dtype)
+                self._try_register_host_buffer(self._input_host_buffer)
+            try:
+                np.copyto(self._input_host_buffer, input_array, casting="unsafe")
+            except Exception as exc:
+                raise TypeError(f"Expected {inp.dtype} input, got {input_array.dtype}") from exc
+            host_input = self._input_host_buffer
 
         cudart = self._cudart
         stream = self._stream
@@ -415,7 +427,7 @@ class TensorRTRunner:
             cudart,
             cudart.cudaMemcpyAsync(
                 inp.device_ptr,
-                int(input_array.ctypes.data),
+                int(host_input.ctypes.data),
                 int(inp.nbytes),
                 cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
                 stream,
@@ -423,8 +435,6 @@ class TensorRTRunner:
         )
 
         if self._use_v3:
-            for binding in self._bindings:
-                self._context.set_tensor_address(binding.name, int(binding.device_ptr))
             ok = bool(self._context.execute_async_v3(stream))
         elif hasattr(self._context, "execute_async_v2"):
             assert self._bindings_ptrs is not None
@@ -438,8 +448,42 @@ class TensorRTRunner:
         if not ok:
             raise RuntimeError("TensorRT execution failed")
 
+    def _try_register_host_buffer(self, host_array: Optional[np.ndarray]) -> None:
+        if host_array is None:
+            return
+        ptr = int(host_array.ctypes.data)
+        if ptr == 0 or int(host_array.nbytes) <= 0 or ptr in self._registered_host_ptrs:
+            return
+        cudart = self._cudart
+        if not hasattr(cudart, "cudaHostRegister"):
+            return
+        try:
+            _cuda_call(cudart, cudart.cudaHostRegister(ptr, int(host_array.nbytes), 0))
+        except Exception:
+            return
+        self._registered_host_ptrs.add(ptr)
+
+    def _try_unregister_host_buffer(self, host_array: Optional[np.ndarray]) -> None:
+        if host_array is None:
+            return
+        ptr = int(host_array.ctypes.data)
+        if ptr == 0 or ptr not in self._registered_host_ptrs:
+            return
+        cudart = self._cudart
+        if not hasattr(cudart, "cudaHostUnregister"):
+            self._registered_host_ptrs.discard(ptr)
+            return
+        try:
+            _cuda_call(cudart, cudart.cudaHostUnregister(ptr))
+        except Exception:
+            pass
+        self._registered_host_ptrs.discard(ptr)
+
     def close(self) -> None:
         cudart = self._cudart
+        self._try_unregister_host_buffer(self._input_host_buffer)
+        for host_output in self._host_outputs.values():
+            self._try_unregister_host_buffer(host_output)
         try:
             if self._stream:
                 _cuda_call(cudart, cudart.cudaStreamDestroy(self._stream))

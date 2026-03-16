@@ -182,11 +182,6 @@ class Detector:
             score = float(d.score)
             class_id = None if getattr(d, "class_id", None) is None else int(d.class_id)
 
-            if score < self.config.confidence_threshold:
-                continue
-            if class_id is not None and self.config.track_class_ids and class_id not in self.config.track_class_ids:
-                continue
-
             box_area = (x2 - x1) * (y2 - y1)
             if box_area < min_area:
                 continue

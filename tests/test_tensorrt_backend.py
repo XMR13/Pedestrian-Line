@@ -9,7 +9,7 @@ import pytest
 
 from pedestrian_line_counter.config import ModelConfig
 from pedestrian_line_counter.detector import Detector
-from pedestrian_line_counter.tensorrt_runner import _Binding, _select_default_primary_output_name, _try_import_cudart
+from pedestrian_line_counter.tensorrt_runner import TensorRTRunner, _Binding, _select_default_primary_output_name, _try_import_cudart
 
 
 def test_tensorrt_backend_reports_missing_deps(monkeypatch, tmp_path: Path) -> None:
@@ -134,3 +134,98 @@ def test_try_import_cudart_falls_back_to_legacy_cuda_python_import(monkeypatch) 
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     assert _try_import_cudart() is legacy_cudart
+
+
+def test_tensorrt_execute_reuses_host_input_buffer_for_dtype_conversion() -> None:
+    success = object()
+
+    class _FakeCudaMemcpyKind:
+        cudaMemcpyHostToDevice = "h2d"
+
+    class _FakeCudart:
+        cudaError_t = types.SimpleNamespace(cudaSuccess=success)
+        cudaMemcpyKind = _FakeCudaMemcpyKind
+
+        @staticmethod
+        def cudaMemcpyAsync(dst, src, nbytes, kind, stream):
+            _ = dst
+            _ = src
+            _ = nbytes
+            _ = kind
+            _ = stream
+            return (success,)
+
+    class _FakeContext:
+        def execute_async_v2(self, _bindings_ptrs, _stream):
+            return True
+
+    runner = object.__new__(TensorRTRunner)
+    runner._inputs = [
+        _Binding(
+            name="images",
+            index=0,
+            is_input=True,
+            dtype=np.dtype(np.float16),
+            shape=(1, 3, 2, 2),
+            nbytes=int(np.dtype(np.float16).itemsize * 12),
+            device_ptr=123,
+        )
+    ]
+    runner._cudart = _FakeCudart()
+    runner._stream = 7
+    runner._use_v3 = False
+    runner._bindings_ptrs = [123]
+    runner._context = _FakeContext()
+    runner._input_host_buffer = None
+    runner._registered_host_ptrs = set()
+
+    blob = np.ones((1, 3, 2, 2), dtype=np.float32)
+
+    runner._execute(blob)
+    first_buffer = runner._input_host_buffer
+    runner._execute(blob * 2.0)
+
+    assert first_buffer is runner._input_host_buffer
+    assert runner._input_host_buffer.dtype == np.float16
+    assert np.allclose(runner._input_host_buffer, np.full((1, 3, 2, 2), 2.0, dtype=np.float16))
+
+
+def test_tensorrt_host_buffer_registration_is_best_effort() -> None:
+    success = object()
+    calls = []
+
+    class _FakeCudart:
+        cudaError_t = types.SimpleNamespace(cudaSuccess=success)
+
+        @staticmethod
+        def cudaHostRegister(ptr, nbytes, flags):
+            calls.append(("register", ptr, nbytes, flags))
+            return (success,)
+
+        @staticmethod
+        def cudaHostUnregister(ptr):
+            calls.append(("unregister", ptr))
+            return (success,)
+
+    runner = object.__new__(TensorRTRunner)
+    runner._cudart = _FakeCudart()
+    runner._registered_host_ptrs = set()
+
+    arr = np.empty((1, 3, 2, 2), dtype=np.float16)
+    runner._try_register_host_buffer(arr)
+    runner._try_register_host_buffer(arr)
+    runner._try_unregister_host_buffer(arr)
+
+    assert len([c for c in calls if c[0] == "register"]) == 1
+    assert len([c for c in calls if c[0] == "unregister"]) == 1
+
+
+def test_tensorrt_host_buffer_registration_falls_back_when_unsupported() -> None:
+    runner = object.__new__(TensorRTRunner)
+    runner._cudart = types.SimpleNamespace()
+    runner._registered_host_ptrs = set()
+
+    arr = np.empty((1, 3, 2, 2), dtype=np.float16)
+    runner._try_register_host_buffer(arr)
+
+    assert runner._registered_host_ptrs == set()

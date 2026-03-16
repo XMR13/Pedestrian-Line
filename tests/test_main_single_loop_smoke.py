@@ -16,6 +16,8 @@ from pedestrian_line_counter.stream_reader import ReaderPoll
 class _FakeCap:
     def __init__(self) -> None:
         self.released = False
+        self.grab_calls = 0
+        self.read_calls = 0
 
     def isOpened(self) -> bool:
         return True
@@ -24,6 +26,15 @@ class _FakeCap:
         return 30.0
 
     def set(self, _prop: int, _value: float) -> bool:
+        return True
+
+    def read(self):
+        self.read_calls += 1
+        frame = np.zeros((16, 16, 3), dtype=np.uint8)
+        return True, frame
+
+    def grab(self) -> bool:
+        self.grab_calls += 1
         return True
 
     def release(self) -> None:
@@ -292,3 +303,41 @@ def test_main_releases_writer_with_interrupt_flag_after_ctrl_c(monkeypatch, tmp_
     )
 
     assert fake_writer.interrupted_arg is True
+
+
+def test_file_fast_skip_is_enabled_with_no_write(monkeypatch, tmp_path, capsys) -> None:
+    fake_cap = _FakeCap()
+    frame0 = np.zeros((16, 16, 3), dtype=np.uint8)
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+
+    def _open_impl(source, **_kwargs):
+        _ = source
+        return fake_cap, frame0, 30.0, 16, 16, "FAKE"
+
+    monkeypatch.setattr(main_module, "_open_source_with_first_frame", _open_impl)
+    monkeypatch.setattr(main_module, "Detector", _FakeDetector)
+    monkeypatch.setattr(main_module, "Tracker", _FakeTracker)
+    monkeypatch.setattr(main_module, "LineCounter", _FakeLineCounter)
+
+    _run_main(
+        monkeypatch,
+        [
+            "--backend",
+            "motion",
+            "--input",
+            str(input_path),
+            "--frame-stride",
+            "2",
+            "--fast-skip",
+            "--no-write",
+            "--no-draw",
+            "--no-progress",
+            "--max-frames",
+            "3",
+        ],
+    )
+
+    out = capsys.readouterr().out
+    assert "fast-skip: enabled" in out
+    assert fake_cap.grab_calls == 1
