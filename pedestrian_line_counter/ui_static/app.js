@@ -198,13 +198,68 @@
       return;
     }
 
-    const navigateToRow = (row) => {
+    const selectionInput = document.querySelector("[data-queue-selection-input]");
+    const positionPill = document.querySelector("[data-queue-position-pill]");
+    const positionValue = document.querySelector("[data-queue-position-value]");
+    const footerSelection = document.querySelector("[data-queue-footer-selection]");
+    const selectedLabel = document.querySelector("[data-queue-selected-label]");
+    const selectedDetailLinks = Array.from(
+      document.querySelectorAll("[data-queue-selected-detail], [data-queue-footer-detail]"),
+    ).filter((node) => node instanceof HTMLAnchorElement);
+
+    const updateSelectionUi = (row) => {
       if (!(row instanceof HTMLElement)) {
         return;
       }
+      rows.forEach((candidate, index) => {
+        const active = candidate === row;
+        candidate.classList.toggle("queue-row-active", active);
+        candidate.setAttribute("aria-current", active ? "true" : "false");
+        const sessionLink = candidate.querySelector(".queue-session-link");
+        if (sessionLink instanceof HTMLElement) {
+          sessionLink.classList.toggle("active", active);
+        }
+        if (active) {
+          const positionText = `${index + 1} / ${rows.length}`;
+          if (selectionInput instanceof HTMLInputElement) {
+            selectionInput.value = positionText;
+          }
+          if (positionPill instanceof HTMLElement) {
+            positionPill.textContent = `item ${positionText}`;
+          }
+          if (positionValue instanceof HTMLElement) {
+            positionValue.textContent = positionText;
+          }
+          if (footerSelection instanceof HTMLElement) {
+            footerSelection.textContent = `Selected ${positionText}`;
+          }
+        }
+      });
+
+      const shortEvent = row.dataset.eventShort || row.dataset.eventUid || "No selection";
+      if (selectedLabel instanceof HTMLElement) {
+        selectedLabel.textContent = `Selected: ${shortEvent}`;
+      }
+
+      const detailUrl = row.dataset.detailUrl || "";
+      selectedDetailLinks.forEach((link) => {
+        link.href = detailUrl || "#";
+        link.setAttribute("aria-disabled", detailUrl ? "false" : "true");
+        link.classList.toggle("is-disabled", !detailUrl);
+      });
+    };
+
+    const selectRow = (row, options = {}) => {
+      if (!(row instanceof HTMLElement)) {
+        return;
+      }
+      updateSelectionUi(row);
+      if (options.focus) {
+        row.focus();
+      }
       const targetUrl = row.dataset.selectUrl || "";
-      if (targetUrl) {
-        window.location.assign(targetUrl);
+      if (!options.skipHistory && targetUrl && window.history && typeof window.history.replaceState === "function") {
+        window.history.replaceState({}, "", targetUrl);
       }
     };
 
@@ -223,14 +278,16 @@
       if (!(target instanceof Element)) {
         return;
       }
-      if (target.closest("a, button")) {
+      const actionLink = target.closest(".btn-compact");
+      if (actionLink instanceof HTMLAnchorElement) {
         return;
       }
       const row = target.closest("[data-queue-row]");
       if (!(row instanceof HTMLElement)) {
         return;
       }
-      navigateToRow(row);
+      event.preventDefault();
+      selectRow(row, { focus: false });
     });
 
     browser.addEventListener("keydown", (event) => {
@@ -244,7 +301,7 @@
       if (event.key === " ") {
         event.preventDefault();
         event.stopPropagation();
-        navigateToRow(target);
+        selectRow(target, { focus: true });
       } else if (event.key === "Enter") {
         event.preventDefault();
         event.stopPropagation();
@@ -261,6 +318,8 @@
         active instanceof HTMLTextAreaElement
         || active instanceof HTMLInputElement
         || active instanceof HTMLSelectElement
+        || active instanceof HTMLButtonElement
+        || active instanceof HTMLAnchorElement
       ) {
         return;
       }
@@ -271,15 +330,20 @@
       const key = event.key.toLowerCase();
       if (key === "j" && currentIndex + 1 < rows.length) {
         event.preventDefault();
-        navigateToRow(rows[currentIndex + 1]);
+        selectRow(rows[currentIndex + 1], { focus: true });
       } else if (key === "k" && currentIndex > 0) {
         event.preventDefault();
-        navigateToRow(rows[currentIndex - 1]);
+        selectRow(rows[currentIndex - 1], { focus: true });
       } else if (key === "enter") {
         event.preventDefault();
         openRowDetail(rows[currentIndex]);
       }
     });
+
+    const activeRow = rows.find((row) => row.classList.contains("queue-row-active")) || rows[0];
+    if (activeRow) {
+      selectRow(activeRow, { skipHistory: true });
+    }
   };
 
   initLogout();

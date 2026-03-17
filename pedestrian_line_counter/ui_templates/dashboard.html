@@ -176,7 +176,7 @@
                 <span class="pill">no thumb</span>
                 {% endif %}
               </td>
-              <td>{{ format_datetime(item.occurred_at_utc) }}</td>
+              <td>{{ format_datetime(item.occurred_at_local) }}</td>
               <td>{{ item.direction or "Unknown" }}</td>
               <td>{{ item.class_name or "Unknown" }}</td>
               <td><span class="pill {{ review_pill_class(item.review_status) }}">{{ review_label(item.review_status) }}</span></td>

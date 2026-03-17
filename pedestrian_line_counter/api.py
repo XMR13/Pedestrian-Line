@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import secrets
 from typing import Any, Dict, Iterable, List, Mapping, Optional
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -37,6 +38,8 @@ UI_STATIC_DIR = Path(__file__).resolve().parent / "ui_static"
 UI_ASSET_DIR = ROOT_DIR / "portal" / "mockups" / "assets"
 REVIEW_STATUS_PENDING = "pending"
 REVIEW_STATUS_ALL = "all"
+DEFAULT_REVIEW_PAGE_SIZE = 25
+REVIEW_PAGE_SIZE_OPTIONS = (15, 20, 25)
 
 
 class SyncRequest(BaseModel):
@@ -362,6 +365,8 @@ class EdgeApiRuntime:
         camera_id: Optional[str] = None,
         status_filter: str = REVIEW_STATUS_PENDING,
         current_event_uid: Optional[str] = None,
+        page: int = 1,
+        page_size: int = DEFAULT_REVIEW_PAGE_SIZE,
     ) -> Dict[str, Any]:
         all_items = self._attach_review_data(list(self._iter_all_events(camera_id=camera_id)))
         normalized_status = _normalize_review_filter(status_filter)
@@ -369,11 +374,45 @@ class EdgeApiRuntime:
         if normalized_status != REVIEW_STATUS_ALL:
             queue = [item for item in queue if _text(item.get("review_status")) == normalized_status]
         queue.sort(key=_event_sort_key)
-        queue = queue[: max(1, int(limit))]
         cameras = self.list_cameras()
+        normalized_page_size = _normalize_review_page_size(page_size)
+        target_uid = _text(current_event_uid)
+        total_items = len(queue)
+        total_pages = max(1, (total_items + normalized_page_size - 1) // normalized_page_size)
+        current_page = max(1, int(page))
+
+        target_index = None
+        if target_uid is not None:
+            for idx, item in enumerate(queue):
+                if _text(item.get("event_uid")) == target_uid:
+                    target_index = idx
+                    break
+        if target_index is not None:
+            current_page = (target_index // normalized_page_size) + 1
+
+        current_page = min(current_page, total_pages)
+        start_index = (current_page - 1) * normalized_page_size
+        end_index = start_index + normalized_page_size
+        queue = queue[start_index:end_index]
+
+        for item in queue:
+            event_uid = _text(item.get("event_uid")) or ""
+            item["queue_select_url"] = _ui_review_queue_url(
+                camera_id=camera_id,
+                status=normalized_status,
+                event_uid=event_uid,
+                page=current_page,
+                page_size=normalized_page_size,
+            )
+            item["detail_url"] = _ui_event_detail_url(
+                event_uid,
+                camera_id=camera_id,
+                status=normalized_status,
+                page=current_page,
+                page_size=normalized_page_size,
+            )
 
         current_index = 0
-        target_uid = _text(current_event_uid)
         if target_uid is not None:
             for idx, item in enumerate(queue):
                 if _text(item.get("event_uid")) == target_uid:
@@ -383,22 +422,84 @@ class EdgeApiRuntime:
         current = queue[current_index] if queue else None
         previous_item = queue[current_index - 1] if queue and current_index > 0 else None
         next_item = queue[current_index + 1] if queue and current_index + 1 < len(queue) else None
-        upcoming = queue[current_index + 1 : current_index + 5] if queue else []
         review_counts = self.review_store.summary()
         pending_count = sum(1 for item in all_items if _text(item.get("review_status")) == REVIEW_STATUS_PENDING)
+        page_start = start_index + 1 if total_items > 0 else 0
+        page_end = min(end_index, total_items)
+        page_window_start = max(1, current_page - 2)
+        page_window_end = min(total_pages, current_page + 2)
+        if page_window_end - page_window_start < 4:
+            if page_window_start == 1:
+                page_window_end = min(total_pages, page_window_start + 4)
+            elif page_window_end == total_pages:
+                page_window_start = max(1, total_pages - 4)
+
+        pagination_pages = []
+        for page_number in range(page_window_start, page_window_end + 1):
+            pagination_pages.append(
+                {
+                    "number": page_number,
+                    "url": _ui_review_queue_url(
+                        camera_id=camera_id,
+                        status=normalized_status,
+                        page=page_number,
+                        page_size=normalized_page_size,
+                    ),
+                    "current": page_number == current_page,
+                }
+            )
 
         return {
             "items": queue,
             "current": current,
             "current_index": current_index + 1 if current is not None else 0,
             "selected_event_uid": _text(current.get("event_uid")) if current is not None else None,
-            "queue_total": len(queue),
+            "queue_total": total_items,
+            "page_item_count": len(queue),
             "previous_item": previous_item,
             "next_item": next_item,
-            "upcoming": upcoming,
             "camera_id": _text(camera_id),
             "status_filter": normalized_status,
             "cameras": cameras,
+            "page_size": normalized_page_size,
+            "page_size_options": list(REVIEW_PAGE_SIZE_OPTIONS),
+            "pagination": {
+                "current_page": current_page,
+                "page_size": normalized_page_size,
+                "total_pages": total_pages,
+                "total_items": total_items,
+                "start_item": page_start,
+                "end_item": page_end,
+                "has_previous": current_page > 1,
+                "has_next": current_page < total_pages,
+                "previous_url": _ui_review_queue_url(
+                    camera_id=camera_id,
+                    status=normalized_status,
+                    page=current_page - 1,
+                    page_size=normalized_page_size,
+                ) if current_page > 1 else None,
+                "next_url": _ui_review_queue_url(
+                    camera_id=camera_id,
+                    status=normalized_status,
+                    page=current_page + 1,
+                    page_size=normalized_page_size,
+                ) if current_page < total_pages else None,
+                "show_first": page_window_start > 1,
+                "show_last": page_window_end < total_pages,
+                "first_url": _ui_review_queue_url(
+                    camera_id=camera_id,
+                    status=normalized_status,
+                    page=1,
+                    page_size=normalized_page_size,
+                ),
+                "last_url": _ui_review_queue_url(
+                    camera_id=camera_id,
+                    status=normalized_status,
+                    page=total_pages,
+                    page_size=normalized_page_size,
+                ),
+                "pages": pagination_pages,
+            },
             "counts": {
                 "pending": max(0, pending_count),
                 "qualified_yes": review_counts[DECISION_YES],
@@ -488,7 +589,7 @@ class EdgeApiRuntime:
     def _build_event_timeline(self, event: Mapping[str, Any]) -> List[Dict[str, str]]:
         timeline = [
             {
-                "time": _text(event.get("occurred_at_utc")) or "Unknown",
+                "time": _coalesce_text(event.get("occurred_at_local"), event.get("occurred_at_utc")) or "Unknown",
                 "description": "Crossing event captured and saved to the local spool.",
             }
         ]
@@ -792,6 +893,8 @@ def create_app(
         camera_id: Optional[str] = Query(default=None),
         status_filter: str = Query(default=REVIEW_STATUS_PENDING, alias="status"),
         event_uid: Optional[str] = Query(default=None),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=DEFAULT_REVIEW_PAGE_SIZE, ge=1, le=100),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
         _auth: None = Depends(_require_ui_auth_json),
     ) -> Dict[str, Any]:
@@ -800,6 +903,8 @@ def create_app(
             camera_id=camera_id,
             status_filter=status_filter,
             current_event_uid=event_uid,
+            page=page,
+            page_size=page_size,
         )
 
     @router.post("/events/{event_uid}/review", tags=["review"])
@@ -838,6 +943,8 @@ def create_app(
         camera_id: Optional[str] = Query(default=None),
         status_filter: str = Query(default=REVIEW_STATUS_PENDING, alias="status"),
         event_uid: Optional[str] = Query(default=None),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=DEFAULT_REVIEW_PAGE_SIZE, ge=1, le=100),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
         _auth: None = Depends(_require_ui_auth_page),
     ) -> HTMLResponse:
@@ -846,14 +953,16 @@ def create_app(
             runtime=runtime,
             request=request,
             page_name="review",
-            page_title="Review Queue",
-            page_subtitle="Rapid YES/NO verification backed by local SQLite review state.",
+            page_title="Antrian Review",
+            page_subtitle="Verifikasi APPROVED/REJECT yang menggunakan database lokal (SQLite).",
         )
         context.update(
             runtime.review_queue_payload(
                 camera_id=camera_id,
                 status_filter=status_filter,
                 current_event_uid=event_uid,
+                page=page,
+                page_size=page_size,
             )
         )
         return templates.TemplateResponse(request, "review_queue.html", context)
@@ -862,6 +971,10 @@ def create_app(
     def event_detail_page(
         request: Request,
         event_uid: str,
+        camera_id: Optional[str] = Query(default=None),
+        status_filter: str = Query(default=REVIEW_STATUS_PENDING, alias="status"),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=DEFAULT_REVIEW_PAGE_SIZE, ge=1, le=100),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
         _auth: None = Depends(_require_ui_auth_page),
     ) -> HTMLResponse:
@@ -879,6 +992,19 @@ def create_app(
         )
         context["event"] = item
         context["review_counts"] = runtime.review_store.summary()
+        context["back_to_queue_url"] = _ui_review_queue_url(
+            camera_id=camera_id,
+            status=status_filter,
+            event_uid=event_uid,
+            page=page,
+            page_size=page_size,
+        )
+        context["pending_queue_url"] = _ui_review_queue_url(
+            camera_id=camera_id,
+            status=REVIEW_STATUS_PENDING,
+            page=1,
+            page_size=page_size,
+        )
         return templates.TemplateResponse(request, "event_detail.html", context)
 
     @router.get("/retention/preview", tags=["admin"])
@@ -1101,6 +1227,7 @@ def _build_event_summary(
         "site_id": _coalesce_text(event.get("site_id"), run_meta.get("site_id")),
         "camera_id": _coalesce_text(event.get("camera_id"), run_meta.get("camera_id")),
         "occurred_at_utc": _text(event.get("occurred_at_utc")),
+        "occurred_at_local": _text(event.get("occurred_at_local")),
         "direction": _text(event.get("direction")),
         "track_id": _mapping_get_int(event, "track_id"),
         "class_id": _mapping_get_int(event, "class_id"),
@@ -1248,7 +1375,12 @@ def _build_ui_context(
         "decision_no": DECISION_NO,
         "format_count": _format_count,
         "format_float": _format_float,
+        "format_date": _format_date,
+        "format_time": _format_time,
         "format_datetime": _format_datetime,
+        "display_event_timestamp": _display_event_timestamp,
+        "short_event_uid": _short_event_uid,
+        "compact_path": _compact_path,
         "review_pill_class": _review_pill_class,
         "review_label": _review_label,
         "status_filter_pending": REVIEW_STATUS_PENDING,
@@ -1261,6 +1393,78 @@ def _normalize_review_filter(value: Optional[str]) -> str:
     if normalized in {DECISION_YES, DECISION_NO, REVIEW_STATUS_PENDING, REVIEW_STATUS_ALL}:
         return normalized
     return REVIEW_STATUS_PENDING
+
+
+def _normalize_review_page_size(value: Any) -> int:
+    try:
+        page_size = int(value)
+    except Exception:
+        return DEFAULT_REVIEW_PAGE_SIZE
+    if page_size in REVIEW_PAGE_SIZE_OPTIONS:
+        return page_size
+    return DEFAULT_REVIEW_PAGE_SIZE
+
+
+def _ui_query_string(
+    *,
+    camera_id: Optional[str] = None,
+    status: Optional[str] = None,
+    event_uid: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
+) -> str:
+    params: Dict[str, str] = {}
+    if camera_id:
+        params["camera_id"] = str(camera_id).strip()
+    normalized_status = _normalize_review_filter(status)
+    if normalized_status:
+        params["status"] = normalized_status
+    if event_uid:
+        params["event_uid"] = str(event_uid).strip()
+    if page is not None:
+        params["page"] = str(max(1, int(page)))
+    if page_size is not None:
+        params["page_size"] = str(_normalize_review_page_size(page_size))
+    return urlencode(params)
+
+
+def _ui_review_queue_url(
+    *,
+    camera_id: Optional[str] = None,
+    status: Optional[str] = None,
+    event_uid: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
+) -> str:
+    query = _ui_query_string(
+        camera_id=camera_id,
+        status=status,
+        event_uid=event_uid,
+        page=page,
+        page_size=page_size,
+    )
+    if query:
+        return f"{UI_BASE_PATH}/review?{query}"
+    return f"{UI_BASE_PATH}/review"
+
+
+def _ui_event_detail_url(
+    event_uid: str,
+    *,
+    camera_id: Optional[str] = None,
+    status: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
+) -> str:
+    query = _ui_query_string(
+        camera_id=camera_id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    if query:
+        return f"{UI_BASE_PATH}/events/{event_uid}?{query}"
+    return f"{UI_BASE_PATH}/events/{event_uid}"
 
 
 def _review_label(value: Optional[str]) -> str:
@@ -1315,6 +1519,58 @@ def _format_datetime(value: Any) -> str:
     if "T" in text:
         return text.replace("T", " ").replace("Z", " UTC")
     return text
+
+
+def _display_event_timestamp(row: Any) -> Optional[str]:
+    if not isinstance(row, Mapping):
+        return _text(row)
+    return _coalesce_text(row.get("occurred_at_local"), row.get("occurred_at_utc"))
+
+
+def _format_date(value: Any) -> str:
+    text = _text(value)
+    if text is None:
+        return "Unavailable"
+    if "T" in text:
+        return text.split("T", 1)[0]
+    if " " in text:
+        return text.split(" ", 1)[0]
+    return text
+
+
+def _format_time(value: Any) -> str:
+    text = _text(value)
+    if text is None:
+        return "Unavailable"
+    if "T" in text:
+        time_text = text.split("T", 1)[1]
+    elif " " in text:
+        time_text = text.split(" ", 1)[1]
+    else:
+        return "Unavailable"
+    return time_text.replace("Z", " UTC")
+
+
+def _short_event_uid(value: Any, head: int = 10, tail: int = 8) -> str:
+    text = _text(value)
+    if text is None:
+        return "Unavailable"
+    if len(text) <= int(head) + int(tail) + 3:
+        return text
+    return f"{text[:int(head)]}...{text[-int(tail):]}"
+
+
+def _compact_path(value: Any, parts: int = 2) -> str:
+    text = _text(value)
+    if text is None:
+        return "Unavailable"
+    normalized = text.replace("\\", "/").rstrip("/")
+    if normalized == "":
+        return text
+    path_parts = [part for part in normalized.split("/") if part]
+    if len(path_parts) <= max(1, int(parts)):
+        return text
+    return ".../" + "/".join(path_parts[-max(1, int(parts)):])
 
 
 app = create_app(spool_dir=ROOT_DIR / "spool")

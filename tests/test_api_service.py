@@ -20,6 +20,7 @@ def _write_run(
     run_uid: str,
     started_at_utc: str,
     occurred_at_utc: str,
+    occurred_at_local: str | None = None,
     completed_at_utc: str | None = None,
     last_error: str | None = None,
     lifecycle_status: str = "stopped",
@@ -68,6 +69,7 @@ def _write_run(
                 "site_id": "site_a",
                 "camera_id": "cam_01",
                 "occurred_at_utc": occurred_at_utc,
+                "occurred_at_local": occurred_at_local,
                 "frame_index": 90,
                 "video_time_s": 3.0,
                 "direction": "A_TO_B",
@@ -439,6 +441,7 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
         run_uid="run_ui",
         started_at_utc="2026-03-11T10:00:00Z",
         occurred_at_utc="2026-03-11T10:05:00Z",
+        occurred_at_local="2026-03-11T17:05:00+07:00",
     )
     client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
 
@@ -447,15 +450,19 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     assert "Traffic Monitoring Dashboard" in dashboard.text
     assert "Recent events" in dashboard.text
 
-    review = client.get("/ui/review")
+    review = client.get("/ui/review?camera_id=cam_01&status=pending&page=1&page_size=25")
     assert review.status_code == 200
     assert "Review Queue" in review.text
     assert "run_ui_e1" in review.text
+    assert "17:05:00+07:00" in review.text
+    assert "/ui/events/run_ui_e1?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25" in review.text
 
-    detail = client.get("/ui/events/run_ui_e1")
+    detail = client.get("/ui/events/run_ui_e1?camera_id=cam_01&status=pending&page=1&page_size=25")
     assert detail.status_code == 200
     assert "Event Detail" in detail.text
     assert "run_ui_e1" in detail.text
+    assert "2026-03-11T17:05:00+07:00" in detail.text
+    assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_ui_e1&amp;page=1&amp;page_size=25" in detail.text
 
     css = client.get("/ui-static/app.css")
     assert css.status_code == 200
@@ -464,6 +471,35 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     js = client.get("/ui-static/app.js")
     assert js.status_code == 200
     assert "initReviewActions" in js.text
+
+
+def test_review_queue_paginates_and_preserves_page_state(tmp_path) -> None:
+    for index in range(30):
+        _write_run(
+            tmp_path,
+            day="2026-03-11",
+            run_uid=f"run_page_{index:02d}",
+            started_at_utc=f"2026-03-11T10:{index:02d}:00Z",
+            occurred_at_utc=f"2026-03-11T10:{index:02d}:30Z",
+        )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    queue = client.get("/review/queue", params={"status": "pending", "page": 2, "page_size": 15})
+    assert queue.status_code == 200
+    payload = queue.json()
+    assert payload["queue_total"] == 30
+    assert payload["page_item_count"] == 15
+    assert payload["pagination"]["current_page"] == 2
+    assert payload["pagination"]["total_pages"] == 2
+    assert payload["pagination"]["start_item"] == 16
+    assert payload["pagination"]["end_item"] == 30
+    assert len(payload["items"]) == 15
+    assert payload["items"][0]["detail_url"].endswith("&page=2&page_size=15")
+
+    detail = client.get("/ui/events/run_page_00_e1?camera_id=cam_01&status=pending&page=2&page_size=15")
+    assert detail.status_code == 200
+    assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_page_00_e1&amp;page=2&amp;page_size=15" in detail.text
 
 
 def test_ui_login_gates_pages_and_sets_cookie(tmp_path) -> None:

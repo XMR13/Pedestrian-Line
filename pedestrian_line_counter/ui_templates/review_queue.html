@@ -2,19 +2,19 @@
 
 {% block sidebar_extra %}
 <section class="panel sidebar-note">
-  <h3>Shortcut map</h3>
+  <h3>Prinsip Review</h3>
   <div class="timeline compact">
     <div class="tl-item">
-      <span class="t">Prev / Next</span>
-      <span class="d"><kbd class="kbd">J</kbd> / <kbd class="kbd">K</kbd> navigate between queue targets.</span>
+      <span class="t">Tabel</span>
+      <span class="d">Reviewer bisa mengscan tabel terlebih dahulu, kemudian bisa memilih data untuk di APPROVE/REJECT.</span>
     </div>
     <div class="tl-item">
-      <span class="t">Label</span>
-      <span class="d"><kbd class="kbd">Y</kbd> / <kbd class="kbd">N</kbd> apply the review decision quickly.</span>
+      <span class="t">Keputusan review</span>
+      <span class="d">Data yang Diterima/Ditolak berada di Event Detail.</span>
     </div>
     <div class="tl-item">
-      <span class="t">Open detail</span>
-      <span class="d"><kbd class="kbd">Enter</kbd> jumps into the single-event inspection page.</span>
+      <span class="t">Keyboard flow</span>
+      <span class="d"><kbd class="kbd">J</kbd> / <kbd class="kbd">K</kbd> Ganti seleksi, <kbd class="kbd">Enter</kbd> Membuka page detail.</span>
     </div>
   </div>
 </section>
@@ -22,6 +22,7 @@
 
 {% block topbar_filters %}
 <form class="filters" method="get" action="{{ ui_base_path }}/review">
+  <span class="hint">Banyak data antrian: {{ format_count(queue_total) }}</span>
   <div class="field">
     <label>Camera</label>
     <select name="camera_id">
@@ -41,136 +42,190 @@
     </select>
   </div>
   <div class="field">
-    <label>Mode</label>
-    <input type="text" value="SQLite-backed review" readonly />
+    <label>Page size</label>
+    <select name="page_size">
+      {% for size in page_size_options %}
+      <option value="{{ size }}" {% if size == page_size %}selected{% endif %}>{{ size }}</option>
+      {% endfor %}
+    </select>
   </div>
+  <div class="field">
+    <label>Selection</label>
+    <input type="text" value="{% if current %}{{ current_index }} / {{ page_item_count }}{% else %}0 / {{ page_item_count }}{% endif %}" readonly data-queue-selection-input />
+  </div>
+  <button class="btn" type="submit">Apply</button>
 </form>
 {% endblock %}
 
 {% block content %}
-<div class="status-banner" data-review-feedback></div>
-
 <section class="mode-banner queue">
   <div class="mode-copy">
-    <div class="mode-eyebrow">QUEUE MODE</div>
-    <div class="mode-title">Rapid event triage</div>
-    <div class="mode-desc">Review, label, and move. This page writes directly into the local SQLite review store.</div>
+    <div class="mode-eyebrow">MODE REVIEW</div>
+    <div class="mode-title">Table-first event triage</div>
+    <div class="mode-desc">Gunakan tabel untuk scan cepat, lalu buka event detail hanya saat perlu melakukan review manual.</div>
   </div>
   <div class="mode-tags">
-    <span class="pill">item {{ current_index }} / {{ queue_total }}</span>
-    <span class="pill ink">hotkeys J/K + Y/N</span>
+    <span class="pill" data-queue-position-pill>item {{ current_index }} / {{ page_item_count }}</span>
+    <span class="pill ink">hotkeys J/K + Enter</span>
     <span class="pill">pending {{ format_count(counts.pending) }}</span>
   </div>
 </section>
 
 <section class="queue-status-grid" aria-live="polite">
-  <article class="queue-status-card"><div class="label">Current position</div><div class="value">{{ current_index }} / {{ queue_total }}</div></article>
+  <article class="queue-status-card"><div class="label">Posisi data sekarang</div><div class="value" data-queue-position-value>{{ current_index }} / {{ page_item_count }}</div></article>
   <article class="queue-status-card"><div class="label">Pending</div><div class="value">{{ format_count(counts.pending) }}</div></article>
-  <article class="queue-status-card yes"><div class="label">Qualified YES</div><div class="value">{{ format_count(counts.qualified_yes) }}</div></article>
-  <article class="queue-status-card no"><div class="label">Qualified NO</div><div class="value">{{ format_count(counts.qualified_no) }}</div></article>
+  <article class="queue-status-card yes"><div class="label">Diterima</div><div class="value">{{ format_count(counts.qualified_yes) }}</div></article>
+  <article class="queue-status-card no"><div class="label">Ditolak</div><div class="value">{{ format_count(counts.qualified_no) }}</div></article>
 </section>
 
-{% if current %}
-<div class="two-col queue-layout">
-  <div class="big-thumb queue-thumb" aria-label="Event evidence">
-    {% if current.scene_url %}
-    <img src="{{ current.scene_url }}" alt="Scene evidence for {{ current.event_uid }}" class="evidence-image" decoding="async" fetchpriority="high" />
-    {% elif current.thumb_url %}
-    <img src="{{ current.thumb_url }}" alt="Thumbnail for {{ current.event_uid }}" class="evidence-image" decoding="async" fetchpriority="high" />
-    {% else %}
-    <div class="image-fallback">No evidence image found for this event yet.</div>
-    {% endif %}
-    <div style="position:absolute; left:14px; top:14px; display:flex; gap:10px;">
-      <span class="pill ink">{{ current.direction or "Unknown" }}</span>
-      <span class="pill">{{ current.class_name or "Unknown" }}</span>
-      <span class="pill">conf {{ format_float(current.confidence, 2) }}</span>
-    </div>
-    <div style="position:absolute; right:14px; top:14px;"><span class="pill">{{ current.event_uid }}</span></div>
-  </div>
-
-  <div class="panel queue-panel">
-    <div class="section-head">
+<section class="queue-table-stage" data-queue-browser>
+  <article class="panel queue-table-panel">
+    <div class="section-head queue-table-head">
       <div>
-        <h3>Current event</h3>
-        <p class="caption">Evidence-first review lane styled after the Action_Detection queue dock.</p>
+        <h3>Tabel data</h3>
+        <p class="caption">Klik baris untuk memilih, lalu tekan <kbd class="kbd">Enter</kbd> atau tombol inspect untuk membuka event detail.</p>
       </div>
-      <a class="pill" href="{{ ui_base_path }}/events/{{ current.event_uid }}">Open detail</a>
-    </div>
-    <div class="meta">
-      <div class="row"><div class="key">Occurred</div><div class="val">{{ format_datetime(current.occurred_at_utc) }}</div></div>
-      <div class="row"><div class="key">Video time</div><div class="val">{{ format_float(current.video_time_s, 3) }}s</div></div>
-      <div class="row"><div class="key">Direction</div><div class="val">{{ current.direction or "Unknown" }}</div></div>
-      <div class="row"><div class="key">Track</div><div class="val">track_id {{ current.track_id or "-" }}</div></div>
-      <div class="row"><div class="key">Class</div><div class="val">{{ current.class_name or "Unknown" }}</div></div>
-    </div>
-
-    <div class="queue-next-strip" role="status" aria-live="polite">
-      <div class="queue-next-copy">
-        <div class="head">Next target in queue</div>
-        <div class="body">
-          {% if upcoming %}
-          {{ upcoming[0].event_uid }} • {{ upcoming[0].class_name or "Unknown" }} • {{ upcoming[0].direction or "Unknown" }}
-          {% else %}
-          No next event in the current filter.
-          {% endif %}
-        </div>
-      </div>
-      <span class="pill">after this: {{ format_count(queue_total - current_index) }} left</span>
-    </div>
-
-    <div style="margin-top: 12px;">
-      <label for="review-notes" style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Notes</label>
-      <textarea id="review-notes" data-review-notes placeholder="Optional notes (e.g. cargo looks like paper, covered with tarp).">{{ current.review.notes if current.review else "" }}</textarea>
-    </div>
-
-    <div class="panel">
-      <div class="section-head">
-        <div>
-          <h3>Upcoming events</h3>
-          <p class="caption">Next queue targets in the current filter.</p>
-        </div>
-      </div>
-      <div class="queue-mini-list">
-        {% for item in upcoming %}
-        <a class="queue-mini-item {% if loop.first %}active{% endif %}" href="{{ ui_base_path }}/review?camera_id={{ camera_id or '' }}&status={{ status_filter }}&event_uid={{ item.event_uid }}">
-          <div class="queue-mini-main">
-            <strong>{{ item.event_uid }} • {{ item.class_name or "Unknown" }} • {{ item.direction or "Unknown" }}</strong>
-            <span>{{ format_datetime(item.occurred_at_utc) }} • conf {{ format_float(item.confidence, 2) }}</span>
-          </div>
-          <span class="pill">{% if loop.first %}next{% else %}{{ loop.index + 1 }}{% endif %}</span>
-        </a>
+      <div class="queue-head-actions">
+        {% if current %}
+        <span class="hint" data-queue-selected-label>Selected: {{ short_event_uid(current.event_uid, 12, 6) }}</span>
+        <a class="btn primary" href="{{ current.detail_url }}" data-queue-selected-detail>Open selected detail</a>
         {% else %}
-        <div class="queue-mini-item"><div class="queue-mini-main"><strong>No more items</strong><span>Queue is clear for this filter.</span></div></div>
-        {% endfor %}
+        <span class="pill" data-queue-selected-label>No selection</span>
+        <a class="btn primary" href="#" data-queue-selected-detail aria-disabled="true">Open selected detail</a>
+        {% endif %}
       </div>
     </div>
 
-    <div
-      class="queue-actions"
-      data-review-actions
-      data-current-event="{{ current.event_uid }}"
-      data-next-event="{{ upcoming[0].event_uid if upcoming else '' }}"
-      data-camera-id="{{ camera_id or '' }}"
-      data-status-filter="{{ status_filter }}"
-      data-review-base="{{ ui_base_path }}/review"
-    >
-      <div class="btn-row equal">
-        <button class="btn yes" type="button" data-review-submit data-decision="{{ decision_yes }}">Qualified YES</button>
-        <button class="btn no" type="button" data-review-submit data-decision="{{ decision_no }}">Qualified NO</button>
-      </div>
-      <div class="queue-help">
-        <span class="hint"><kbd class="kbd">Y</kbd> mark yes</span>
-        <span class="hint"><kbd class="kbd">N</kbd> mark no</span>
-        <span class="hint"><kbd class="kbd">J</kbd>/<kbd class="kbd">K</kbd> navigate</span>
-        <a class="hint" href="{{ ui_base_path }}/events/{{ current.event_uid }}" style="text-decoration:none;"><kbd class="kbd">Enter</kbd> detail</a>
+    {% if items %}
+    <div class="table-scroll queue-table-scroll">
+      <table class="table queue-table" aria-label="Traffic review queue">
+        <colgroup>
+          <col class="queue-col-event" />
+          <col class="queue-col-occurred" />
+          <col class="queue-col-camera" />
+          <col class="queue-col-direction" />
+          <col class="queue-col-class" />
+          <col class="queue-col-confidence" />
+          <col class="queue-col-review" />
+          <col class="queue-col-evidence" />
+          <col class="queue-col-action" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col">Event</th>
+            <th scope="col">Date / Time</th>
+            <th scope="col">Camera</th>
+            <th scope="col">Arah</th>
+            <th scope="col">Tipe<br>kendaraan</th>
+            <th scope="col">Akurasi <br>(Confidence)</th>
+            <th scope="col">Review</th>
+            <th scope="col">Bukti</th>
+            <th scope="col">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <tr
+            class="{% if item.event_uid == selected_event_uid %}queue-row-active{% endif %}"
+            data-queue-row
+            data-select-url="{{ item.queue_select_url }}"
+            data-detail-url="{{ item.detail_url }}"
+            data-event-uid="{{ item.event_uid }}"
+            data-event-short="{{ short_event_uid(item.event_uid, 12, 6) }}"
+            data-row-index="{{ loop.index }}"
+            tabindex="0"
+            aria-current="{% if item.event_uid == selected_event_uid %}true{% else %}false{% endif %}"
+          >
+            <td>
+              <a class="queue-session-link {% if item.event_uid == selected_event_uid %}active{% endif %}" href="{{ item.queue_select_url }}">{{ item.event_uid }}</a>
+            </td>
+            <td>
+              {% set display_time = display_event_timestamp(item) %}
+              <div class="queue-datetime-cell">
+                <span class="queue-date">{{ format_date(display_time) }}</span>
+                <span class="queue-time">{{ format_time(display_time) }}</span>
+              </div>
+            </td>
+            <td>{{ item.camera_id or "Unknown" }}</td>
+            <td><span class="pill ink">{{ item.direction or "Unknown" }}</span></td>
+            <td>{{ item.class_name or "Unknown" }}</td>
+            <td>{{ format_float(item.confidence, 2) }}</td>
+            <td>
+              <div class="queue-review-cell">
+                <span class="pill {{ review_pill_class(item.review_status) }}">{{ review_label(item.review_status) }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="queue-evidence-cell">
+                <div class="queue-evidence-preview {% if not item.thumb_url and not item.scene_url %}queue-evidence-empty{% endif %}">
+                  {% if item.scene_url %}
+                  <img class="queue-evidence-thumb" src="{{ item.scene_url }}" alt="Scene evidence for {{ item.event_uid }}" loading="lazy" decoding="async" />
+                  <span class="queue-evidence-badge">S</span>
+                  {% elif item.thumb_url %}
+                  <img class="queue-evidence-thumb" src="{{ item.thumb_url }}" alt="Thumbnail for {{ item.event_uid }}" loading="lazy" decoding="async" />
+                  <span class="queue-evidence-badge">T</span>
+                  {% else %}
+                  <span class="queue-evidence-none">none</span>
+                  {% endif %}
+                </div>
+              </div>
+            </td>
+            <td><a class="btn secondary btn-compact" href="{{ item.detail_url }}">Inspect</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="queue-pagination" aria-label="Queue meta">
+      <span class="hint">Showing {{ pagination.start_item }}-{{ pagination.end_item }} of {{ format_count(queue_total) }} item(s).</span>
+      <div class="queue-pagination-actions">
+        <span class="pill ink" data-queue-footer-selection>Selected {{ current_index }} / {{ page_item_count }}</span>
+        {% if current %}
+        <a class="pill" href="{{ current.detail_url }}" data-queue-footer-detail>Inspect selected</a>
+        {% endif %}
       </div>
     </div>
-  </div>
-</div>
-{% else %}
-<div class="panel">
-  <h3>Queue clear</h3>
-  <p class="caption">No events match the current filter yet. Try `All` status or switch the selected camera.</p>
-</div>
-{% endif %}
+
+    {% if pagination.total_pages > 1 %}
+    <nav class="queue-pager" aria-label="Queue pages">
+      {% if pagination.has_previous %}
+      <a class="btn" href="{{ pagination.previous_url }}">Previous</a>
+      {% else %}
+      <span class="btn is-disabled" aria-disabled="true">Previous</span>
+      {% endif %}
+
+      <div class="queue-page-list">
+        {% if pagination.show_first %}
+        <a class="pill" href="{{ pagination.first_url }}">1</a>
+        <span class="queue-page-gap" aria-hidden="true">…</span>
+        {% endif %}
+        {% for item in pagination.pages %}
+        {% if item.current %}
+        <span class="pill brand queue-page-current" aria-current="page">{{ item.number }}</span>
+        {% else %}
+        <a class="pill" href="{{ item.url }}">{{ item.number }}</a>
+        {% endif %}
+        {% endfor %}
+        {% if pagination.show_last %}
+        <span class="queue-page-gap" aria-hidden="true">…</span>
+        <a class="pill" href="{{ pagination.last_url }}">{{ pagination.total_pages }}</a>
+        {% endif %}
+      </div>
+
+      {% if pagination.has_next %}
+      <a class="btn" href="{{ pagination.next_url }}">Next</a>
+      {% else %}
+      <span class="btn is-disabled" aria-disabled="true">Next</span>
+      {% endif %}
+    </nav>
+    {% endif %}
+    {% else %}
+    <div class="queue-empty-state">
+      <h3>Queue clear</h3>
+      <p class="caption">No traffic events match the current filter yet. Try `All` status or switch the selected camera.</p>
+    </div>
+    {% endif %}
+  </article>
+</section>
 {% endblock %}
