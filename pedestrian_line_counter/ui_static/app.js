@@ -183,7 +183,107 @@
     });
   };
 
+  const initReviewQueueSelection = () => {
+    if (!body.classList.contains("page-review")) {
+      return;
+    }
+    const browser = document.querySelector("[data-queue-browser]");
+    if (!(browser instanceof HTMLElement)) {
+      return;
+    }
+    const rows = Array.from(browser.querySelectorAll("[data-queue-row]")).filter(
+      (row) => row instanceof HTMLElement,
+    );
+    if (rows.length === 0) {
+      return;
+    }
+
+    const navigateToRow = (row) => {
+      if (!(row instanceof HTMLElement)) {
+        return;
+      }
+      const targetUrl = row.dataset.selectUrl || "";
+      if (targetUrl) {
+        window.location.assign(targetUrl);
+      }
+    };
+
+    const openRowDetail = (row) => {
+      if (!(row instanceof HTMLElement)) {
+        return;
+      }
+      const detailUrl = row.dataset.detailUrl || "";
+      if (detailUrl) {
+        window.location.assign(detailUrl);
+      }
+    };
+
+    browser.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      if (target.closest("a, button")) {
+        return;
+      }
+      const row = target.closest("[data-queue-row]");
+      if (!(row instanceof HTMLElement)) {
+        return;
+      }
+      navigateToRow(row);
+    });
+
+    browser.addEventListener("keydown", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      if (!target.matches("[data-queue-row]")) {
+        return;
+      }
+      if (event.key === " ") {
+        event.preventDefault();
+        event.stopPropagation();
+        navigateToRow(target);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        openRowDetail(target);
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLTextAreaElement
+        || active instanceof HTMLInputElement
+        || active instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      const currentIndex = rows.findIndex((row) => row.classList.contains("queue-row-active"));
+      if (currentIndex < 0) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "j" && currentIndex + 1 < rows.length) {
+        event.preventDefault();
+        navigateToRow(rows[currentIndex + 1]);
+      } else if (key === "k" && currentIndex > 0) {
+        event.preventDefault();
+        navigateToRow(rows[currentIndex - 1]);
+      } else if (key === "enter") {
+        event.preventDefault();
+        openRowDetail(rows[currentIndex]);
+      }
+    });
+  };
+
   initLogout();
   initLogin();
   initReviewActions();
+  initReviewQueueSelection();
 })();

@@ -381,14 +381,20 @@ class EdgeApiRuntime:
                     break
 
         current = queue[current_index] if queue else None
+        previous_item = queue[current_index - 1] if queue and current_index > 0 else None
+        next_item = queue[current_index + 1] if queue and current_index + 1 < len(queue) else None
         upcoming = queue[current_index + 1 : current_index + 5] if queue else []
         review_counts = self.review_store.summary()
         pending_count = sum(1 for item in all_items if _text(item.get("review_status")) == REVIEW_STATUS_PENDING)
 
         return {
+            "items": queue,
             "current": current,
             "current_index": current_index + 1 if current is not None else 0,
+            "selected_event_uid": _text(current.get("event_uid")) if current is not None else None,
             "queue_total": len(queue),
+            "previous_item": previous_item,
+            "next_item": next_item,
             "upcoming": upcoming,
             "camera_id": _text(camera_id),
             "status_filter": normalized_status,
@@ -821,7 +827,7 @@ def create_app(
             request=request,
             page_name="dashboard",
             page_title="Traffic Monitoring Dashboard",
-            page_subtitle="Live totals from the edge spool plus the current review backlog.",
+            page_subtitle="Total data dari live ditambah dengan data yang akan direview.",
         )
         context.update(runtime.dashboard_payload())
         return templates.TemplateResponse(request, "dashboard.html", context)

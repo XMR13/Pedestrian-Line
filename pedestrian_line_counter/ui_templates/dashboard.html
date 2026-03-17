@@ -1,34 +1,17 @@
 {% extends "base.html" %}
 
-{% block sidebar_extra %}
-<section class="panel sidebar-note">
-  <h3>UI Direction</h3>
-  <p class="caption">This page now follows the Action_Detection operations-console layout while keeping the traffic data path intact.</p>
-  <div class="timeline compact">
-    <div class="tl-item">
-      <span class="t">Dashboard</span>
-      <span class="d">Live spool totals, queue pressure, and recent runs stay visible on one screen.</span>
-    </div>
-    <div class="tl-item">
-      <span class="t">Trend panel</span>
-      <span class="d">Trend styling matches the reference system; chart data is still placeholder-first.</span>
-    </div>
-  </div>
-</section>
-{% endblock %}
-
 {% block topbar_filters %}
 <div class="filters">
   <div class="field">
-    <label>Source</label>
+    <label>Sumber</label>
     <input type="text" value="{{ latest_run.source_type or 'spool' }}" readonly />
   </div>
   <div class="field">
-    <label>Camera set</label>
+    <label>Camera</label>
     <input type="text" value="{{ cameras|length }} active view(s)" readonly />
   </div>
   <div class="field">
-    <label>Review DB</label>
+    <label>Databases</label>
     <input type="text" value="SQLite" readonly />
   </div>
 </div>
@@ -41,7 +24,7 @@
       <div class="mode-eyebrow">OPS PULSE</div>
       <div class="mode-title">
         {% if latest_run.run_uid %}
-        Latest run {{ latest_run.run_uid }} is {{ latest_run.lifecycle_status or "active" }}
+        Data taerbaru {{ latest_run.run_uid }} is {{ latest_run.lifecycle_status or "active" }}
         {% else %}
         UI is online and waiting for spool activity
         {% endif %}
@@ -63,11 +46,11 @@
   </section>
 
   <section class="kpis">
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">A_TO_B</div><div class="kpi-accent ink">A→B</div></div><div class="kpi-value">{{ format_count(metrics.count_a_to_b_total) }}</div><div class="kpi-hint">Total counted crossings</div></div></div>
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">B_TO_A</div><div class="kpi-accent brand">B→A</div></div><div class="kpi-value">{{ format_count(metrics.count_b_to_a_total) }}</div><div class="kpi-hint">Total counted crossings</div></div></div>
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Pending reviews</div><div class="kpi-accent">P</div></div><div class="kpi-value">{{ format_count(pending_reviews) }}</div><div class="kpi-hint">Needs manual confirmation</div></div></div>
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Qualified YES</div><div class="kpi-accent yes">Y</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_yes) }}</div><div class="kpi-hint">Accepted by reviewer</div></div></div>
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Qualified NO</div><div class="kpi-accent no">N</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_no) }}</div><div class="kpi-hint">Rejected by reviewer</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">A_TO_B</div><div class="kpi-accent ink">A→B</div></div><div class="kpi-value">{{ format_count(metrics.count_a_to_b_total) }}</div><div class="kpi-hint">Total kendaraan dari A -> B</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">B_TO_A</div><div class="kpi-accent brand">B→A</div></div><div class="kpi-value">{{ format_count(metrics.count_b_to_a_total) }}</div><div class="kpi-hint">Total kendaraan dari B -> A</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Review Pending</div><div class="kpi-accent">P</div></div><div class="kpi-value">{{ format_count(pending_reviews) }}</div><div class="kpi-hint">Menunggu konfirmasi review</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Qualified YES</div><div class="kpi-accent yes">Y</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_yes) }}</div><div class="kpi-hint">Diterima</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Qualified NO</div><div class="kpi-accent no">N</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_no) }}</div><div class="kpi-hint">Ditolak</div></div></div>
   </section>
 
   <section class="row2">
@@ -76,11 +59,11 @@
         <div class="btn-row">
           <span class="pill ink">A_TO_B</span>
           <span class="pill brand">B_TO_A</span>
-          <span class="pill">review backlog</span>
+          <span class="pill">yang perlu di review</span>
         </div>
         <div class="trend-context">
-          <p class="trend-meaning"><b>Traffic Monitoring Dashboard</b> uses the Action_Detection trend card layout while the trend series remains placeholder-first.</p>
-          <p class="caption">Live totals and queue counts are real. Time-series wiring is next.</p>
+          <p class="trend-meaning"><b>Traffic Monitoring Dashboard</b> Data yang digunakan berdasarkan layout data yang yang sama dengan KPI.</p>
+          <p class="caption">Tampilan data counting secara realtime.</p>
           <div class="trend-meta-pills">
             <span class="trend-key"><span class="trend-key-line dir-a"></span>A_TO_B</span>
             <span class="trend-key"><span class="trend-key-line dir-b"></span>B_TO_A</span>
@@ -121,9 +104,9 @@
       <div class="section-head">
         <div>
           <h3>Review lane</h3>
-          <p class="caption">Compact queue pressure block using the Action_Detection side-panel treatment.</p>
+          <p class="caption">Status antrian review</p>
         </div>
-        <a class="pill" href="{{ ui_base_path }}/review">open queue</a>
+        <a class="pill" href="{{ ui_base_path }}/review">Buka antrian review</a>
       </div>
       <div class="queue-status-grid compact-grid">
         <div class="queue-status-card">
@@ -131,24 +114,24 @@
           <div class="value">{{ format_count(pending_reviews) }}</div>
         </div>
         <div class="queue-status-card yes">
-          <div class="label">Qualified YES</div>
+          <div class="label">Diterima</div>
           <div class="value">{{ format_count(review_counts.qualified_yes) }}</div>
         </div>
         <div class="queue-status-card no">
-          <div class="label">Qualified NO</div>
+          <div class="label">Ditolak</div>
           <div class="value">{{ format_count(review_counts.qualified_no) }}</div>
         </div>
         <div class="queue-status-card">
-          <div class="label">Events total</div>
+          <div class="label">Total events</div>
           <div class="value">{{ format_count(metrics.events_total) }}</div>
         </div>
       </div>
       <div class="queue-next-strip">
         <div class="queue-next-copy">
-          <span class="head">Next operator action</span>
-          <span class="body">Open Review Queue to confirm pending events against the local evidence store.</span>
+          <span class="head">Langkah selanjutnya</span>
+          <span class="body">Buka antrian review untuk memeriksa apakah vehicle tersebut termasuk dalam kategori atau tidak.</span>
         </div>
-        <a class="btn primary" href="{{ ui_base_path }}/review">Open Review Queue</a>
+        <a class="btn primary" href="{{ ui_base_path }}/review">Bukan antrian review</a>
       </div>
     </article>
   </section>
@@ -157,8 +140,8 @@
     <div class="pad">
       <div class="section-head">
         <div>
-          <h3>Recent events</h3>
-          <p class="caption">Latest evidence captured from the spool.</p>
+          <h3>Event terbaru</h3>
+          <p class="caption">Data terbaru semenjak kejadian yang ada.</p>
         </div>
         <div class="pill">events.jsonl</div>
       </div>
@@ -166,10 +149,10 @@
         <table class="table">
           <thead>
             <tr>
-              <th scope="col">Thumb</th>
-              <th scope="col">Occurred</th>
-              <th scope="col">Direction</th>
-              <th scope="col">Class</th>
+              <th scope="col">Gambar</th>
+              <th scope="col">Datetime</th>
+              <th scope="col">Arah</th>
+              <th scope="col">Tipe Kendaraan</th>
               <th scope="col">Review</th>
               <th scope="col">Action</th>
             </tr>
@@ -212,8 +195,8 @@
     <div class="pad">
       <div class="section-head">
         <div>
-          <h3>Recent runs</h3>
-          <p class="caption">Operational view of the latest spool sessions.</p>
+          <h3>Data terbaru</h3>
+          <p class="caption">View operasional dari data terbaru.</p>
         </div>
         <div class="pill ink">status</div>
       </div>
@@ -225,7 +208,7 @@
               <th scope="col">Camera</th>
               <th scope="col">Updated</th>
               <th scope="col">Lifecycle</th>
-              <th scope="col">Delivery</th>
+              <th scope="col">Pengiriman data</th>
             </tr>
           </thead>
           <tbody>

@@ -36,9 +36,9 @@
             </div>
           </div>
           <div>
-            <h1>Traffic Monitoring MVP</h1>
-            <p class="sub">Edge-first dashboard and review surface</p>
-            <p class="brand-path">served by FastAPI + SQLite</p>
+            <h1>Vehicle Counting Website MVP</h1>
+            <p class="sub">Dashboard dengan fitur review hasil counting kendaraan</p>
+            <p class="brand-path">Use with FastAPI + SQLite</p>
           </div>
         </div>
 
@@ -48,7 +48,7 @@
             <span class="pill ink">LIVE</span>
           </a>
           <a class="{% if page_name == 'review' %}active{% endif %}" href="{{ ui_base_path }}/review">
-            <strong>Review Queue</strong>
+            <strong>Antrian Review</strong>
             <span class="pill">MVP</span>
           </a>
           {% if page_name == 'event_detail' and event %}
@@ -72,7 +72,7 @@
 
         <section class="panel sidebar-note">
           <h3>Runtime</h3>
-          <p class="caption">Live edge state from the local service and spool.</p>
+          <p class="caption">Status dari service dan local pool.</p>
           <div class="meta">
             <div class="row"><div class="key">Spool</div><div class="val">{{ runtime.spool_dir }}</div></div>
             <div class="row"><div class="key">Retention</div><div class="val">{{ "On" if runtime.retention_cfg.enabled else "Off" }}</div></div>
