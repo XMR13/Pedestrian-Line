@@ -10,7 +10,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Sora:wght@400;500;600;700;800&display=swap"
     />
-    <link rel="stylesheet" href="/ui-static/app.css" />
+    <link rel="stylesheet" href="/ui-static/app.css?v={{ ui_static_version }}" />
   </head>
   <body class="page-{{ page_name|replace('_', '-') }}">
     <a class="skip-link" href="#main-content">Skip to Main Content</a>
@@ -36,7 +36,7 @@
             </div>
           </div>
           <div>
-            <h1>Vehicle Counting Website MVP</h1>
+            <h1>Vehicle Counting Website</h1>
             <p class="sub">Dashboard dengan fitur review hasil counting kendaraan</p>
             <p class="brand-path">Use with FastAPI + SQLite</p>
           </div>
@@ -97,6 +97,6 @@
     </div>
 
     {% block scripts %}{% endblock %}
-    <script src="/ui-static/app.js" defer></script>
+    <script src="/ui-static/app.js?v={{ ui_static_version }}" defer></script>
   </body>
 </html>

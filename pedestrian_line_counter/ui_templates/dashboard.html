@@ -56,46 +56,39 @@
   <section class="row2">
     <article class="dashboard-trend">
       <div class="pad">
-        <div class="btn-row">
-          <span class="pill ink">A_TO_B</span>
-          <span class="pill brand">B_TO_A</span>
-          <span class="pill">yang perlu di review</span>
-        </div>
         <div class="trend-context">
-          <p class="trend-meaning"><b>Traffic Monitoring Dashboard</b> Data yang digunakan berdasarkan layout data yang yang sama dengan KPI.</p>
-          <p class="caption">Tampilan data counting secara realtime.</p>
+          <p class="trend-meaning"><b>Traffic Monitoring Dashboard</b> Trend menggunakan event spool asli yang dibucket per jam untuk {{ trend.window_label|lower }}.</p>
+          <p class="caption">{% if trend.empty %}Menunggu event masuk untuk membentuk trend.{% else %}Rentang {{ trend.window_start_label }} sampai {{ trend.window_end_label }}.{% endif %}</p>
           <div class="trend-meta-pills">
-            <span class="trend-key"><span class="trend-key-line dir-a"></span>A_TO_B</span>
-            <span class="trend-key"><span class="trend-key-line dir-b"></span>B_TO_A</span>
-            <span class="trend-key"><span class="trend-key-line no"></span>Pending</span>
+            {% for series in trend.series %}
+            <span class="trend-key"><span class="trend-key-line {{ series.css_class }}"></span>{{ series.label }}</span>
+            {% endfor %}
           </div>
         </div>
         <div class="trend-chart-wrap">
-          <svg class="trend-svg" viewBox="0 0 760 190" role="img" aria-label="Traffic trend placeholder chart">
-            <line class="trend-grid-line" x1="52" y1="26" x2="720" y2="26"></line>
-            <line class="trend-grid-line" x1="52" y1="84" x2="720" y2="84"></line>
-            <line class="trend-grid-line" x1="52" y1="142" x2="720" y2="142"></line>
-            <text class="trend-grid-value" x="42" y="29">50</text>
-            <text class="trend-grid-value" x="42" y="87">30</text>
-            <text class="trend-grid-value" x="42" y="145">10</text>
-            <path class="trend-line dir-a" d="M60 136 C140 126, 180 116, 240 118 S360 98, 420 86 S560 66, 720 72"></path>
-            <path class="trend-line dir-b" d="M60 154 C132 150, 180 142, 240 140 S360 130, 420 124 S560 116, 720 120"></path>
-            <path class="trend-line no" d="M60 160 C140 160, 220 158, 300 154 S500 150, 720 148"></path>
-            <circle class="trend-focus-dot dir-a" cx="720" cy="72" r="4.5"></circle>
-            <circle class="trend-focus-dot dir-b" cx="720" cy="120" r="4.5"></circle>
-            <circle class="trend-focus-dot no" cx="720" cy="148" r="4.5"></circle>
-            <text class="trend-axis-label" x="100" y="176">06:00</text>
-            <text class="trend-axis-label" x="240" y="176">09:00</text>
-            <text class="trend-axis-label" x="380" y="176">12:00</text>
-            <text class="trend-axis-label" x="520" y="176">15:00</text>
-            <text class="trend-axis-label" x="660" y="176">18:00</text>
+          <svg class="trend-svg" viewBox="0 0 760 190" role="img" aria-label="Traffic trend chart from local spool data">
+            {% for line in trend.grid_lines %}
+            <line class="trend-grid-line" x1="52" y1="{{ line.y }}" x2="720" y2="{{ line.y }}"></line>
+            <text class="trend-grid-value" x="42" y="{{ line.y + 3 }}">{{ line.value }}</text>
+            {% endfor %}
+            {% for series in trend.series %}
+            <path class="trend-line {{ series.css_class }}" d="{{ series.path }}"></path>
+            {% endfor %}
+            {% for bucket in trend.buckets %}
+            {% if loop.index0 % 3 == 0 or loop.last %}
+            {% set x = trend.series[0].points[loop.index0].x %}
+            <text class="trend-axis-label{% if loop.first %} is-start{% elif loop.last %} is-end{% endif %}" x="{{ x }}" y="176">{{ bucket.label }}</text>
+            {% endif %}
+            {% endfor %}
           </svg>
-          <div class="trend-x-title">Time (local)</div>
+        </div>
+        <div class="trend-axis-footer">
+          <span class="trend-x-title">{{ trend.time_basis_label }}</span>
         </div>
         <div class="trend-value-strip">
-          <span class="pill" id="trend-strip-a-to-b">A_TO_B {{ format_count(metrics.count_a_to_b_total) }}</span>
-          <span class="pill" id="trend-strip-b-to-a">B_TO_A {{ format_count(metrics.count_b_to_a_total) }}</span>
-          <span class="pill no" id="trend-strip-pending">pending {{ format_count(pending_reviews) }}</span>
+          <span class="pill" id="trend-strip-a-to-b">A_TO_B {{ format_count(trend.window_totals.a_to_b) }}</span>
+          <span class="pill" id="trend-strip-b-to-a">B_TO_A {{ format_count(trend.window_totals.b_to_a) }}</span>
+          <span class="pill no" id="trend-strip-pending">pending {{ format_count(trend.window_totals.pending) }}</span>
         </div>
       </div>
     </article>

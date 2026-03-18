@@ -37,8 +37,8 @@
     <select name="status">
       <option value="pending" {% if status_filter == "pending" %}selected{% endif %}>Pending</option>
       <option value="all" {% if status_filter == "all" %}selected{% endif %}>All</option>
-      <option value="qualified_yes" {% if status_filter == "qualified_yes" %}selected{% endif %}>Qualified YES</option>
-      <option value="qualified_no" {% if status_filter == "qualified_no" %}selected{% endif %}>Qualified NO</option>
+      <option value="qualified_yes" {% if status_filter == "qualified_yes" %}selected{% endif %}>Diterima</option>
+      <option value="qualified_no" {% if status_filter == "qualified_no" %}selected{% endif %}>Ditolak</option>
     </select>
   </div>
   <div class="field">

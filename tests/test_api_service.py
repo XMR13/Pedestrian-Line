@@ -22,6 +22,7 @@ def _write_run(
     occurred_at_utc: str,
     camera_id: str = "cam_01",
     occurred_at_local: str | None = None,
+    direction: str = "A_TO_B",
     completed_at_utc: str | None = None,
     last_error: str | None = None,
     lifecycle_status: str = "stopped",
@@ -73,7 +74,7 @@ def _write_run(
                 "occurred_at_local": occurred_at_local,
                 "frame_index": 90,
                 "video_time_s": 3.0,
-                "direction": "A_TO_B",
+                "direction": direction,
                 "track_id": 1,
                 "class_id": 2,
                 "class_name": "truck",
@@ -224,6 +225,59 @@ def test_metrics_and_config_expose_runtime_configuration(tmp_path) -> None:
         "protect_incomplete_runs": True,
         "state_filename": ".portal_upload_state.json",
     }
+
+
+def test_dashboard_payload_builds_real_hourly_trend(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_a",
+        started_at_utc="2026-03-11T00:00:00Z",
+        occurred_at_utc="2026-03-11T00:15:00Z",
+        occurred_at_local="2026-03-11T07:15:00+07:00",
+        direction="A_TO_B",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_b",
+        started_at_utc="2026-03-11T01:00:00Z",
+        occurred_at_utc="2026-03-11T01:10:00Z",
+        occurred_at_local="2026-03-11T08:10:00+07:00",
+        direction="B_TO_A",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_c",
+        started_at_utc="2026-03-11T01:00:00Z",
+        occurred_at_utc="2026-03-11T01:40:00Z",
+        occurred_at_local="2026-03-11T08:40:00+07:00",
+        direction="A_TO_B",
+    )
+
+    app = create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3")
+    client = TestClient(app)
+    review_resp = client.post(
+        "/events/run_b_e1/review",
+        json={"decision": "qualified_yes", "notes": "reviewed", "page_size": 25},
+    )
+    assert review_resp.status_code == 200
+
+    trend = app.state.runtime.dashboard_payload()["trend"]
+    assert trend["empty"] is False
+    assert trend["bucket_hours"] == 12
+    assert trend["time_basis_label"] == "Time (local)"
+    assert trend["window_totals"] == {"a_to_b": 2, "b_to_a": 1, "pending": 2}
+    assert trend["buckets"][-2]["label"] == "07:00"
+    assert trend["buckets"][-1]["label"] == "08:00"
+    assert trend["buckets"][-2]["a_to_b"] == 1
+    assert trend["buckets"][-2]["b_to_a"] == 0
+    assert trend["buckets"][-2]["pending"] == 1
+    assert trend["buckets"][-1]["a_to_b"] == 1
+    assert trend["buckets"][-1]["b_to_a"] == 1
+    assert trend["buckets"][-1]["pending"] == 1
+    assert trend["series"][0]["path"].startswith("M")
 
 
 def test_retention_preview_and_run_endpoint_apply_policy(tmp_path) -> None:
@@ -432,7 +486,7 @@ def test_review_api_and_event_detail_include_sqlite_backed_review_state(tmp_path
     event_payload = event_resp.json()
     assert event_payload["review_status"] == "qualified_yes"
     assert event_payload["review"]["notes"] == "matches target vehicle"
-    assert event_payload["timeline"][-1]["description"].startswith("Reviewed as Qualified YES")
+    assert event_payload["timeline"][-1]["description"].startswith("Reviewed as Diterima")
 
 
 def test_review_api_returns_next_pending_event_for_detail_flow(tmp_path) -> None:
@@ -459,17 +513,23 @@ def test_review_api_returns_next_pending_event_for_detail_flow(tmp_path) -> None
             "decision": "qualified_yes",
             "notes": "move forward",
             "camera_id": "cam_01",
+            "status_filter": "pending",
+            "page": 1,
             "page_size": 25,
         },
     )
     assert review_resp.status_code == 200
     payload = review_resp.json()
     assert payload["next_event_uid"] == "run_old_e1"
+    assert payload["next_detail_url"] == "/ui/events/run_old_e1?camera_id=cam_01&status=pending&page=1&page_size=25"
+    assert payload["queue_page_url"] == "/ui/review?camera_id=cam_01&status=pending&page=1&page_size=25"
     assert payload["next_pending_detail_url"] == "/ui/events/run_old_e1?camera_id=cam_01&status=pending&page=1&page_size=25"
     assert payload["next_pending_queue_url"] == "/ui/review?camera_id=cam_01&status=pending&page=1&page_size=25"
 
     detail = client.get("/ui/events/run_new_e1?camera_id=cam_01&status=pending&page=1&page_size=25")
     assert detail.status_code == 200
+    assert "data-status-filter=\"pending\"" in detail.text
+    assert "data-page=\"1\"" in detail.text
     assert "data-pending-queue-url=\"/ui/review?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25\"" in detail.text
 
 
@@ -499,12 +559,16 @@ def test_review_api_uses_global_pending_queue_when_detail_is_not_camera_filtered
             "decision": "qualified_yes",
             "notes": "continue globally",
             "camera_id": None,
+            "status_filter": "pending",
+            "page": 1,
             "page_size": 25,
         },
     )
     assert review_resp.status_code == 200
     payload = review_resp.json()
     assert payload["next_event_uid"] == "run_cam_a_e1"
+    assert payload["next_detail_url"] == "/ui/events/run_cam_a_e1?status=pending&page=1&page_size=25"
+    assert payload["queue_page_url"] == "/ui/review?status=pending&page=1&page_size=25"
     assert payload["next_pending_detail_url"] == "/ui/events/run_cam_a_e1?status=pending&page=1&page_size=25"
     assert payload["next_pending_queue_url"] == "/ui/review?status=pending&page=1&page_size=25"
 
@@ -512,6 +576,76 @@ def test_review_api_uses_global_pending_queue_when_detail_is_not_camera_filtered
     assert detail.status_code == 200
     assert "data-camera-id=\"\"" in detail.text
     assert "data-pending-queue-url=\"/ui/review?status=pending&amp;page=1&amp;page_size=25\"" in detail.text
+
+
+def test_review_api_preserves_all_queue_continuation_path(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_old",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_new",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    review_resp = client.post(
+        "/events/run_new_e1/review",
+        json={
+            "decision": "qualified_yes",
+            "notes": "continue in all queue",
+            "camera_id": "cam_01",
+            "status_filter": "all",
+            "page": 1,
+            "page_size": 25,
+        },
+    )
+    assert review_resp.status_code == 200
+    payload = review_resp.json()
+    assert payload["next_detail_url"] == "/ui/events/run_old_e1?camera_id=cam_01&status=all&page=1&page_size=25"
+    assert payload["queue_page_url"] == "/ui/review?camera_id=cam_01&status=all&page=1&page_size=25"
+    assert payload["next_pending_detail_url"] == "/ui/events/run_old_e1?camera_id=cam_01&status=pending&page=1&page_size=25"
+
+
+def test_event_detail_form_submit_redirects_to_next_detail(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_old",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_new",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    response = client.post(
+        "/ui/events/run_new_e1/review",
+        data={
+            "decision": "qualified_yes",
+            "notes": "use redirect flow",
+            "camera_id": "cam_01",
+            "status_filter": "pending",
+            "page": "1",
+            "page_size": "25",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ui/events/run_old_e1?camera_id=cam_01&status=pending&page=1&page_size=25"
 
 
 def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
@@ -528,11 +662,13 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     dashboard = client.get("/ui/dashboard")
     assert dashboard.status_code == 200
     assert "Traffic Monitoring Dashboard" in dashboard.text
-    assert "Recent events" in dashboard.text
+    assert "Event terbaru" in dashboard.text
+    assert "Traffic trend chart from local spool data" in dashboard.text
+    assert "placeholder chart" not in dashboard.text
 
     review = client.get("/ui/review?camera_id=cam_01&status=pending&page=1&page_size=25")
     assert review.status_code == 200
-    assert "Review Queue" in review.text
+    assert "Antrian Review" in review.text
     assert "run_ui_e1" in review.text
     assert "17:05:00+07:00" in review.text
     assert "/ui/events/run_ui_e1?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25" in review.text

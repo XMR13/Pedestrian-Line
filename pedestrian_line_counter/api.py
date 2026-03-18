@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import secrets
 from typing import Any, Dict, Iterable, List, Mapping, Optional
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -40,6 +40,11 @@ REVIEW_STATUS_PENDING = "pending"
 REVIEW_STATUS_ALL = "all"
 DEFAULT_REVIEW_PAGE_SIZE = 25
 REVIEW_PAGE_SIZE_OPTIONS = (15, 20, 25)
+UI_STATIC_VERSION = max(
+    int(path.stat().st_mtime)
+    for path in (UI_STATIC_DIR / "app.css", UI_STATIC_DIR / "app.js")
+)
+TREND_BUCKET_HOURS = 12
 
 
 class SyncRequest(BaseModel):
@@ -64,6 +69,8 @@ class ReviewUpdateRequest(BaseModel):
     decision: str
     notes: str = ""
     camera_id: Optional[str] = None
+    status_filter: Optional[str] = None
+    page: Optional[int] = Field(default=None, ge=1)
     page_size: Optional[int] = Field(default=None, ge=1, le=100)
 
 
@@ -523,11 +530,30 @@ class EdgeApiRuntime:
         decision: str,
         notes: str = "",
         camera_id: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        page: Optional[int] = None,
         page_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         event = self.get_event(event_uid)
         if event is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"event_uid not found: {event_uid}")
+
+        queue_camera_id = _text(camera_id)
+        normalized_status = _normalize_review_filter(status_filter)
+        normalized_page = max(1, int(page or 1))
+        normalized_page_size = _normalize_review_page_size(page_size) if page_size is not None else DEFAULT_REVIEW_PAGE_SIZE
+        queue_context = self.review_queue_payload(
+            camera_id=queue_camera_id,
+            status_filter=normalized_status,
+            current_event_uid=event_uid,
+            page=normalized_page,
+            page_size=normalized_page_size,
+        )
+        in_queue_before_save = _text(queue_context.get("selected_event_uid")) == event_uid
+        continuation_item = None
+        if in_queue_before_save:
+            continuation_item = queue_context.get("next_item") or queue_context.get("previous_item")
+        queue_page_number = int(queue_context["pagination"]["current_page"])
 
         record = self.review_store.save_review(
             event_uid=str(event["event_uid"]),
@@ -539,20 +565,25 @@ class EdgeApiRuntime:
             now_utc=_utcnow_iso(),
         )
         updated_event = self.get_event(event_uid)
-        queue_camera_id = _text(camera_id)
         next_pending = self.list_review_queue(
             limit=1,
             camera_id=queue_camera_id,
             status_filter=REVIEW_STATUS_PENDING,
         )
         next_event_uid = _text(next_pending[0].get("event_uid")) if next_pending else None
-        normalized_page_size = _normalize_review_page_size(page_size) if page_size is not None else DEFAULT_REVIEW_PAGE_SIZE
         return {
             "ok": True,
             "event_uid": event_uid,
             "review": record.to_dict(),
             "event": updated_event,
             "next_event_uid": next_event_uid,
+            "next_detail_url": _text(continuation_item.get("detail_url")) if isinstance(continuation_item, Mapping) else None,
+            "queue_page_url": _ui_review_queue_url(
+                camera_id=queue_camera_id,
+                status=normalized_status,
+                page=queue_page_number,
+                page_size=normalized_page_size,
+            ),
             "next_pending_detail_url": _ui_event_detail_url(
                 next_event_uid,
                 camera_id=queue_camera_id,
@@ -579,6 +610,7 @@ class EdgeApiRuntime:
         latest_run = metrics.get("latest_run") or {}
         review_counts = metrics.get("review_counts") or {}
         pending_reviews = max(0, int(metrics.get("events_total", 0)) - int(review_counts.get("reviewed_total", 0)))
+        trend = self._build_dashboard_trend()
         return {
             "metrics": metrics,
             "recent_events": recent_events,
@@ -587,6 +619,107 @@ class EdgeApiRuntime:
             "pending_reviews": pending_reviews,
             "review_counts": review_counts,
             "cameras": self.list_cameras(),
+            "trend": trend,
+        }
+
+    def _build_dashboard_trend(self) -> Dict[str, Any]:
+        events = self._attach_review_data(list(self._iter_all_events()))
+        points: List[tuple[datetime, Dict[str, Any]]] = []
+        for event in events:
+            event_dt = _event_bucket_datetime(event)
+            if event_dt is None:
+                continue
+            points.append((event_dt, event))
+
+        if not points:
+            return _empty_dashboard_trend()
+
+        latest_dt = max(item[0] for item in points)
+        latest_bucket = latest_dt.replace(minute=0, second=0, microsecond=0)
+        bucket_count = TREND_BUCKET_HOURS
+        bucket_start = latest_bucket - timedelta(hours=bucket_count - 1)
+        bucket_index = {
+            bucket_start + timedelta(hours=offset): offset
+            for offset in range(bucket_count)
+        }
+        buckets = [
+            {
+                "start": bucket_start + timedelta(hours=offset),
+                "label": (bucket_start + timedelta(hours=offset)).strftime("%H:%M"),
+                "a_to_b": 0,
+                "b_to_a": 0,
+                "pending": 0,
+            }
+            for offset in range(bucket_count)
+        ]
+
+        for event_dt, event in points:
+            normalized_dt = event_dt.astimezone(latest_bucket.tzinfo)
+            event_bucket = normalized_dt.replace(minute=0, second=0, microsecond=0)
+            offset = bucket_index.get(event_bucket)
+            if offset is None:
+                continue
+            bucket = buckets[offset]
+            if _text(event.get("direction")) == "A_TO_B":
+                bucket["a_to_b"] += 1
+            elif _text(event.get("direction")) == "B_TO_A":
+                bucket["b_to_a"] += 1
+            if _text(event.get("review_status")) == REVIEW_STATUS_PENDING:
+                bucket["pending"] += 1
+
+        y_max = max(
+            1,
+            max(
+                max(int(bucket["a_to_b"]), int(bucket["b_to_a"]), int(bucket["pending"]))
+                for bucket in buckets
+            ),
+        )
+        x_positions = _trend_x_positions(bucket_count)
+        series_specs = [
+            ("a_to_b", "A_TO_B", "dir-a"),
+            ("b_to_a", "B_TO_A", "dir-b"),
+            ("pending", "Pending", "no"),
+        ]
+        series = []
+        for key, label, css_class in series_specs:
+            series_points = []
+            for index, bucket in enumerate(buckets):
+                count = int(bucket[key])
+                series_points.append(
+                    {
+                        "x": x_positions[index],
+                        "y": _trend_y_position(count, y_max),
+                        "count": count,
+                        "label": bucket["label"],
+                    }
+                )
+            series.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "css_class": css_class,
+                    "path": _trend_svg_path(series_points),
+                    "points": series_points,
+                    "window_total": sum(int(bucket[key]) for bucket in buckets),
+                    "latest_value": int(series_points[-1]["count"]) if series_points else 0,
+                }
+            )
+
+        return {
+            "empty": False,
+            "bucket_hours": bucket_count,
+            "time_basis_label": "Time (local)" if any(_text(event.get("occurred_at_local")) for _, event in points) else "Time (UTC)",
+            "window_label": f"Last {bucket_count} hours",
+            "buckets": buckets,
+            "series": series,
+            "grid_lines": _trend_grid_lines(y_max),
+            "window_start_label": buckets[0]["start"].strftime("%Y-%m-%d %H:%M"),
+            "window_end_label": buckets[-1]["start"].strftime("%Y-%m-%d %H:%M"),
+            "window_totals": {
+                "a_to_b": sum(int(bucket["a_to_b"]) for bucket in buckets),
+                "b_to_a": sum(int(bucket["b_to_a"]) for bucket in buckets),
+                "pending": sum(int(bucket["pending"]) for bucket in buckets),
+            },
         }
 
     def _iter_all_events(self, *, camera_id: Optional[str] = None) -> Iterable[Dict[str, Any]]:
@@ -951,7 +1084,47 @@ def create_app(
             decision=payload.decision,
             notes=payload.notes,
             camera_id=payload.camera_id,
+            status_filter=payload.status_filter,
+            page=payload.page,
             page_size=payload.page_size,
+        )
+
+    @router.post(f"{UI_BASE_PATH}/events/{{event_uid}}/review", include_in_schema=False)
+    async def save_event_review_page(
+        request: Request,
+        event_uid: str,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_page),
+    ) -> RedirectResponse:
+        raw_body = (await request.body()).decode("utf-8", errors="ignore")
+        form_fields = parse_qs(raw_body, keep_blank_values=True)
+        decision = _text((form_fields.get("decision") or [None])[0])
+        if decision == "":
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="decision is required")
+        notes = _text((form_fields.get("notes") or [""])[0])
+        camera_id = _text((form_fields.get("camera_id") or [""])[0]) or None
+        status_filter = _text((form_fields.get("status_filter") or [REVIEW_STATUS_PENDING])[0]) or REVIEW_STATUS_PENDING
+        page = int(_text((form_fields.get("page") or ["1"])[0]) or "1")
+        page_size = int(_text((form_fields.get("page_size") or [str(DEFAULT_REVIEW_PAGE_SIZE)])[0]) or str(DEFAULT_REVIEW_PAGE_SIZE))
+        payload = runtime.save_review(
+            event_uid,
+            decision=decision,
+            notes=notes,
+            camera_id=camera_id,
+            status_filter=status_filter,
+            page=page,
+            page_size=page_size,
+        )
+        redirect_target = (
+            _text(payload.get("next_detail_url"))
+            or _text(payload.get("next_pending_detail_url"))
+            or _text(payload.get("queue_page_url"))
+            or _text(payload.get("next_pending_queue_url"))
+            or _ui_review_queue_url(status=REVIEW_STATUS_PENDING)
+        )
+        return RedirectResponse(
+            url=str(request.url_for("review_page")) if redirect_target == UI_BASE_PATH else redirect_target,
+            status_code=status.HTTP_303_SEE_OTHER,
         )
 
     @router.get(f"{UI_BASE_PATH}/dashboard", response_class=HTMLResponse, include_in_schema=False)
@@ -1062,6 +1235,7 @@ def create_app(
             "status_filter": queue_context.get("status_filter"),
             "camera_id": queue_context.get("camera_id"),
         }
+        context["queue_page_number"] = int(queue_context["pagination"]["current_page"])
         return templates.TemplateResponse(request, "event_detail.html", context)
 
     @router.get("/retention/preview", tags=["admin"])
@@ -1428,6 +1602,7 @@ def _build_ui_context(
         "page_subtitle": page_subtitle,
         "ui_base_path": UI_BASE_PATH,
         "static_base": "/ui-static",
+        "ui_static_version": UI_STATIC_VERSION,
         "decision_yes": DECISION_YES,
         "decision_no": DECISION_NO,
         "format_count": _format_count,
@@ -1526,9 +1701,9 @@ def _ui_event_detail_url(
 
 def _review_label(value: Optional[str]) -> str:
     if value == DECISION_YES:
-        return "Qualified YES"
+        return "Diterima"
     if value == DECISION_NO:
-        return "Qualified NO"
+        return "Ditolak"
     return "Pending"
 
 
@@ -1606,6 +1781,98 @@ def _format_time(value: Any) -> str:
     else:
         return "Unavailable"
     return time_text.replace("Z", " UTC")
+
+
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    text = _text(value)
+    if text is None:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _event_bucket_datetime(event: Mapping[str, Any]) -> Optional[datetime]:
+    return _parse_iso_datetime(event.get("occurred_at_local")) or _parse_iso_datetime(event.get("occurred_at_utc"))
+
+
+def _empty_dashboard_trend() -> Dict[str, Any]:
+    bucket_count = TREND_BUCKET_HOURS
+    fallback_labels = [f"{index:02d}:00" for index in range(bucket_count)]
+    x_positions = _trend_x_positions(bucket_count)
+    empty_points = [
+        {"x": x_positions[index], "y": _trend_y_position(0, 1), "count": 0, "label": fallback_labels[index]}
+        for index in range(bucket_count)
+    ]
+    return {
+        "empty": True,
+        "bucket_hours": bucket_count,
+        "time_basis_label": "Time (local)",
+        "window_label": f"Last {bucket_count} hours",
+        "buckets": [{"label": label, "a_to_b": 0, "b_to_a": 0, "pending": 0} for label in fallback_labels],
+        "series": [
+            {
+                "key": key,
+                "label": label,
+                "css_class": css_class,
+                "path": _trend_svg_path(empty_points),
+                "points": list(empty_points),
+                "window_total": 0,
+                "latest_value": 0,
+            }
+            for key, label, css_class in (
+                ("a_to_b", "A_TO_B", "dir-a"),
+                ("b_to_a", "B_TO_A", "dir-b"),
+                ("pending", "Pending", "no"),
+            )
+        ],
+        "grid_lines": _trend_grid_lines(1),
+        "window_start_label": "Unavailable",
+        "window_end_label": "Unavailable",
+        "window_totals": {"a_to_b": 0, "b_to_a": 0, "pending": 0},
+    }
+
+
+def _trend_x_positions(bucket_count: int) -> List[int]:
+    chart_left = 60
+    chart_right = 720
+    if bucket_count <= 1:
+        return [chart_right]
+    span = chart_right - chart_left
+    return [
+        chart_left + round(span * index / (bucket_count - 1))
+        for index in range(bucket_count)
+    ]
+
+
+def _trend_y_position(value: int, y_max: int) -> int:
+    top = 26
+    bottom = 154
+    if y_max <= 0:
+        return bottom
+    ratio = max(0.0, min(1.0, float(value) / float(y_max)))
+    return round(bottom - ((bottom - top) * ratio))
+
+
+def _trend_svg_path(points: List[Mapping[str, Any]]) -> str:
+    if not points:
+        return ""
+    commands = [f"M{int(points[0]['x'])} {int(points[0]['y'])}"]
+    commands.extend(f"L{int(point['x'])} {int(point['y'])}" for point in points[1:])
+    return " ".join(commands)
+
+
+def _trend_grid_lines(y_max: int) -> List[Dict[str, int]]:
+    values = sorted({y_max, max(0, round(y_max * 0.6)), max(0, round(y_max * 0.2))}, reverse=True)
+    return [
+        {"value": int(value), "y": _trend_y_position(int(value), y_max)}
+        for value in values
+    ]
 
 
 def _short_event_uid(value: Any, head: int = 10, tail: int = 8) -> str:

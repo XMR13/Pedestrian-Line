@@ -10,7 +10,7 @@
       <span class="d"><span class="pill {{ review_pill_class(event.review_status) }}">{{ review_label(event.review_status) }}</span></span>
     </div>
     <div class="tl-item">
-      <span class="t">Alir review</span>
+      <span class="t">Proses review</span>
       <span class="d">Periksa bukti, pastikan keputusan sesuai, lalu simpan hasil review.</span>
     </div>
   </div>
@@ -24,25 +24,25 @@
     <div class="detail-readonly-value" title="{{ event.event_uid }}">{{ short_event_uid(event.event_uid, 14, 8) }}</div>
   </div>
   {% if detail_queue.previous_item %}
-  <a class="btn" href="{{ detail_queue.previous_item.detail_url }}">Previous</a>
+  <a class="btn" href="{{ detail_queue.previous_item.detail_url }}">Previous (K)</a>
   {% else %}
-  <span class="btn is-disabled" aria-disabled="true">Previous</span>
+  <span class="btn is-disabled" aria-disabled="true">Previous (K)</span>
   {% endif %}
   <a class="btn" href="{{ queue_page_url }}">Back to Queue</a>
   {% if detail_queue.next_item %}
-  <a class="btn primary" href="{{ detail_queue.next_item.detail_url }}">Next</a>
+  <a class="btn primary" href="{{ detail_queue.next_item.detail_url }}">Next (J)</a>
   {% else %}
-  <span class="btn primary is-disabled" aria-disabled="true">Next</span>
+  <span class="btn primary is-disabled" aria-disabled="true">Next (J)</span>
   {% endif %}
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="status-banner" data-review-feedback></div>
+<div class="status-banner" data-review-feedback aria-live="polite"></div>
 {% set display_time = display_event_timestamp(event) %}
 
 <div class="detail-crumb">
-  <a href="{{ back_to_queue_url }}">Review Queue</a>
+  <a href="{{ back_to_queue_url }}">Antrian Review</a>
   <span>/</span>
   <span>{{ event.event_uid }}</span>
 </div>
@@ -50,8 +50,8 @@
 <section class="mode-banner detail">
   <div class="mode-copy">
     <div class="mode-eyebrow">CONTINUOUS REVIEW</div>
-    <div class="mode-title">Review from detail without returning to the queue</div>
-    <div class="mode-desc">Gunakan <kbd class="kbd">J</kbd> / <kbd class="kbd">K</kbd> untuk pindah event dan <kbd class="kbd">Y</kbd> / <kbd class="kbd">N</kbd> untuk menyimpan keputusan lalu lanjut.</div>
+    <div class="mode-title">Review individual data yang melewati crossing</div>
+    <div class="mode-desc"><kbd class="kbd">J</kbd> pindah ke event berikutnya di queue, <kbd class="kbd">K</kbd> kembali ke event sebelumnya, dan <kbd class="kbd">Y</kbd> / <kbd class="kbd">N</kbd> menyimpan keputusan lalu lanjut.</div>
   </div>
   <div class="mode-tags">
     {% if detail_queue.in_queue %}
@@ -59,8 +59,8 @@
     {% else %}
     <span class="pill ink">outside current filter</span>
     {% endif %}
-    <span class="pill">auto advance on save</span>
-    <a class="pill" href="{{ pending_queue_url }}">pending queue</a>
+    <span class="pill">Autosave</span>
+    <a class="pill" href="{{ pending_queue_url }}">Antrian pending.</a>
   </div>
 </section>
 
@@ -167,8 +167,10 @@
   </section>
 
   <aside class="detail-rail">
-    <div
+    <form
       class="panel detail-decision-panel"
+      method="post"
+      action="{{ ui_base_path }}/events/{{ event.event_uid }}/review"
       data-review-actions
       data-current-event="{{ event.event_uid }}"
       data-previous-detail-url="{% if detail_queue.previous_item %}{{ detail_queue.previous_item.detail_url }}{% endif %}"
@@ -176,8 +178,14 @@
       data-queue-url="{{ queue_page_url }}"
       data-pending-queue-url="{{ pending_queue_url }}"
       data-camera-id="{{ detail_queue.camera_id or '' }}"
+      data-status-filter="{{ detail_queue.status_filter }}"
+      data-page="{{ queue_page_number }}"
       data-page-size="{{ page_size }}"
     >
+      <input type="hidden" name="camera_id" value="{{ detail_queue.camera_id or '' }}" />
+      <input type="hidden" name="status_filter" value="{{ detail_queue.status_filter }}" />
+      <input type="hidden" name="page" value="{{ queue_page_number }}" />
+      <input type="hidden" name="page_size" value="{{ page_size }}" />
       <div class="section-head">
         <div>
           <h3>Review</h3>
@@ -186,7 +194,7 @@
       </div>
       <div class="detail-nav-strip" aria-label="Queue navigation">
         <div class="detail-nav-card">
-          <span class="detail-nav-label">Previous</span>
+          <span class="detail-nav-label">Previous (K)</span>
           {% if detail_queue.previous_item %}
           <a class="detail-nav-link" href="{{ detail_queue.previous_item.detail_url }}">{{ short_event_uid(detail_queue.previous_item.event_uid, 12, 6) }}</a>
           {% else %}
@@ -202,7 +210,7 @@
           {% endif %}
         </div>
         <div class="detail-nav-card">
-          <span class="detail-nav-label">Next</span>
+          <span class="detail-nav-label">Next (J)</span>
           {% if detail_queue.next_item %}
           <a class="detail-nav-link" href="{{ detail_queue.next_item.detail_url }}">{{ short_event_uid(detail_queue.next_item.event_uid, 12, 6) }}</a>
           {% else %}
@@ -216,13 +224,13 @@
         <span class="pill">{% if event.scene_url or event.thumb_url %}image ready{% else %}no image{% endif %}</span>
       </div>
       <div class="detail-decision-grid">
-        <button class="btn yes detail-decision-btn" type="button" data-review-submit data-decision="{{ decision_yes }}">Qualified YES</button>
-        <button class="btn no detail-decision-btn" type="button" data-review-submit data-decision="{{ decision_no }}">Qualified NO</button>
+        <button class="btn yes detail-decision-btn" type="submit" name="decision" value="{{ decision_yes }}" data-review-submit data-decision="{{ decision_yes }}">YES</button>
+        <button class="btn no detail-decision-btn" type="submit" name="decision" value="{{ decision_no }}" data-review-submit data-decision="{{ decision_no }}">NO</button>
       </div>
       <p class="caption detail-review-hint">Saat tombol ditekan, sistem menyimpan review lalu membuka event berikutnya pada filter yang sama. Jika tidak ada event berikutnya, halaman kembali ke queue.</p>
       <div class="field">
         <label for="event-detail-notes" style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Notes</label>
-        <textarea id="event-detail-notes" data-review-notes placeholder="Alasan Diterima/Ditolak.">{{ event.review.notes if event.review else "" }}</textarea>
+        <textarea id="event-detail-notes" name="notes" data-review-notes placeholder="Alasan Diterima/Ditolak.">{{ event.review.notes if event.review else "" }}</textarea>
       </div>
       <div class="timeline">
         {% for item in event.timeline %}
@@ -232,7 +240,7 @@
         </div>
         {% endfor %}
       </div>
-    </div>
+    </form>
   </aside>
 </section>
 {% endblock %}

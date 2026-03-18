@@ -90,7 +90,7 @@
 
   const initReviewActions = () => {
     const actionRoot = document.querySelector("[data-review-actions]");
-    if (!(actionRoot instanceof HTMLElement)) {
+    if (!(actionRoot instanceof HTMLFormElement)) {
       return;
     }
     const buttons = Array.from(actionRoot.querySelectorAll("[data-review-submit]")).filter(
@@ -100,71 +100,24 @@
       return;
     }
     const feedback = document.querySelector("[data-review-feedback]");
-    const notes = document.querySelector("[data-review-notes]");
     const currentEventUid = actionRoot.dataset.currentEvent || "";
     const previousDetailUrl = actionRoot.dataset.previousDetailUrl || "";
     const nextDetailUrl = actionRoot.dataset.nextDetailUrl || "";
-    const queueUrl = actionRoot.dataset.queueUrl || "/ui/review";
-    const pendingQueueUrl = actionRoot.dataset.pendingQueueUrl || "/ui/review?status=pending";
-    const cameraId = actionRoot.dataset.cameraId || "";
-    const pageSize = Number.parseInt(actionRoot.dataset.pageSize || "", 10);
     const isDetailPage = body.classList.contains("page-event-detail");
+    const yesButton = buttons.find((button) => String(button.dataset.decision || "") === "qualified_yes") || null;
+    const noButton = buttons.find((button) => String(button.dataset.decision || "") === "qualified_no") || null;
 
-    const submitReview = async (decision) => {
-      if (!currentEventUid) {
+    actionRoot.addEventListener("submit", (event) => {
+      const submitter = event.submitter;
+      if (!(submitter instanceof HTMLButtonElement) || !buttons.includes(submitter)) {
         return;
       }
-      const notesText = notes instanceof HTMLTextAreaElement ? notes.value : "";
-      buttons.forEach((button) => {
-        button.disabled = true;
-      });
-
-      try {
-        const response = await fetch(`/events/${currentEventUid}/review`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            decision,
-            notes: notesText,
-            camera_id: cameraId || null,
-            page_size: Number.isFinite(pageSize) ? pageSize : null,
-          }),
-        });
-        if (!response.ok) {
-          throw new Error("review update failed");
-        }
-        const payload = await response.json();
-        if (isDetailPage) {
-          const fallbackUrl = queueUrl || "/ui/review";
-          const nextUrl = payload.next_pending_detail_url
-            || payload.next_pending_queue_url
-            || nextDetailUrl
-            || pendingQueueUrl
-            || fallbackUrl;
-          if (payload && payload.ok) {
-            window.location.assign(nextUrl);
-            return;
-          }
-        }
-        window.location.reload();
-      } catch (_error) {
-        setBanner(feedback, "Review update failed.", "error");
+      setBanner(feedback, "Saving review…", "info");
+      window.setTimeout(() => {
         buttons.forEach((button) => {
-          button.disabled = false;
+          button.disabled = true;
         });
-      }
-    };
-
-    actionRoot.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) {
-        return;
-      }
-      const button = target.closest("[data-review-submit]");
-      if (!(button instanceof HTMLButtonElement)) {
-        return;
-      }
-      submitReview(String(button.dataset.decision || ""));
+      }, 0);
     });
 
     document.addEventListener("keydown", (event) => {
@@ -178,12 +131,12 @@
         return;
       }
       const key = event.key.toLowerCase();
-      if (key === "y") {
+      if (key === "y" && yesButton) {
         event.preventDefault();
-        submitReview("qualified_yes");
-      } else if (key === "n") {
+        actionRoot.requestSubmit(yesButton);
+      } else if (key === "n" && noButton) {
         event.preventDefault();
-        submitReview("qualified_no");
+        actionRoot.requestSubmit(noButton);
       } else if (key === "j" && nextDetailUrl && isDetailPage) {
         event.preventDefault();
         window.location.assign(nextDetailUrl);
