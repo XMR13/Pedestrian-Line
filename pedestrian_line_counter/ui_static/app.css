@@ -850,6 +850,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   text-overflow: ellipsis;
 }
 
+.detail-header-tools {
+  gap: 8px;
+}
+
 .detail-overview {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1007,6 +1011,62 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   padding: 10px 0 2px;
 }
 
+.detail-nav-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-nav-card {
+  display: grid;
+  gap: 6px;
+  min-height: 82px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(45, 55, 72, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.72)),
+    radial-gradient(180px 100px at 100% 0%, rgba(232, 24, 32, 0.06), transparent 72%);
+}
+
+.detail-nav-card-current {
+  border-color: rgba(232, 24, 32, 0.22);
+  box-shadow: 0 10px 20px rgba(232, 24, 32, 0.08);
+}
+
+.detail-nav-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.28px;
+  text-transform: uppercase;
+}
+
+.detail-nav-link {
+  color: var(--brand-ink-deep);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.detail-nav-link:hover {
+  text-decoration: underline;
+}
+
+.detail-nav-empty {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.detail-nav-position {
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.2;
+  color: var(--brand-ink-deep);
+}
+
 .detail-decision-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1018,6 +1078,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   padding: 10px 12px;
   font-size: 13px;
   font-weight: 700;
+}
+
+.detail-review-hint {
+  margin: -4px 0 0;
 }
 
 @media (max-width: 1260px) {
@@ -1051,6 +1115,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
   .detail-overview-card-wide {
     grid-column: span 2;
+  }
+
+  .detail-nav-strip {
+    grid-template-columns: 1fr;
   }
 }
 

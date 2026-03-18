@@ -63,6 +63,8 @@ class RetentionRequest(BaseModel):
 class ReviewUpdateRequest(BaseModel):
     decision: str
     notes: str = ""
+    camera_id: Optional[str] = None
+    page_size: Optional[int] = Field(default=None, ge=1, le=100)
 
 
 class LoginRequest(BaseModel):
@@ -382,46 +384,51 @@ class EdgeApiRuntime:
         current_page = max(1, int(page))
 
         target_index = None
-        if target_uid is not None:
-            for idx, item in enumerate(queue):
-                if _text(item.get("event_uid")) == target_uid:
-                    target_index = idx
-                    break
-        if target_index is not None:
-            current_page = (target_index // normalized_page_size) + 1
-
-        current_page = min(current_page, total_pages)
-        start_index = (current_page - 1) * normalized_page_size
-        end_index = start_index + normalized_page_size
-        queue = queue[start_index:end_index]
-
-        for item in queue:
+        for idx, item in enumerate(queue):
+            item_page = (idx // normalized_page_size) + 1
             event_uid = _text(item.get("event_uid")) or ""
+            item["queue_position"] = idx + 1
+            item["queue_page"] = item_page
             item["queue_select_url"] = _ui_review_queue_url(
                 camera_id=camera_id,
                 status=normalized_status,
                 event_uid=event_uid,
-                page=current_page,
+                page=item_page,
                 page_size=normalized_page_size,
             )
             item["detail_url"] = _ui_event_detail_url(
                 event_uid,
                 camera_id=camera_id,
                 status=normalized_status,
-                page=current_page,
+                page=item_page,
                 page_size=normalized_page_size,
             )
+            if target_uid is not None and event_uid == target_uid:
+                target_index = idx
+        if target_index is not None:
+            current_page = (target_index // normalized_page_size) + 1
+
+        current_page = min(current_page, total_pages)
+        start_index = (current_page - 1) * normalized_page_size
+        end_index = start_index + normalized_page_size
+        page_items = queue[start_index:end_index]
 
         current_index = 0
-        if target_uid is not None:
-            for idx, item in enumerate(queue):
-                if _text(item.get("event_uid")) == target_uid:
-                    current_index = idx
-                    break
+        if target_index is not None and start_index <= target_index < end_index:
+            current_index = target_index - start_index
 
-        current = queue[current_index] if queue else None
-        previous_item = queue[current_index - 1] if queue and current_index > 0 else None
-        next_item = queue[current_index + 1] if queue and current_index + 1 < len(queue) else None
+        current = page_items[current_index] if page_items else None
+        current_absolute_index: Optional[int] = None
+        if current is not None:
+            current_absolute_index = start_index + current_index
+
+        previous_item = None
+        next_item = None
+        if current_absolute_index is not None:
+            if current_absolute_index > 0:
+                previous_item = queue[current_absolute_index - 1]
+            if current_absolute_index + 1 < len(queue):
+                next_item = queue[current_absolute_index + 1]
         review_counts = self.review_store.summary()
         pending_count = sum(1 for item in all_items if _text(item.get("review_status")) == REVIEW_STATUS_PENDING)
         page_start = start_index + 1 if total_items > 0 else 0
@@ -450,12 +457,13 @@ class EdgeApiRuntime:
             )
 
         return {
-            "items": queue,
+            "items": page_items,
             "current": current,
             "current_index": current_index + 1 if current is not None else 0,
+            "current_absolute_index": current_absolute_index + 1 if current_absolute_index is not None else 0,
             "selected_event_uid": _text(current.get("event_uid")) if current is not None else None,
             "queue_total": total_items,
-            "page_item_count": len(queue),
+            "page_item_count": len(page_items),
             "previous_item": previous_item,
             "next_item": next_item,
             "camera_id": _text(camera_id),
@@ -508,7 +516,15 @@ class EdgeApiRuntime:
             },
         }
 
-    def save_review(self, event_uid: str, *, decision: str, notes: str = "") -> Dict[str, Any]:
+    def save_review(
+        self,
+        event_uid: str,
+        *,
+        decision: str,
+        notes: str = "",
+        camera_id: Optional[str] = None,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
         event = self.get_event(event_uid)
         if event is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"event_uid not found: {event_uid}")
@@ -523,17 +539,33 @@ class EdgeApiRuntime:
             now_utc=_utcnow_iso(),
         )
         updated_event = self.get_event(event_uid)
+        queue_camera_id = _text(camera_id)
         next_pending = self.list_review_queue(
             limit=1,
-            camera_id=_text(event.get("camera_id")),
+            camera_id=queue_camera_id,
             status_filter=REVIEW_STATUS_PENDING,
         )
+        next_event_uid = _text(next_pending[0].get("event_uid")) if next_pending else None
+        normalized_page_size = _normalize_review_page_size(page_size) if page_size is not None else DEFAULT_REVIEW_PAGE_SIZE
         return {
             "ok": True,
             "event_uid": event_uid,
             "review": record.to_dict(),
             "event": updated_event,
-            "next_event_uid": _text(next_pending[0].get("event_uid")) if next_pending else None,
+            "next_event_uid": next_event_uid,
+            "next_pending_detail_url": _ui_event_detail_url(
+                next_event_uid,
+                camera_id=queue_camera_id,
+                status=REVIEW_STATUS_PENDING,
+                page=1,
+                page_size=normalized_page_size,
+            ) if next_event_uid else None,
+            "next_pending_queue_url": _ui_review_queue_url(
+                camera_id=queue_camera_id,
+                status=REVIEW_STATUS_PENDING,
+                page=1,
+                page_size=normalized_page_size,
+            ),
         }
 
     def list_cameras(self) -> List[str]:
@@ -918,6 +950,8 @@ def create_app(
             event_uid,
             decision=payload.decision,
             notes=payload.notes,
+            camera_id=payload.camera_id,
+            page_size=payload.page_size,
         )
 
     @router.get(f"{UI_BASE_PATH}/dashboard", response_class=HTMLResponse, include_in_schema=False)
@@ -982,6 +1016,14 @@ def create_app(
         item = runtime.get_event(event_uid)
         if item is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"event_uid not found: {event_uid}")
+        queue_context = runtime.review_queue_payload(
+            camera_id=camera_id,
+            status_filter=status_filter,
+            current_event_uid=event_uid,
+            page=page,
+            page_size=page_size,
+        )
+        in_queue = _text(queue_context.get("selected_event_uid")) == event_uid
 
         context = _build_ui_context(
             runtime=runtime,
@@ -995,8 +1037,14 @@ def create_app(
         context["back_to_queue_url"] = _ui_review_queue_url(
             camera_id=camera_id,
             status=status_filter,
-            event_uid=event_uid,
+            event_uid=event_uid if in_queue else None,
             page=page,
+            page_size=page_size,
+        )
+        context["queue_page_url"] = _ui_review_queue_url(
+            camera_id=camera_id,
+            status=status_filter,
+            page=int(queue_context["pagination"]["current_page"]),
             page_size=page_size,
         )
         context["pending_queue_url"] = _ui_review_queue_url(
@@ -1005,6 +1053,15 @@ def create_app(
             page=1,
             page_size=page_size,
         )
+        context["detail_queue"] = {
+            "in_queue": in_queue,
+            "position": int(queue_context.get("current_absolute_index") or 0),
+            "total": int(queue_context.get("queue_total") or 0),
+            "previous_item": queue_context.get("previous_item"),
+            "next_item": queue_context.get("next_item"),
+            "status_filter": queue_context.get("status_filter"),
+            "camera_id": queue_context.get("camera_id"),
+        }
         return templates.TemplateResponse(request, "event_detail.html", context)
 
     @router.get("/retention/preview", tags=["admin"])

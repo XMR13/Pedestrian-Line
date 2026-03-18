@@ -102,12 +102,15 @@
     const feedback = document.querySelector("[data-review-feedback]");
     const notes = document.querySelector("[data-review-notes]");
     const currentEventUid = actionRoot.dataset.currentEvent || "";
-    const nextEventUid = actionRoot.dataset.nextEvent || "";
+    const previousDetailUrl = actionRoot.dataset.previousDetailUrl || "";
+    const nextDetailUrl = actionRoot.dataset.nextDetailUrl || "";
+    const queueUrl = actionRoot.dataset.queueUrl || "/ui/review";
+    const pendingQueueUrl = actionRoot.dataset.pendingQueueUrl || "/ui/review?status=pending";
     const cameraId = actionRoot.dataset.cameraId || "";
-    const statusFilter = actionRoot.dataset.statusFilter || "pending";
-    const redirectBase = actionRoot.dataset.reviewBase || "/ui/review";
+    const pageSize = Number.parseInt(actionRoot.dataset.pageSize || "", 10);
+    const isDetailPage = body.classList.contains("page-event-detail");
 
-    const submitReview = async (decision, reloadMode) => {
+    const submitReview = async (decision) => {
       if (!currentEventUid) {
         return;
       }
@@ -120,23 +123,30 @@
         const response = await fetch(`/events/${currentEventUid}/review`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ decision, notes: notesText }),
+          body: JSON.stringify({
+            decision,
+            notes: notesText,
+            camera_id: cameraId || null,
+            page_size: Number.isFinite(pageSize) ? pageSize : null,
+          }),
         });
         if (!response.ok) {
           throw new Error("review update failed");
         }
-        if (reloadMode === "reload") {
-          window.location.reload();
-          return;
-        }
         const payload = await response.json();
-        const targetEvent = nextEventUid || payload.next_event_uid;
-        const params = new URLSearchParams();
-        if (cameraId) params.set("camera_id", cameraId);
-        if (statusFilter) params.set("status", statusFilter);
-        if (targetEvent) params.set("event_uid", targetEvent);
-        const nextUrl = params.toString() ? `${redirectBase}?${params.toString()}` : redirectBase;
-        window.location.assign(nextUrl);
+        if (isDetailPage) {
+          const fallbackUrl = queueUrl || "/ui/review";
+          const nextUrl = payload.next_pending_detail_url
+            || payload.next_pending_queue_url
+            || nextDetailUrl
+            || pendingQueueUrl
+            || fallbackUrl;
+          if (payload && payload.ok) {
+            window.location.assign(nextUrl);
+            return;
+          }
+        }
+        window.location.reload();
       } catch (_error) {
         setBanner(feedback, "Review update failed.", "error");
         buttons.forEach((button) => {
@@ -154,28 +164,32 @@
       if (!(button instanceof HTMLButtonElement)) {
         return;
       }
-      submitReview(String(button.dataset.decision || ""), button.dataset.reloadMode || "");
+      submitReview(String(button.dataset.decision || ""));
     });
 
     document.addEventListener("keydown", (event) => {
       const active = document.activeElement;
-      if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) {
+      if (
+        active instanceof HTMLTextAreaElement
+        || active instanceof HTMLInputElement
+        || active instanceof HTMLSelectElement
+        || (active instanceof HTMLElement && active.isContentEditable)
+      ) {
         return;
       }
       const key = event.key.toLowerCase();
       if (key === "y") {
         event.preventDefault();
-        submitReview("qualified_yes", body.classList.contains("page-event-detail") ? "reload" : "");
+        submitReview("qualified_yes");
       } else if (key === "n") {
         event.preventDefault();
-        submitReview("qualified_no", body.classList.contains("page-event-detail") ? "reload" : "");
-      } else if (key === "j" && nextEventUid && body.classList.contains("page-review")) {
+        submitReview("qualified_no");
+      } else if (key === "j" && nextDetailUrl && isDetailPage) {
         event.preventDefault();
-        const params = new URLSearchParams();
-        if (cameraId) params.set("camera_id", cameraId);
-        if (statusFilter) params.set("status", statusFilter);
-        params.set("event_uid", nextEventUid);
-        window.location.assign(`${redirectBase}?${params.toString()}`);
+        window.location.assign(nextDetailUrl);
+      } else if (key === "k" && previousDetailUrl && isDetailPage) {
+        event.preventDefault();
+        window.location.assign(previousDetailUrl);
       } else if (key === "enter" && currentEventUid && body.classList.contains("page-review")) {
         event.preventDefault();
         window.location.assign(`/ui/events/${encodeURIComponent(currentEventUid)}`);

@@ -23,8 +23,17 @@
     <label>Event UID</label>
     <div class="detail-readonly-value" title="{{ event.event_uid }}">{{ short_event_uid(event.event_uid, 14, 8) }}</div>
   </div>
-  <a class="btn" href="{{ back_to_queue_url }}">Back to Queue</a>
-  <a class="btn primary" href="{{ pending_queue_url }}">Pending Queue</a>
+  {% if detail_queue.previous_item %}
+  <a class="btn" href="{{ detail_queue.previous_item.detail_url }}">Previous</a>
+  {% else %}
+  <span class="btn is-disabled" aria-disabled="true">Previous</span>
+  {% endif %}
+  <a class="btn" href="{{ queue_page_url }}">Back to Queue</a>
+  {% if detail_queue.next_item %}
+  <a class="btn primary" href="{{ detail_queue.next_item.detail_url }}">Next</a>
+  {% else %}
+  <span class="btn primary is-disabled" aria-disabled="true">Next</span>
+  {% endif %}
 </div>
 {% endblock %}
 
@@ -37,6 +46,23 @@
   <span>/</span>
   <span>{{ event.event_uid }}</span>
 </div>
+
+<section class="mode-banner detail">
+  <div class="mode-copy">
+    <div class="mode-eyebrow">CONTINUOUS REVIEW</div>
+    <div class="mode-title">Review from detail without returning to the queue</div>
+    <div class="mode-desc">Gunakan <kbd class="kbd">J</kbd> / <kbd class="kbd">K</kbd> untuk pindah event dan <kbd class="kbd">Y</kbd> / <kbd class="kbd">N</kbd> untuk menyimpan keputusan lalu lanjut.</div>
+  </div>
+  <div class="mode-tags">
+    {% if detail_queue.in_queue %}
+    <span class="pill ink">item {{ detail_queue.position }} / {{ detail_queue.total }}</span>
+    {% else %}
+    <span class="pill ink">outside current filter</span>
+    {% endif %}
+    <span class="pill">auto advance on save</span>
+    <a class="pill" href="{{ pending_queue_url }}">pending queue</a>
+  </div>
+</section>
 
 <section class="detail-overview" aria-label="Event overview">
   <article class="detail-overview-card detail-overview-card-wide detail-overview-card-uid">
@@ -145,11 +171,43 @@
       class="panel detail-decision-panel"
       data-review-actions
       data-current-event="{{ event.event_uid }}"
+      data-previous-detail-url="{% if detail_queue.previous_item %}{{ detail_queue.previous_item.detail_url }}{% endif %}"
+      data-next-detail-url="{% if detail_queue.next_item %}{{ detail_queue.next_item.detail_url }}{% endif %}"
+      data-queue-url="{{ queue_page_url }}"
+      data-pending-queue-url="{{ pending_queue_url }}"
+      data-camera-id="{{ detail_queue.camera_id or '' }}"
+      data-page-size="{{ page_size }}"
     >
       <div class="section-head">
         <div>
           <h3>Review</h3>
-          <p class="caption">Proses review manual setelah melakukan pengecekan bukti.</p>
+          <p class="caption">Proses review manual setelah melakukan pengecekan bukti. Keputusan akan langsung membuka event berikutnya bila tersedia.</p>
+        </div>
+      </div>
+      <div class="detail-nav-strip" aria-label="Queue navigation">
+        <div class="detail-nav-card">
+          <span class="detail-nav-label">Previous</span>
+          {% if detail_queue.previous_item %}
+          <a class="detail-nav-link" href="{{ detail_queue.previous_item.detail_url }}">{{ short_event_uid(detail_queue.previous_item.event_uid, 12, 6) }}</a>
+          {% else %}
+          <span class="detail-nav-empty">No previous event</span>
+          {% endif %}
+        </div>
+        <div class="detail-nav-card detail-nav-card-current">
+          <span class="detail-nav-label">Queue position</span>
+          {% if detail_queue.in_queue %}
+          <strong class="detail-nav-position">{{ detail_queue.position }} / {{ detail_queue.total }}</strong>
+          {% else %}
+          <strong class="detail-nav-position">Outside filter</strong>
+          {% endif %}
+        </div>
+        <div class="detail-nav-card">
+          <span class="detail-nav-label">Next</span>
+          {% if detail_queue.next_item %}
+          <a class="detail-nav-link" href="{{ detail_queue.next_item.detail_url }}">{{ short_event_uid(detail_queue.next_item.event_uid, 12, 6) }}</a>
+          {% else %}
+          <span class="detail-nav-empty">Queue ends here</span>
+          {% endif %}
         </div>
       </div>
       <div class="detail-status-row">
@@ -158,9 +216,10 @@
         <span class="pill">{% if event.scene_url or event.thumb_url %}image ready{% else %}no image{% endif %}</span>
       </div>
       <div class="detail-decision-grid">
-        <button class="btn yes detail-decision-btn" type="button" data-review-submit data-decision="{{ decision_yes }}" data-reload-mode="reload">Qualified YES</button>
-        <button class="btn no detail-decision-btn" type="button" data-review-submit data-decision="{{ decision_no }}" data-reload-mode="reload">Qualified NO</button>
+        <button class="btn yes detail-decision-btn" type="button" data-review-submit data-decision="{{ decision_yes }}">Qualified YES</button>
+        <button class="btn no detail-decision-btn" type="button" data-review-submit data-decision="{{ decision_no }}">Qualified NO</button>
       </div>
+      <p class="caption detail-review-hint">Saat tombol ditekan, sistem menyimpan review lalu membuka event berikutnya pada filter yang sama. Jika tidak ada event berikutnya, halaman kembali ke queue.</p>
       <div class="field">
         <label for="event-detail-notes" style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Notes</label>
         <textarea id="event-detail-notes" data-review-notes placeholder="Alasan Diterima/Ditolak.">{{ event.review.notes if event.review else "" }}</textarea>

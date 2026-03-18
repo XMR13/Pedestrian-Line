@@ -20,6 +20,7 @@ def _write_run(
     run_uid: str,
     started_at_utc: str,
     occurred_at_utc: str,
+    camera_id: str = "cam_01",
     occurred_at_local: str | None = None,
     completed_at_utc: str | None = None,
     last_error: str | None = None,
@@ -32,7 +33,7 @@ def _write_run(
     run_json = {
         "run_uid": run_uid,
         "site_id": "site_a",
-        "camera_id": "cam_01",
+        "camera_id": camera_id,
         "started_at_utc": started_at_utc,
         "updated_at_utc": started_at_utc,
         "ended_at_utc": started_at_utc,
@@ -67,7 +68,7 @@ def _write_run(
                 "event_uid": f"{run_uid}_e1",
                 "run_uid": run_uid,
                 "site_id": "site_a",
-                "camera_id": "cam_01",
+                "camera_id": camera_id,
                 "occurred_at_utc": occurred_at_utc,
                 "occurred_at_local": occurred_at_local,
                 "frame_index": 90,
@@ -434,6 +435,85 @@ def test_review_api_and_event_detail_include_sqlite_backed_review_state(tmp_path
     assert event_payload["timeline"][-1]["description"].startswith("Reviewed as Qualified YES")
 
 
+def test_review_api_returns_next_pending_event_for_detail_flow(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_old",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_new",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    review_resp = client.post(
+        "/events/run_new_e1/review",
+        json={
+            "decision": "qualified_yes",
+            "notes": "move forward",
+            "camera_id": "cam_01",
+            "page_size": 25,
+        },
+    )
+    assert review_resp.status_code == 200
+    payload = review_resp.json()
+    assert payload["next_event_uid"] == "run_old_e1"
+    assert payload["next_pending_detail_url"] == "/ui/events/run_old_e1?camera_id=cam_01&status=pending&page=1&page_size=25"
+    assert payload["next_pending_queue_url"] == "/ui/review?camera_id=cam_01&status=pending&page=1&page_size=25"
+
+    detail = client.get("/ui/events/run_new_e1?camera_id=cam_01&status=pending&page=1&page_size=25")
+    assert detail.status_code == 200
+    assert "data-pending-queue-url=\"/ui/review?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25\"" in detail.text
+
+
+def test_review_api_uses_global_pending_queue_when_detail_is_not_camera_filtered(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_cam_a",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+        camera_id="cam_01",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_cam_b",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+        camera_id="cam_02",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    review_resp = client.post(
+        "/events/run_cam_b_e1/review",
+        json={
+            "decision": "qualified_yes",
+            "notes": "continue globally",
+            "camera_id": None,
+            "page_size": 25,
+        },
+    )
+    assert review_resp.status_code == 200
+    payload = review_resp.json()
+    assert payload["next_event_uid"] == "run_cam_a_e1"
+    assert payload["next_pending_detail_url"] == "/ui/events/run_cam_a_e1?status=pending&page=1&page_size=25"
+    assert payload["next_pending_queue_url"] == "/ui/review?status=pending&page=1&page_size=25"
+
+    detail = client.get("/ui/events/run_cam_b_e1?status=pending&page=1&page_size=25")
+    assert detail.status_code == 200
+    assert "data-camera-id=\"\"" in detail.text
+    assert "data-pending-queue-url=\"/ui/review?status=pending&amp;page=1&amp;page_size=25\"" in detail.text
+
+
 def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     _write_run(
         tmp_path,
@@ -500,6 +580,40 @@ def test_review_queue_paginates_and_preserves_page_state(tmp_path) -> None:
     detail = client.get("/ui/events/run_page_00_e1?camera_id=cam_01&status=pending&page=2&page_size=15")
     assert detail.status_code == 200
     assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_page_00_e1&amp;page=2&amp;page_size=15" in detail.text
+
+
+def test_event_detail_includes_cross_page_review_navigation(tmp_path) -> None:
+    for index in range(30):
+        _write_run(
+            tmp_path,
+            day="2026-03-11",
+            run_uid=f"run_nav_{index:02d}",
+            started_at_utc=f"2026-03-11T10:{index:02d}:00Z",
+            occurred_at_utc=f"2026-03-11T10:{index:02d}:30Z",
+        )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    page_one = client.get("/review/queue", params={"status": "pending", "page": 1, "page_size": 15})
+    assert page_one.status_code == 200
+    boundary_event_uid = page_one.json()["items"][-1]["event_uid"]
+
+    focused_queue = client.get(
+        "/review/queue",
+        params={"status": "pending", "event_uid": boundary_event_uid, "page": 1, "page_size": 15},
+    )
+    assert focused_queue.status_code == 200
+    queue_payload = focused_queue.json()
+    assert queue_payload["current"]["event_uid"] == boundary_event_uid
+    assert queue_payload["current_absolute_index"] == 15
+    assert queue_payload["next_item"]["detail_url"].endswith("&page=2&page_size=15")
+
+    detail = client.get(f"/ui/events/{boundary_event_uid}?status=pending&page=1&page_size=15")
+    assert detail.status_code == 200
+    assert "item 15 / 30" in detail.text
+    assert "auto advance on save" in detail.text
+    assert "&amp;page=2&amp;page_size=15" in detail.text
+    assert "data-next-detail-url=" in detail.text
 
 
 def test_ui_login_gates_pages_and_sets_cookie(tmp_path) -> None:
