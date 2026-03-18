@@ -264,20 +264,58 @@ def test_dashboard_payload_builds_real_hourly_trend(tmp_path) -> None:
     )
     assert review_resp.status_code == 200
 
-    trend = app.state.runtime.dashboard_payload()["trend"]
+    trend = app.state.runtime.dashboard_payload(date_from="2026-03-11", date_to="2026-03-11")["trend"]
     assert trend["empty"] is False
-    assert trend["bucket_hours"] == 12
-    assert trend["time_basis_label"] == "Time (local)"
+    assert trend["bucket_mode"] == "hour"
+    assert trend["bucket_hours"] == 24
+    assert trend["time_basis_label"] == "Time (UTC)"
     assert trend["window_totals"] == {"a_to_b": 2, "b_to_a": 1, "pending": 2}
-    assert trend["buckets"][-2]["label"] == "07:00"
-    assert trend["buckets"][-1]["label"] == "08:00"
-    assert trend["buckets"][-2]["a_to_b"] == 1
-    assert trend["buckets"][-2]["b_to_a"] == 0
-    assert trend["buckets"][-2]["pending"] == 1
-    assert trend["buckets"][-1]["a_to_b"] == 1
-    assert trend["buckets"][-1]["b_to_a"] == 1
-    assert trend["buckets"][-1]["pending"] == 1
+    assert trend["window_label"] == "UTC day 2026-03-11"
+    assert trend["buckets"][0]["label"] == "00:00"
+    assert trend["buckets"][1]["label"] == "01:00"
+    assert trend["buckets"][0]["a_to_b"] == 1
+    assert trend["buckets"][0]["b_to_a"] == 0
+    assert trend["buckets"][0]["pending"] == 1
+    assert trend["buckets"][1]["a_to_b"] == 1
+    assert trend["buckets"][1]["b_to_a"] == 1
+    assert trend["buckets"][1]["pending"] == 1
     assert trend["series"][0]["path"].startswith("M")
+
+
+def test_dashboard_payload_adapts_trend_buckets_for_longer_date_ranges(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-01",
+        run_uid="run_mar_01",
+        started_at_utc="2026-03-01T10:00:00Z",
+        occurred_at_utc="2026-03-01T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-05",
+        run_uid="run_mar_05",
+        started_at_utc="2026-03-05T10:00:00Z",
+        occurred_at_utc="2026-03-05T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-04-02",
+        run_uid="run_apr_02",
+        started_at_utc="2026-04-02T10:00:00Z",
+        occurred_at_utc="2026-04-02T10:05:00Z",
+    )
+
+    app = create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3")
+
+    weekly_trend = app.state.runtime.dashboard_payload(date_from="2026-03-01", date_to="2026-03-07")["trend"]
+    assert weekly_trend["bucket_mode"] == "day"
+    assert weekly_trend["buckets"][0]["label"] == "03-01"
+    assert weekly_trend["buckets"][4]["label"] == "03-05"
+
+    monthly_trend = app.state.runtime.dashboard_payload(date_from="2026-03-01", date_to="2026-04-30")["trend"]
+    assert monthly_trend["bucket_mode"] == "month"
+    assert monthly_trend["buckets"][0]["label"] == "2026-03"
+    assert monthly_trend["buckets"][1]["label"] == "2026-04"
 
 
 def test_retention_preview_and_run_endpoint_apply_policy(tmp_path) -> None:
@@ -648,6 +686,109 @@ def test_event_detail_form_submit_redirects_to_next_detail(tmp_path) -> None:
     assert response.headers["location"] == "/ui/events/run_old_e1?camera_id=cam_01&status=pending&page=1&page_size=25"
 
 
+def test_review_queue_date_filter_preserves_state_in_detail_links(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-10",
+        run_uid="run_old_day",
+        started_at_utc="2026-03-10T10:00:00Z",
+        occurred_at_utc="2026-03-10T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_target_day",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    queue = client.get(
+        "/review/queue",
+        params={
+            "status": "pending",
+            "camera_id": "cam_01",
+            "page": 1,
+            "page_size": 25,
+            "date_from": "2026-03-11",
+            "date_to": "2026-03-11",
+        },
+    )
+    assert queue.status_code == 200
+    payload = queue.json()
+    assert payload["queue_total"] == 1
+    assert payload["items"][0]["event_uid"] == "run_target_day_e1"
+    assert payload["items"][0]["detail_url"] == "/ui/events/run_target_day_e1?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11"
+
+    detail = client.get("/ui/events/run_target_day_e1?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11")
+    assert detail.status_code == 200
+    assert "value=\"2026-03-11\"" in detail.text
+    assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_target_day_e1&amp;page=1&amp;page_size=25&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in detail.text
+
+
+def test_review_submit_keeps_date_range_and_stays_within_filtered_queue(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-10",
+        run_uid="run_outside_range",
+        started_at_utc="2026-03-10T10:00:00Z",
+        occurred_at_utc="2026-03-10T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_in_range_old",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_in_range_new",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    review_resp = client.post(
+        "/events/run_in_range_new_e1/review",
+        json={
+            "decision": "qualified_yes",
+            "notes": "filtered review",
+            "camera_id": "cam_01",
+            "status_filter": "pending",
+            "page": 1,
+            "page_size": 25,
+            "date_from": "2026-03-11",
+            "date_to": "2026-03-11",
+        },
+    )
+    assert review_resp.status_code == 200
+    payload = review_resp.json()
+    assert payload["next_event_uid"] == "run_in_range_old_e1"
+    assert payload["next_detail_url"] == "/ui/events/run_in_range_old_e1?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11"
+    assert payload["next_pending_detail_url"] == "/ui/events/run_in_range_old_e1?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11"
+
+    response = client.post(
+        "/ui/events/run_in_range_new_e1/review",
+        data={
+            "decision": "qualified_yes",
+            "notes": "use redirect flow",
+            "camera_id": "cam_01",
+            "status_filter": "pending",
+            "page": "1",
+            "page_size": "25",
+            "date_from": "2026-03-11",
+            "date_to": "2026-03-11",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ui/events/run_in_range_old_e1?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11"
+
+
 def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     _write_run(
         tmp_path,
@@ -659,26 +800,28 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     )
     client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
 
-    dashboard = client.get("/ui/dashboard")
+    dashboard = client.get("/ui/dashboard?date_from=2026-03-11&date_to=2026-03-11")
     assert dashboard.status_code == 200
     assert "Traffic Monitoring Dashboard" in dashboard.text
     assert "Event terbaru" in dashboard.text
     assert "Traffic trend chart from local spool data" in dashboard.text
     assert "placeholder chart" not in dashboard.text
+    assert "value=\"2026-03-11\"" in dashboard.text
+    assert "/ui/review?status=pending&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in dashboard.text
 
-    review = client.get("/ui/review?camera_id=cam_01&status=pending&page=1&page_size=25")
+    review = client.get("/ui/review?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11")
     assert review.status_code == 200
     assert "Antrian Review" in review.text
     assert "run_ui_e1" in review.text
     assert "17:05:00+07:00" in review.text
-    assert "/ui/events/run_ui_e1?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25" in review.text
+    assert "/ui/events/run_ui_e1?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in review.text
 
-    detail = client.get("/ui/events/run_ui_e1?camera_id=cam_01&status=pending&page=1&page_size=25")
+    detail = client.get("/ui/events/run_ui_e1?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11")
     assert detail.status_code == 200
     assert "Event Detail" in detail.text
     assert "run_ui_e1" in detail.text
     assert "2026-03-11T17:05:00+07:00" in detail.text
-    assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_ui_e1&amp;page=1&amp;page_size=25" in detail.text
+    assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_ui_e1&amp;page=1&amp;page_size=25&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in detail.text
 
     css = client.get("/ui-static/app.css")
     assert css.status_code == 200

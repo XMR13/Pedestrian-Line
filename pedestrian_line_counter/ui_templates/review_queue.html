@@ -50,6 +50,14 @@
     </select>
   </div>
   <div class="field">
+    <label>Tanggal awal</label>
+    <input type="date" name="date_from" value="{{ date_from }}" />
+  </div>
+  <div class="field">
+    <label>Tanggal akhir</label>
+    <input type="date" name="date_to" value="{{ date_to }}" />
+  </div>
+  <div class="field">
     <label>Selection</label>
     <input type="text" value="{% if current %}{{ current_index }} / {{ page_item_count }}{% else %}0 / {{ page_item_count }}{% endif %}" readonly data-queue-selection-input />
   </div>
@@ -68,6 +76,7 @@
     <span class="pill" data-queue-position-pill>item {{ current_index }} / {{ page_item_count }}</span>
     <span class="pill ink">hotkeys J/K + Enter</span>
     <span class="pill">pending {{ format_count(counts.pending) }}</span>
+    <span class="pill">{% if date_filter.active %}{{ date_filter.label }}{% else %}all UTC dates{% endif %}</span>
   </div>
 </section>
 

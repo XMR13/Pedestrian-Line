@@ -1,10 +1,18 @@
 {% extends "base.html" %}
 
 {% block topbar_filters %}
-<div class="filters">
+<form class="filters" method="get" action="{{ ui_base_path }}/dashboard">
   <div class="field">
     <label>Sumber</label>
     <input type="text" value="{{ latest_run.source_type or 'spool' }}" readonly />
+  </div>
+  <div class="field">
+    <label>Tanggal awal</label>
+    <input type="date" name="date_from" value="{{ date_from }}" />
+  </div>
+  <div class="field">
+    <label>Tanggal akhir</label>
+    <input type="date" name="date_to" value="{{ date_to }}" />
   </div>
   <div class="field">
     <label>Camera</label>
@@ -14,7 +22,8 @@
     <label>Databases</label>
     <input type="text" value="SQLite" readonly />
   </div>
-</div>
+  <button class="btn" type="submit">Apply</button>
+</form>
 {% endblock %}
 
 {% block content %}
@@ -41,7 +50,7 @@
       <span class="pill">runs {{ format_count(metrics.runs_total) }}</span>
       <span class="pill ink">pending {{ format_count(pending_reviews) }}</span>
       <span class="pill brand">reviewed {{ format_count(review_counts.reviewed_total) }}</span>
-      <span class="pill">date: all</span>
+      <span class="pill">{% if date_filter.active %}{{ date_filter.label }}{% else %}all UTC dates{% endif %}</span>
     </div>
   </section>
 
@@ -99,7 +108,7 @@
           <h3>Review lane</h3>
           <p class="caption">Status antrian review</p>
         </div>
-        <a class="pill" href="{{ ui_base_path }}/review">Buka antrian review</a>
+        <a class="pill" href="{{ review_queue_url }}">Buka antrian review</a>
       </div>
       <div class="queue-status-grid compact-grid">
         <div class="queue-status-card">
@@ -124,7 +133,7 @@
           <span class="head">Langkah selanjutnya</span>
           <span class="body">Buka antrian review untuk memeriksa apakah vehicle tersebut termasuk dalam kategori atau tidak.</span>
         </div>
-        <a class="btn primary" href="{{ ui_base_path }}/review">Bukan antrian review</a>
+        <a class="btn primary" href="{{ review_queue_url }}">Bukan antrian review</a>
       </div>
     </article>
   </section>
@@ -173,7 +182,7 @@
               <td>{{ item.direction or "Unknown" }}</td>
               <td>{{ item.class_name or "Unknown" }}</td>
               <td><span class="pill {{ review_pill_class(item.review_status) }}">{{ review_label(item.review_status) }}</span></td>
-              <td><a class="btn secondary" href="{{ ui_base_path }}/events/{{ item.event_uid }}" style="text-decoration:none;">Inspect</a></td>
+              <td><a class="btn secondary" href="{{ item.detail_url }}" style="text-decoration:none;">Inspect</a></td>
             </tr>
             {% else %}
             <tr><td colspan="6">No events found in the configured spool yet.</td></tr>

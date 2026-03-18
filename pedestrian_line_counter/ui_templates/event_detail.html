@@ -59,7 +59,8 @@
     {% else %}
     <span class="pill ink">outside current filter</span>
     {% endif %}
-    <span class="pill">Autosave</span>
+    <span class="pill">auto advance on save</span>
+    <span class="pill">{% if detail_queue.date_filter.active %}{{ detail_queue.date_filter.label }}{% else %}all UTC dates{% endif %}</span>
     <a class="pill" href="{{ pending_queue_url }}">Antrian pending.</a>
   </div>
 </section>
@@ -181,11 +182,15 @@
       data-status-filter="{{ detail_queue.status_filter }}"
       data-page="{{ queue_page_number }}"
       data-page-size="{{ page_size }}"
+      data-date-from="{{ detail_queue.date_from or '' }}"
+      data-date-to="{{ detail_queue.date_to or '' }}"
     >
       <input type="hidden" name="camera_id" value="{{ detail_queue.camera_id or '' }}" />
       <input type="hidden" name="status_filter" value="{{ detail_queue.status_filter }}" />
       <input type="hidden" name="page" value="{{ queue_page_number }}" />
       <input type="hidden" name="page_size" value="{{ page_size }}" />
+      <input type="hidden" name="date_from" value="{{ detail_queue.date_from or '' }}" />
+      <input type="hidden" name="date_to" value="{{ detail_queue.date_to or '' }}" />
       <div class="section-head">
         <div>
           <h3>Review</h3>

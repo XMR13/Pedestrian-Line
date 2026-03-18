@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-import json
+from datetime import datetime, timedelta
 from pathlib import Path
 import secrets
 from typing import Any, Dict, Iterable, List, Mapping, Optional
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
 
 from .config import ROOT_DIR, SpoolRetentionConfig
 from .event_uploader import (
@@ -26,66 +24,81 @@ from .review_store import DECISION_NO, DECISION_YES, ReviewStore
 from .spool_retention import apply_retention_policy
 from .ui_auth import UiAuthConfig, issue_session_token, validate_session_token
 
-
-DEFAULT_STATE_FILENAME = ".portal_upload_state.json"
-DEFAULT_MUTATION_API_KEY_HEADER = "X-API-Key"
-MAX_RUNS_LIMIT = 200
-MAX_EVENTS_LIMIT = 500
-DEFAULT_REVIEW_DB_FILENAME = ".edge_ui_reviews.sqlite3"
-UI_BASE_PATH = "/ui"
-UI_TEMPLATE_DIR = Path(__file__).resolve().parent / "ui_templates"
-UI_STATIC_DIR = Path(__file__).resolve().parent / "ui_static"
-UI_ASSET_DIR = ROOT_DIR / "portal" / "mockups" / "assets"
-REVIEW_STATUS_PENDING = "pending"
-REVIEW_STATUS_ALL = "all"
-DEFAULT_REVIEW_PAGE_SIZE = 25
-REVIEW_PAGE_SIZE_OPTIONS = (15, 20, 25)
-UI_STATIC_VERSION = max(
-    int(path.stat().st_mtime)
-    for path in (UI_STATIC_DIR / "app.css", UI_STATIC_DIR / "app.js")
+## Import all the necessary helpers and common definitions for the API implementation
+from ._api_common import (
+    DEFAULT_MUTATION_API_KEY_HEADER,
+    DEFAULT_REVIEW_DB_FILENAME,
+    DEFAULT_REVIEW_PAGE_SIZE,
+    DEFAULT_STATE_FILENAME,
+    LoginRequest,
+    MAX_EVENTS_LIMIT,
+    MAX_RUNS_LIMIT,
+    MutationAuthConfig,
+    REVIEW_PAGE_SIZE_OPTIONS,
+    REVIEW_STATUS_ALL,
+    REVIEW_STATUS_PENDING,
+    RetentionRequest,
+    ReviewUpdateRequest,
+    SingleRunSyncRequest,
+    SyncRequest,
+    UI_ASSET_DIR,
+    UI_BASE_PATH,
+    UI_STATIC_DIR,
+    UI_TEMPLATE_DIR,
+    UiDateRange,
 )
-TREND_BUCKET_HOURS = 12
-
-
-class SyncRequest(BaseModel):
-    force: bool = False
-    dry_run: bool = False
-    max_runs: Optional[int] = Field(default=None, ge=1)
-
-
-class SingleRunSyncRequest(BaseModel):
-    force: bool = False
-    dry_run: bool = False
-
-
-class RetentionRequest(BaseModel):
-    dry_run: bool = True
-    max_age_days: Optional[int] = Field(default=None, ge=0)
-    state_filename: Optional[str] = None
-    protect_incomplete_runs: Optional[bool] = None
-
-
-class ReviewUpdateRequest(BaseModel):
-    decision: str
-    notes: str = ""
-    camera_id: Optional[str] = None
-    status_filter: Optional[str] = None
-    page: Optional[int] = Field(default=None, ge=1)
-    page_size: Optional[int] = Field(default=None, ge=1, le=100)
-
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-@dataclass
-class MutationAuthConfig:
-    api_key: str = ""
-    header_name: str = DEFAULT_MUTATION_API_KEY_HEADER
-
-    def enabled(self) -> bool:
-        return bool(str(self.api_key).strip())
+from ._api_helpers import (
+    _build_event_summary,
+    _build_run_summary,
+    _build_ui_context,
+    _clamp_limit,
+    _coalesce_text,
+    _compact_path,
+    _datetime_in_date_range,
+    _delivery_state_name,
+    _display_event_timestamp,
+    _empty_dashboard_trend,
+    _event_occurrence_utc,
+    _event_sort_key,
+    _format_count,
+    _format_date,
+    _format_datetime,
+    _format_float,
+    _format_time,
+    _load_json_dict,
+    _mapping_get_float,
+    _mapping_get_int,
+    _month_start,
+    _normalize_review_filter,
+    _normalize_review_page_size,
+    _normalize_ui_date_range,
+    _parse_iso_datetime,
+    _path_to_public_url,
+    _relpath_to_public_url,
+    _review_label,
+    _review_pill_class,
+    _run_occurrence_utc,
+    _run_sort_key,
+    _serialize_retention_summary,
+    _serialize_retention_run_info,
+    _select_trend_bucket_mode,
+    _short_event_uid,
+    _text,
+    _trend_grid_lines,
+    _trend_svg_path,
+    _trend_window_bounds,
+    _trend_window_label,
+    _trend_x_positions,
+    _trend_y_position,
+    _ui_date_range_context,
+    _ui_event_detail_url,
+    _ui_query_string,
+    _ui_review_queue_url,
+    _utcnow_iso,
+    _iter_jsonl_records,
+    _align_datetime_to_bucket,
+    _build_trend_buckets,
+)
 
 
 @dataclass
@@ -139,39 +152,38 @@ class EdgeApiRuntime:
             "latest_run": runs[0] if runs else None,
         }
 
-    def metrics_payload(self) -> Dict[str, Any]:
-        delivery_counts = self._collect_delivery_counts()
-        review_counts = self.review_store.summary()
+    def metrics_payload(
+        self,
+        *,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
+        run_summaries = list(self._iter_all_runs(date_range=date_range))
+        filtered_events = self._attach_review_data(list(self._iter_all_events(date_range=date_range)))
+        delivery_counts = self._collect_delivery_counts(run_summaries=run_summaries)
+        review_counts = self._review_counts_for_items(filtered_events)
         lifecycle_status_counts: Dict[str, int] = {}
         totals = {
-            "events_total": 0,
+            "events_total": len(filtered_events),
             "frames_total": 0,
             "frames_processed": 0,
             "events_emitted_total": 0,
-            "count_a_to_b_total": 0,
-            "count_b_to_a_total": 0,
+            "count_a_to_b_total": sum(1 for item in filtered_events if _text(item.get("direction")) == "A_TO_B"),
+            "count_b_to_a_total": sum(1 for item in filtered_events if _text(item.get("direction")) == "B_TO_A"),
         }
         latest_run: Optional[Dict[str, Any]] = None
         latest_key: tuple[str, str] = ("", "")
 
-        for run_dir in iter_spool_runs(self.spool_dir):
-            run_meta = _load_json_dict(run_dir / "run.json")
-            if run_meta is None:
-                continue
-            status_meta = _load_json_dict(run_dir / "status.json")
-            state_meta = _load_json_dict(run_dir / self._state_filename())
-            summary = _build_run_summary(run_dir, run_meta, status_meta, state_meta)
-            totals["events_total"] += len(_iter_jsonl_records(run_dir / "events.jsonl"))
+        for summary in run_summaries:
             for key in (
                 "frames_total",
                 "frames_processed",
                 "events_emitted_total",
-                "count_a_to_b",
-                "count_b_to_a",
             ):
                 value = _mapping_get_int(summary, key)
                 if value is not None:
-                    totals[f"{key}_total" if key.startswith("count_") else key] += value
+                    totals[key] += value
 
             lifecycle_status = _text(summary.get("lifecycle_status"))
             if lifecycle_status is not None:
@@ -287,17 +299,15 @@ class EdgeApiRuntime:
             protect_incomplete_runs=protect_incomplete_runs,
         )
 
-    def list_recent_runs(self, *, limit: int = 20) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
-        state_filename = self._state_filename()
-        for run_dir in iter_spool_runs(self.spool_dir):
-            run_meta = _load_json_dict(run_dir / "run.json")
-            if run_meta is None:
-                continue
-            status_meta = _load_json_dict(run_dir / "status.json")
-            state_meta = _load_json_dict(run_dir / state_filename)
-            rows.append(_build_run_summary(run_dir, run_meta, status_meta, state_meta))
-
+    def list_recent_runs(
+        self,
+        *,
+        limit: int = 20,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
+        rows = list(self._iter_all_runs(date_range=date_range))
         rows.sort(key=_run_sort_key, reverse=True)
         return rows[: _clamp_limit(limit, MAX_RUNS_LIMIT)]
 
@@ -307,23 +317,17 @@ class EdgeApiRuntime:
         limit: int = 50,
         run_uid: Optional[str] = None,
         camera_id: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
         target_run_uid = str(run_uid).strip() if run_uid else None
-        target_camera_id = str(camera_id).strip() if camera_id else None
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
 
-        for run_dir in iter_spool_runs(self.spool_dir):
-            run_meta = _load_json_dict(run_dir / "run.json")
-            if run_meta is None:
+        for summary in self._iter_all_events(camera_id=camera_id, date_range=date_range):
+            if target_run_uid is not None and _text(summary.get("run_uid")) != target_run_uid:
                 continue
-            current_run_uid = _text(run_meta.get("run_uid"))
-            if target_run_uid is not None and current_run_uid != target_run_uid:
-                continue
-            for event in _iter_jsonl_records(run_dir / "events.jsonl"):
-                summary = _build_event_summary(run_dir, run_meta, event, spool_dir=self.spool_dir)
-                if target_camera_id is not None and _text(summary.get("camera_id")) != target_camera_id:
-                    continue
-                items.append(summary)
+            items.append(summary)
 
         items.sort(key=_event_sort_key, reverse=True)
         merged = self._attach_review_data(items[: _clamp_limit(limit, MAX_EVENTS_LIMIT)])
@@ -357,8 +361,11 @@ class EdgeApiRuntime:
         limit: int = 100,
         camera_id: Optional[str] = None,
         status_filter: str = REVIEW_STATUS_PENDING,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        items = list(self._iter_all_events(camera_id=camera_id))
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
+        items = list(self._iter_all_events(camera_id=camera_id, date_range=date_range))
         items = self._attach_review_data(items)
         normalized_status = _normalize_review_filter(status_filter)
         if normalized_status != REVIEW_STATUS_ALL:
@@ -376,8 +383,11 @@ class EdgeApiRuntime:
         current_event_uid: Optional[str] = None,
         page: int = 1,
         page_size: int = DEFAULT_REVIEW_PAGE_SIZE,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> Dict[str, Any]:
-        all_items = self._attach_review_data(list(self._iter_all_events(camera_id=camera_id)))
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
+        all_items = self._attach_review_data(list(self._iter_all_events(camera_id=camera_id, date_range=date_range)))
         normalized_status = _normalize_review_filter(status_filter)
         queue = list(all_items)
         if normalized_status != REVIEW_STATUS_ALL:
@@ -402,6 +412,8 @@ class EdgeApiRuntime:
                 event_uid=event_uid,
                 page=item_page,
                 page_size=normalized_page_size,
+                date_from=date_range.date_from,
+                date_to=date_range.date_to,
             )
             item["detail_url"] = _ui_event_detail_url(
                 event_uid,
@@ -409,6 +421,8 @@ class EdgeApiRuntime:
                 status=normalized_status,
                 page=item_page,
                 page_size=normalized_page_size,
+                date_from=date_range.date_from,
+                date_to=date_range.date_to,
             )
             if target_uid is not None and event_uid == target_uid:
                 target_index = idx
@@ -436,8 +450,7 @@ class EdgeApiRuntime:
                 previous_item = queue[current_absolute_index - 1]
             if current_absolute_index + 1 < len(queue):
                 next_item = queue[current_absolute_index + 1]
-        review_counts = self.review_store.summary()
-        pending_count = sum(1 for item in all_items if _text(item.get("review_status")) == REVIEW_STATUS_PENDING)
+        review_counts = self._review_counts_for_items(all_items)
         page_start = start_index + 1 if total_items > 0 else 0
         page_end = min(end_index, total_items)
         page_window_start = max(1, current_page - 2)
@@ -458,6 +471,8 @@ class EdgeApiRuntime:
                         status=normalized_status,
                         page=page_number,
                         page_size=normalized_page_size,
+                        date_from=date_range.date_from,
+                        date_to=date_range.date_to,
                     ),
                     "current": page_number == current_page,
                 }
@@ -478,6 +493,9 @@ class EdgeApiRuntime:
             "cameras": cameras,
             "page_size": normalized_page_size,
             "page_size_options": list(REVIEW_PAGE_SIZE_OPTIONS),
+            "date_from": date_range.date_from or "",
+            "date_to": date_range.date_to or "",
+            "date_filter": _ui_date_range_context(date_range),
             "pagination": {
                 "current_page": current_page,
                 "page_size": normalized_page_size,
@@ -492,12 +510,16 @@ class EdgeApiRuntime:
                     status=normalized_status,
                     page=current_page - 1,
                     page_size=normalized_page_size,
+                    date_from=date_range.date_from,
+                    date_to=date_range.date_to,
                 ) if current_page > 1 else None,
                 "next_url": _ui_review_queue_url(
                     camera_id=camera_id,
                     status=normalized_status,
                     page=current_page + 1,
                     page_size=normalized_page_size,
+                    date_from=date_range.date_from,
+                    date_to=date_range.date_to,
                 ) if current_page < total_pages else None,
                 "show_first": page_window_start > 1,
                 "show_last": page_window_end < total_pages,
@@ -506,17 +528,21 @@ class EdgeApiRuntime:
                     status=normalized_status,
                     page=1,
                     page_size=normalized_page_size,
+                    date_from=date_range.date_from,
+                    date_to=date_range.date_to,
                 ),
                 "last_url": _ui_review_queue_url(
                     camera_id=camera_id,
                     status=normalized_status,
                     page=total_pages,
                     page_size=normalized_page_size,
+                    date_from=date_range.date_from,
+                    date_to=date_range.date_to,
                 ),
                 "pages": pagination_pages,
             },
             "counts": {
-                "pending": max(0, pending_count),
+                "pending": review_counts["pending"],
                 "qualified_yes": review_counts[DECISION_YES],
                 "qualified_no": review_counts[DECISION_NO],
                 "reviewed_total": review_counts["reviewed_total"],
@@ -533,6 +559,8 @@ class EdgeApiRuntime:
         status_filter: Optional[str] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> Dict[str, Any]:
         event = self.get_event(event_uid)
         if event is None:
@@ -542,12 +570,15 @@ class EdgeApiRuntime:
         normalized_status = _normalize_review_filter(status_filter)
         normalized_page = max(1, int(page or 1))
         normalized_page_size = _normalize_review_page_size(page_size) if page_size is not None else DEFAULT_REVIEW_PAGE_SIZE
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
         queue_context = self.review_queue_payload(
             camera_id=queue_camera_id,
             status_filter=normalized_status,
             current_event_uid=event_uid,
             page=normalized_page,
             page_size=normalized_page_size,
+            date_from=date_range.date_from,
+            date_to=date_range.date_to,
         )
         in_queue_before_save = _text(queue_context.get("selected_event_uid")) == event_uid
         continuation_item = None
@@ -569,6 +600,8 @@ class EdgeApiRuntime:
             limit=1,
             camera_id=queue_camera_id,
             status_filter=REVIEW_STATUS_PENDING,
+            date_from=date_range.date_from,
+            date_to=date_range.date_to,
         )
         next_event_uid = _text(next_pending[0].get("event_uid")) if next_pending else None
         return {
@@ -583,6 +616,8 @@ class EdgeApiRuntime:
                 status=normalized_status,
                 page=queue_page_number,
                 page_size=normalized_page_size,
+                date_from=date_range.date_from,
+                date_to=date_range.date_to,
             ),
             "next_pending_detail_url": _ui_event_detail_url(
                 next_event_uid,
@@ -590,12 +625,16 @@ class EdgeApiRuntime:
                 status=REVIEW_STATUS_PENDING,
                 page=1,
                 page_size=normalized_page_size,
+                date_from=date_range.date_from,
+                date_to=date_range.date_to,
             ) if next_event_uid else None,
             "next_pending_queue_url": _ui_review_queue_url(
                 camera_id=queue_camera_id,
                 status=REVIEW_STATUS_PENDING,
                 page=1,
                 page_size=normalized_page_size,
+                date_from=date_range.date_from,
+                date_to=date_range.date_to,
             ),
         }
 
@@ -603,14 +642,27 @@ class EdgeApiRuntime:
         cameras = {_text(item.get("camera_id")) for item in self._iter_all_events()}
         return sorted(item for item in cameras if item)
 
-    def dashboard_payload(self) -> Dict[str, Any]:
-        metrics = self.metrics_payload()
-        recent_events = self.list_recent_events(limit=8)
-        recent_runs = self.list_recent_runs(limit=5)
+    def dashboard_payload(
+        self,
+        *,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
+        metrics = self.metrics_payload(date_from=date_range.date_from, date_to=date_range.date_to)
+        recent_events = self.list_recent_events(limit=8, date_from=date_range.date_from, date_to=date_range.date_to)
+        for item in recent_events:
+            item["detail_url"] = _ui_event_detail_url(
+                _text(item.get("event_uid")) or "",
+                status=REVIEW_STATUS_ALL,
+                date_from=date_range.date_from,
+                date_to=date_range.date_to,
+            )
+        recent_runs = self.list_recent_runs(limit=5, date_from=date_range.date_from, date_to=date_range.date_to)
         latest_run = metrics.get("latest_run") or {}
         review_counts = metrics.get("review_counts") or {}
         pending_reviews = max(0, int(metrics.get("events_total", 0)) - int(review_counts.get("reviewed_total", 0)))
-        trend = self._build_dashboard_trend()
+        trend = self._build_dashboard_trend(date_range=date_range)
         return {
             "metrics": metrics,
             "recent_events": recent_events,
@@ -620,42 +672,42 @@ class EdgeApiRuntime:
             "review_counts": review_counts,
             "cameras": self.list_cameras(),
             "trend": trend,
+            "date_from": date_range.date_from or "",
+            "date_to": date_range.date_to or "",
+            "date_filter": _ui_date_range_context(date_range),
+            "review_queue_url": _ui_review_queue_url(
+                status=REVIEW_STATUS_PENDING,
+                date_from=date_range.date_from,
+                date_to=date_range.date_to,
+            ),
         }
 
-    def _build_dashboard_trend(self) -> Dict[str, Any]:
-        events = self._attach_review_data(list(self._iter_all_events()))
+    def _build_dashboard_trend(self, *, date_range: UiDateRange) -> Dict[str, Any]:
+        events = self._attach_review_data(list(self._iter_all_events(date_range=date_range)))
         points: List[tuple[datetime, Dict[str, Any]]] = []
         for event in events:
-            event_dt = _event_bucket_datetime(event)
+            event_dt = _event_occurrence_utc(event)
             if event_dt is None:
                 continue
             points.append((event_dt, event))
 
         if not points:
-            return _empty_dashboard_trend()
+            return _empty_dashboard_trend(date_range=date_range)
 
-        latest_dt = max(item[0] for item in points)
-        latest_bucket = latest_dt.replace(minute=0, second=0, microsecond=0)
-        bucket_count = TREND_BUCKET_HOURS
-        bucket_start = latest_bucket - timedelta(hours=bucket_count - 1)
+        range_start, range_end_exclusive = _trend_window_bounds(date_range=date_range, points=points)
+        bucket_mode = _select_trend_bucket_mode(range_start=range_start, range_end_exclusive=range_end_exclusive)
+        buckets = _build_trend_buckets(
+            range_start=range_start,
+            range_end_exclusive=range_end_exclusive,
+            bucket_mode=bucket_mode,
+        )
         bucket_index = {
-            bucket_start + timedelta(hours=offset): offset
-            for offset in range(bucket_count)
+            bucket["start"]: index
+            for index, bucket in enumerate(buckets)
         }
-        buckets = [
-            {
-                "start": bucket_start + timedelta(hours=offset),
-                "label": (bucket_start + timedelta(hours=offset)).strftime("%H:%M"),
-                "a_to_b": 0,
-                "b_to_a": 0,
-                "pending": 0,
-            }
-            for offset in range(bucket_count)
-        ]
 
         for event_dt, event in points:
-            normalized_dt = event_dt.astimezone(latest_bucket.tzinfo)
-            event_bucket = normalized_dt.replace(minute=0, second=0, microsecond=0)
+            event_bucket = _align_datetime_to_bucket(event_dt, bucket_mode=bucket_mode)
             offset = bucket_index.get(event_bucket)
             if offset is None:
                 continue
@@ -674,6 +726,7 @@ class EdgeApiRuntime:
                 for bucket in buckets
             ),
         )
+        bucket_count = len(buckets)
         x_positions = _trend_x_positions(bucket_count)
         series_specs = [
             ("a_to_b", "A_TO_B", "dir-a"),
@@ -707,14 +760,15 @@ class EdgeApiRuntime:
 
         return {
             "empty": False,
-            "bucket_hours": bucket_count,
-            "time_basis_label": "Time (local)" if any(_text(event.get("occurred_at_local")) for _, event in points) else "Time (UTC)",
-            "window_label": f"Last {bucket_count} hours",
+            "bucket_hours": bucket_count if bucket_mode == "hour" else None,
+            "bucket_mode": bucket_mode,
+            "time_basis_label": "Time (UTC)",
+            "window_label": _trend_window_label(date_range=date_range, range_start=range_start, range_end_exclusive=range_end_exclusive),
             "buckets": buckets,
             "series": series,
             "grid_lines": _trend_grid_lines(y_max),
-            "window_start_label": buckets[0]["start"].strftime("%Y-%m-%d %H:%M"),
-            "window_end_label": buckets[-1]["start"].strftime("%Y-%m-%d %H:%M"),
+            "window_start_label": _format_datetime(range_start.isoformat().replace("+00:00", "Z")),
+            "window_end_label": _format_datetime((range_end_exclusive - timedelta(seconds=1)).isoformat().replace("+00:00", "Z")),
             "window_totals": {
                 "a_to_b": sum(int(bucket["a_to_b"]) for bucket in buckets),
                 "b_to_a": sum(int(bucket["b_to_a"]) for bucket in buckets),
@@ -722,7 +776,25 @@ class EdgeApiRuntime:
             },
         }
 
-    def _iter_all_events(self, *, camera_id: Optional[str] = None) -> Iterable[Dict[str, Any]]:
+    def _iter_all_runs(self, *, date_range: Optional[UiDateRange] = None) -> Iterable[Dict[str, Any]]:
+        state_filename = self._state_filename()
+        for run_dir in iter_spool_runs(self.spool_dir):
+            run_meta = _load_json_dict(run_dir / "run.json")
+            if run_meta is None:
+                continue
+            status_meta = _load_json_dict(run_dir / "status.json")
+            state_meta = _load_json_dict(run_dir / state_filename)
+            summary = _build_run_summary(run_dir, run_meta, status_meta, state_meta)
+            if date_range is not None and not _datetime_in_date_range(_run_occurrence_utc(summary), date_range):
+                continue
+            yield summary
+
+    def _iter_all_events(
+        self,
+        *,
+        camera_id: Optional[str] = None,
+        date_range: Optional[UiDateRange] = None,
+    ) -> Iterable[Dict[str, Any]]:
         target_camera_id = _text(camera_id)
         for run_dir in iter_spool_runs(self.spool_dir):
             run_meta = _load_json_dict(run_dir / "run.json")
@@ -732,7 +804,20 @@ class EdgeApiRuntime:
                 summary = _build_event_summary(run_dir, run_meta, event, spool_dir=self.spool_dir)
                 if target_camera_id is not None and _text(summary.get("camera_id")) != target_camera_id:
                     continue
+                if date_range is not None and not _datetime_in_date_range(_event_occurrence_utc(summary), date_range):
+                    continue
                 yield summary
+
+    def _review_counts_for_items(self, items: List[Dict[str, Any]]) -> Dict[str, int]:
+        yes_count = sum(1 for item in items if _text(item.get("review_status")) == DECISION_YES)
+        no_count = sum(1 for item in items if _text(item.get("review_status")) == DECISION_NO)
+        pending_count = sum(1 for item in items if _text(item.get("review_status")) == REVIEW_STATUS_PENDING)
+        return {
+            DECISION_YES: yes_count,
+            DECISION_NO: no_count,
+            REVIEW_STATUS_PENDING: pending_count,
+            "reviewed_total": yes_count + no_count,
+        }
 
     def _attach_review_data(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         review_map = self.review_store.get_reviews(
@@ -890,7 +975,11 @@ class EdgeApiRuntime:
         )
         return _serialize_retention_summary(summary)
 
-    def _collect_delivery_counts(self) -> Dict[str, int]:
+    def _collect_delivery_counts(
+        self,
+        *,
+        run_summaries: Optional[Iterable[Mapping[str, Any]]] = None,
+    ) -> Dict[str, int]:
         counts = {
             "runs_total": 0,
             "completed": 0,
@@ -899,11 +988,10 @@ class EdgeApiRuntime:
             "in_progress": 0,
             "unknown": 0,
         }
-        state_filename = self._state_filename()
-        for run_dir in iter_spool_runs(self.spool_dir):
+        items = run_summaries if run_summaries is not None else self._iter_all_runs()
+        for summary in items:
             counts["runs_total"] += 1
-            state_meta = _load_json_dict(run_dir / state_filename)
-            state_name = _delivery_state_name(state_meta)
+            state_name = _text(summary.get("delivery_state")) or "unknown"
             if state_name in counts:
                 counts[state_name] += 1
             else:
@@ -1031,15 +1119,25 @@ def create_app(
         limit: int = Query(default=50, ge=1, le=MAX_EVENTS_LIMIT),
         run_uid: Optional[str] = Query(default=None),
         camera_id: Optional[str] = Query(default=None),
+        date_from: Optional[str] = Query(default=None),
+        date_to: Optional[str] = Query(default=None),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
     ) -> Dict[str, Any]:
-        items = runtime.list_recent_events(limit=limit, run_uid=run_uid, camera_id=camera_id)
+        items = runtime.list_recent_events(
+            limit=limit,
+            run_uid=run_uid,
+            camera_id=camera_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
         return {
             "items": items,
             "count": len(items),
             "limit": int(limit),
             "run_uid": run_uid,
             "camera_id": camera_id,
+            "date_from": date_from,
+            "date_to": date_to,
         }
 
     @router.get("/events/{event_uid}", tags=["events"])
@@ -1060,6 +1158,8 @@ def create_app(
         event_uid: Optional[str] = Query(default=None),
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=DEFAULT_REVIEW_PAGE_SIZE, ge=1, le=100),
+        date_from: Optional[str] = Query(default=None),
+        date_to: Optional[str] = Query(default=None),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
         _auth: None = Depends(_require_ui_auth_json),
     ) -> Dict[str, Any]:
@@ -1070,6 +1170,8 @@ def create_app(
             current_event_uid=event_uid,
             page=page,
             page_size=page_size,
+            date_from=date_from,
+            date_to=date_to,
         )
 
     @router.post("/events/{event_uid}/review", tags=["review"])
@@ -1087,6 +1189,8 @@ def create_app(
             status_filter=payload.status_filter,
             page=payload.page,
             page_size=payload.page_size,
+            date_from=payload.date_from,
+            date_to=payload.date_to,
         )
 
     @router.post(f"{UI_BASE_PATH}/events/{{event_uid}}/review", include_in_schema=False)
@@ -1106,6 +1210,8 @@ def create_app(
         status_filter = _text((form_fields.get("status_filter") or [REVIEW_STATUS_PENDING])[0]) or REVIEW_STATUS_PENDING
         page = int(_text((form_fields.get("page") or ["1"])[0]) or "1")
         page_size = int(_text((form_fields.get("page_size") or [str(DEFAULT_REVIEW_PAGE_SIZE)])[0]) or str(DEFAULT_REVIEW_PAGE_SIZE))
+        date_from = _text((form_fields.get("date_from") or [""])[0]) or None
+        date_to = _text((form_fields.get("date_to") or [""])[0]) or None
         payload = runtime.save_review(
             event_uid,
             decision=decision,
@@ -1114,6 +1220,8 @@ def create_app(
             status_filter=status_filter,
             page=page,
             page_size=page_size,
+            date_from=date_from,
+            date_to=date_to,
         )
         redirect_target = (
             _text(payload.get("next_detail_url"))
@@ -1130,6 +1238,8 @@ def create_app(
     @router.get(f"{UI_BASE_PATH}/dashboard", response_class=HTMLResponse, include_in_schema=False)
     def dashboard_page(
         request: Request,
+        date_from: Optional[str] = Query(default=None),
+        date_to: Optional[str] = Query(default=None),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
         _auth: None = Depends(_require_ui_auth_page),
     ) -> HTMLResponse:
@@ -1141,7 +1251,7 @@ def create_app(
             page_title="Traffic Monitoring Dashboard",
             page_subtitle="Total data dari live ditambah dengan data yang akan direview.",
         )
-        context.update(runtime.dashboard_payload())
+        context.update(runtime.dashboard_payload(date_from=date_from, date_to=date_to))
         return templates.TemplateResponse(request, "dashboard.html", context)
 
     @router.get(f"{UI_BASE_PATH}/review", response_class=HTMLResponse, include_in_schema=False)
@@ -1152,6 +1262,8 @@ def create_app(
         event_uid: Optional[str] = Query(default=None),
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=DEFAULT_REVIEW_PAGE_SIZE, ge=1, le=100),
+        date_from: Optional[str] = Query(default=None),
+        date_to: Optional[str] = Query(default=None),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
         _auth: None = Depends(_require_ui_auth_page),
     ) -> HTMLResponse:
@@ -1170,6 +1282,8 @@ def create_app(
                 current_event_uid=event_uid,
                 page=page,
                 page_size=page_size,
+                date_from=date_from,
+                date_to=date_to,
             )
         )
         return templates.TemplateResponse(request, "review_queue.html", context)
@@ -1182,6 +1296,8 @@ def create_app(
         status_filter: str = Query(default=REVIEW_STATUS_PENDING, alias="status"),
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=DEFAULT_REVIEW_PAGE_SIZE, ge=1, le=100),
+        date_from: Optional[str] = Query(default=None),
+        date_to: Optional[str] = Query(default=None),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
         _auth: None = Depends(_require_ui_auth_page),
     ) -> HTMLResponse:
@@ -1195,6 +1311,8 @@ def create_app(
             current_event_uid=event_uid,
             page=page,
             page_size=page_size,
+            date_from=date_from,
+            date_to=date_to,
         )
         in_queue = _text(queue_context.get("selected_event_uid")) == event_uid
 
@@ -1203,7 +1321,7 @@ def create_app(
             request=request,
             page_name="event_detail",
             page_title="Event Detail",
-            page_subtitle="Evidence, metadata, and review state for a single crossing.",
+            page_subtitle="Bukti, metadata, dan hasil review untuk satu data.",
         )
         context["event"] = item
         context["review_counts"] = runtime.review_store.summary()
@@ -1213,18 +1331,24 @@ def create_app(
             event_uid=event_uid if in_queue else None,
             page=page,
             page_size=page_size,
+            date_from=queue_context.get("date_from"),
+            date_to=queue_context.get("date_to"),
         )
         context["queue_page_url"] = _ui_review_queue_url(
             camera_id=camera_id,
             status=status_filter,
             page=int(queue_context["pagination"]["current_page"]),
             page_size=page_size,
+            date_from=queue_context.get("date_from"),
+            date_to=queue_context.get("date_to"),
         )
         context["pending_queue_url"] = _ui_review_queue_url(
             camera_id=camera_id,
             status=REVIEW_STATUS_PENDING,
             page=1,
             page_size=page_size,
+            date_from=queue_context.get("date_from"),
+            date_to=queue_context.get("date_to"),
         )
         context["detail_queue"] = {
             "in_queue": in_queue,
@@ -1234,6 +1358,9 @@ def create_app(
             "next_item": queue_context.get("next_item"),
             "status_filter": queue_context.get("status_filter"),
             "camera_id": queue_context.get("camera_id"),
+            "date_from": queue_context.get("date_from"),
+            "date_to": queue_context.get("date_to"),
+            "date_filter": queue_context.get("date_filter"),
         }
         context["queue_page_number"] = int(queue_context["pagination"]["current_page"])
         return templates.TemplateResponse(request, "event_detail.html", context)
@@ -1360,541 +1487,6 @@ def _require_mutation_auth(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid_api_key",
         )
-
-
-def _load_json_dict(path: Path) -> Optional[Dict[str, Any]]:
-    """Load a json file and return its content
-        into a dictionary. if that saild path does not exist
-        then it will return None    
-     """
-    if not path.exists():
-        return None
-    
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        #if the data is not a dict then it will return 
-        return None
-    
-    #if all check passed, then return the json loads
-    return data
-
-def _iter_jsonl_records(path: Path) -> List[Dict[str, Any]]:
-    if not path.exists():
-        return []
-    items: List[Dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            row = line.strip()
-            if not row:
-                continue
-            try:
-                obj = json.loads(row)
-            except json.JSONDecodeError:
-                if not line.endswith("\n"):
-                    break
-                continue
-            if isinstance(obj, dict):
-                items.append(obj)
-    return items
-
-
-def _build_run_summary(
-    run_dir: Path,
-    run_meta: Mapping[str, Any],
-    status_meta: Optional[Mapping[str, Any]],
-    state_meta: Optional[Mapping[str, Any]],
-) -> Dict[str, Any]:
-    health_summary = status_meta.get("health_summary") if isinstance(status_meta, Mapping) else None
-    if not isinstance(health_summary, Mapping):
-        health_summary = run_meta.get("health_summary") if isinstance(run_meta.get("health_summary"), Mapping) else None
-
-    return {
-        "run_uid": _text(run_meta.get("run_uid")),
-        "run_dir": str(run_dir),
-        "site_id": _text(run_meta.get("site_id")),
-        "camera_id": _text(run_meta.get("camera_id")),
-        "started_at_utc": _text(run_meta.get("started_at_utc")),
-        "updated_at_utc": _coalesce_text(
-            (status_meta or {}).get("updated_at_utc") if isinstance(status_meta, Mapping) else None,
-            run_meta.get("updated_at_utc"),
-        ),
-        "ended_at_utc": _coalesce_text(
-            run_meta.get("ended_at_utc"),
-            (health_summary or {}).get("ended_at_utc") if isinstance(health_summary, Mapping) else None,
-        ),
-        "source_type": _coalesce_text(run_meta.get("source_type"), _mapping_get_text(run_meta.get("source"), "type")),
-        "source_value": _coalesce_text(run_meta.get("source_value"), _mapping_get_text(run_meta.get("source"), "value")),
-        "line_mode": _text(run_meta.get("line_mode")),
-        "delivery_state": _delivery_state_name(state_meta),
-        "delivery_completed_at_utc": _mapping_get_text(state_meta, "completed_at_utc"),
-        "delivery_last_error": _mapping_get_text(state_meta, "last_error"),
-        "report_csv_relpath": _text(run_meta.get("report_csv_relpath")),
-        "lifecycle_status": _mapping_get_text(health_summary, "lifecycle_status"),
-        "frames_total": _mapping_get_int(health_summary, "frames_total"),
-        "frames_processed": _mapping_get_int(health_summary, "frames_processed"),
-        "events_emitted_total": _mapping_get_int(health_summary, "events_emitted_total"),
-        "count_a_to_b": _mapping_get_int(health_summary, "count_a_to_b"),
-        "count_b_to_a": _mapping_get_int(health_summary, "count_b_to_a"),
-        "effective_fps": _mapping_get_float(health_summary, "effective_fps"),
-        "processed_fps": _mapping_get_float(health_summary, "processed_fps"),
-    }
-
-
-def _build_event_summary(
-    run_dir: Path,
-    run_meta: Mapping[str, Any],
-    event: Mapping[str, Any],
-    *,
-    spool_dir: Path,
-) -> Dict[str, Any]:
-    thumb_rel = _text(event.get("thumb_relpath"))
-    scene_rel = _text(event.get("scene_relpath"))
-    return {
-        "event_uid": _text(event.get("event_uid")),
-        "run_uid": _coalesce_text(event.get("run_uid"), run_meta.get("run_uid")),
-        "site_id": _coalesce_text(event.get("site_id"), run_meta.get("site_id")),
-        "camera_id": _coalesce_text(event.get("camera_id"), run_meta.get("camera_id")),
-        "occurred_at_utc": _text(event.get("occurred_at_utc")),
-        "occurred_at_local": _text(event.get("occurred_at_local")),
-        "direction": _text(event.get("direction")),
-        "track_id": _mapping_get_int(event, "track_id"),
-        "class_id": _mapping_get_int(event, "class_id"),
-        "class_name": _text(event.get("class_name")),
-        "confidence": _mapping_get_float(event, "confidence"),
-        "frame_index": _mapping_get_int(event, "frame_index"),
-        "video_time_s": _mapping_get_float(event, "video_time_s"),
-        "thumb_relpath": thumb_rel,
-        "scene_relpath": scene_rel,
-        "thumb_path": str(run_dir / thumb_rel) if thumb_rel else None,
-        "scene_path": str(run_dir / scene_rel) if scene_rel else None,
-        "thumb_url": _relpath_to_public_url(spool_dir, run_dir / thumb_rel) if thumb_rel else None,
-        "scene_url": _relpath_to_public_url(spool_dir, run_dir / scene_rel) if scene_rel else None,
-    }
-
-
-def _delivery_state_name(state_meta: Optional[Mapping[str, Any]]) -> str:
-    if not isinstance(state_meta, Mapping):
-        return "pending"
-    if _text(state_meta.get("completed_at_utc")):
-        return "completed"
-    if _text(state_meta.get("last_error")):
-        return "failed"
-    if _mapping_get_int(state_meta, "events_uploaded_count") is not None:
-        return "in_progress"
-    return "pending"
-
-
-def _run_sort_key(row: Mapping[str, Any]) -> tuple[str, str]:
-    return (
-        _coalesce_text(row.get("updated_at_utc"), row.get("started_at_utc"), row.get("run_uid")) or "",
-        _text(row.get("run_uid")) or "",
-    )
-
-
-def _event_sort_key(row: Mapping[str, Any]) -> tuple[str, str]:
-    return (
-        _coalesce_text(row.get("occurred_at_utc"), row.get("event_uid")) or "",
-        _text(row.get("event_uid")) or "",
-    )
-
-
-def _mapping_get_text(mapping: Any, key: str) -> Optional[str]:
-    if not isinstance(mapping, Mapping):
-        return None
-    return _text(mapping.get(key))
-
-
-def _mapping_get_int(mapping: Any, key: str) -> Optional[int]:
-    if not isinstance(mapping, Mapping):
-        return None
-    value = mapping.get(key)
-    if value is None or value == "":
-        return None
-    try:
-        return int(value)
-    except Exception:
-        return None
-
-
-def _mapping_get_float(mapping: Any, key: str) -> Optional[float]:
-    if not isinstance(mapping, Mapping):
-        return None
-    value = mapping.get(key)
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
-def _coalesce_text(*values: Any) -> Optional[str]:
-    for value in values:
-        out = _text(value)
-        if out is not None:
-            return out
-    return None
-
-
-def _text(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    s = str(value).strip()
-    return s if s else None
-
-
-def _clamp_limit(value: int, max_value: int) -> int:
-    return max(1, min(int(value), int(max_value)))
-
-
-def _serialize_retention_summary(summary: Any) -> Dict[str, Any]:
-    return {
-        "ok": True,
-        "root_dir": str(summary.root_dir),
-        "now_utc": summary.now_utc,
-        "max_age_days": int(summary.max_age_days),
-        "state_filename": str(summary.state_filename),
-        "dry_run": bool(summary.dry_run),
-        "scanned_runs": int(summary.scanned_runs),
-        "deleted_runs": int(summary.deleted_runs),
-        "protected_runs": int(summary.protected_runs),
-        "retained_recent_runs": int(summary.retained_recent_runs),
-        "eligible_runs": int(summary.eligible_runs),
-        "bytes_reclaimable": int(summary.bytes_reclaimable),
-        "bytes_deleted": int(summary.bytes_deleted),
-        "items": [_serialize_retention_run_info(info) for info in summary.runs],
-    }
-
-
-def _serialize_retention_run_info(info: Any) -> Dict[str, Any]:
-    return {
-        "run_uid": info.run_uid,
-        "run_dir": str(info.run_dir),
-        "size_bytes": int(info.size_bytes),
-        "status": str(info.status),
-        "reason": str(info.reason),
-        "ended_at_utc": info.ended_at_utc,
-        "age_days": float(info.age_days) if info.age_days is not None else None,
-        "state_path": str(info.state_path) if info.state_path is not None else None,
-    }
-
-
-def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _build_ui_context(
-    *,
-    runtime: EdgeApiRuntime,
-    request: Request,
-    page_name: str,
-    page_title: str,
-    page_subtitle: str,
-) -> Dict[str, Any]:
-    return {
-        "request": request,
-        "runtime": runtime,
-        "page_name": page_name,
-        "page_title": page_title,
-        "page_subtitle": page_subtitle,
-        "ui_base_path": UI_BASE_PATH,
-        "static_base": "/ui-static",
-        "ui_static_version": UI_STATIC_VERSION,
-        "decision_yes": DECISION_YES,
-        "decision_no": DECISION_NO,
-        "format_count": _format_count,
-        "format_float": _format_float,
-        "format_date": _format_date,
-        "format_time": _format_time,
-        "format_datetime": _format_datetime,
-        "display_event_timestamp": _display_event_timestamp,
-        "short_event_uid": _short_event_uid,
-        "compact_path": _compact_path,
-        "review_pill_class": _review_pill_class,
-        "review_label": _review_label,
-        "status_filter_pending": REVIEW_STATUS_PENDING,
-        "status_filter_all": REVIEW_STATUS_ALL,
-    }
-
-
-def _normalize_review_filter(value: Optional[str]) -> str:
-    normalized = str(value or "").strip().lower()
-    if normalized in {DECISION_YES, DECISION_NO, REVIEW_STATUS_PENDING, REVIEW_STATUS_ALL}:
-        return normalized
-    return REVIEW_STATUS_PENDING
-
-
-def _normalize_review_page_size(value: Any) -> int:
-    try:
-        page_size = int(value)
-    except Exception:
-        return DEFAULT_REVIEW_PAGE_SIZE
-    if page_size in REVIEW_PAGE_SIZE_OPTIONS:
-        return page_size
-    return DEFAULT_REVIEW_PAGE_SIZE
-
-
-def _ui_query_string(
-    *,
-    camera_id: Optional[str] = None,
-    status: Optional[str] = None,
-    event_uid: Optional[str] = None,
-    page: Optional[int] = None,
-    page_size: Optional[int] = None,
-) -> str:
-    params: Dict[str, str] = {}
-    if camera_id:
-        params["camera_id"] = str(camera_id).strip()
-    normalized_status = _normalize_review_filter(status)
-    if normalized_status:
-        params["status"] = normalized_status
-    if event_uid:
-        params["event_uid"] = str(event_uid).strip()
-    if page is not None:
-        params["page"] = str(max(1, int(page)))
-    if page_size is not None:
-        params["page_size"] = str(_normalize_review_page_size(page_size))
-    return urlencode(params)
-
-
-def _ui_review_queue_url(
-    *,
-    camera_id: Optional[str] = None,
-    status: Optional[str] = None,
-    event_uid: Optional[str] = None,
-    page: Optional[int] = None,
-    page_size: Optional[int] = None,
-) -> str:
-    query = _ui_query_string(
-        camera_id=camera_id,
-        status=status,
-        event_uid=event_uid,
-        page=page,
-        page_size=page_size,
-    )
-    if query:
-        return f"{UI_BASE_PATH}/review?{query}"
-    return f"{UI_BASE_PATH}/review"
-
-
-def _ui_event_detail_url(
-    event_uid: str,
-    *,
-    camera_id: Optional[str] = None,
-    status: Optional[str] = None,
-    page: Optional[int] = None,
-    page_size: Optional[int] = None,
-) -> str:
-    query = _ui_query_string(
-        camera_id=camera_id,
-        status=status,
-        page=page,
-        page_size=page_size,
-    )
-    if query:
-        return f"{UI_BASE_PATH}/events/{event_uid}?{query}"
-    return f"{UI_BASE_PATH}/events/{event_uid}"
-
-
-def _review_label(value: Optional[str]) -> str:
-    if value == DECISION_YES:
-        return "Diterima"
-    if value == DECISION_NO:
-        return "Ditolak"
-    return "Pending"
-
-
-def _review_pill_class(value: Optional[str]) -> str:
-    if value == DECISION_YES:
-        return "yes"
-    if value == DECISION_NO:
-        return "no"
-    return ""
-
-
-def _path_to_public_url(spool_dir: Path, value: Any) -> Optional[str]:
-    text = _text(value)
-    if text is None:
-        return None
-    return _relpath_to_public_url(spool_dir, Path(text))
-
-
-def _relpath_to_public_url(spool_dir: Path, path: Path) -> Optional[str]:
-    try:
-        relpath = path.resolve().relative_to(spool_dir.resolve())
-    except Exception:
-        return None
-    return "/evidence/" + relpath.as_posix()
-
-
-def _format_count(value: Any) -> str:
-    try:
-        return f"{int(value):,}"
-    except Exception:
-        return "0"
-
-
-def _format_float(value: Any, digits: int = 1) -> str:
-    try:
-        return f"{float(value):.{int(digits)}f}"
-    except Exception:
-        return "0.0"
-
-
-def _format_datetime(value: Any) -> str:
-    text = _text(value)
-    if text is None:
-        return "Unavailable"
-    if "T" in text:
-        return text.replace("T", " ").replace("Z", " UTC")
-    return text
-
-
-def _display_event_timestamp(row: Any) -> Optional[str]:
-    if not isinstance(row, Mapping):
-        return _text(row)
-    return _coalesce_text(row.get("occurred_at_local"), row.get("occurred_at_utc"))
-
-
-def _format_date(value: Any) -> str:
-    text = _text(value)
-    if text is None:
-        return "Unavailable"
-    if "T" in text:
-        return text.split("T", 1)[0]
-    if " " in text:
-        return text.split(" ", 1)[0]
-    return text
-
-
-def _format_time(value: Any) -> str:
-    text = _text(value)
-    if text is None:
-        return "Unavailable"
-    if "T" in text:
-        time_text = text.split("T", 1)[1]
-    elif " " in text:
-        time_text = text.split(" ", 1)[1]
-    else:
-        return "Unavailable"
-    return time_text.replace("Z", " UTC")
-
-
-def _parse_iso_datetime(value: Any) -> Optional[datetime]:
-    text = _text(value)
-    if text is None:
-        return None
-    normalized = text.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except Exception:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def _event_bucket_datetime(event: Mapping[str, Any]) -> Optional[datetime]:
-    return _parse_iso_datetime(event.get("occurred_at_local")) or _parse_iso_datetime(event.get("occurred_at_utc"))
-
-
-def _empty_dashboard_trend() -> Dict[str, Any]:
-    bucket_count = TREND_BUCKET_HOURS
-    fallback_labels = [f"{index:02d}:00" for index in range(bucket_count)]
-    x_positions = _trend_x_positions(bucket_count)
-    empty_points = [
-        {"x": x_positions[index], "y": _trend_y_position(0, 1), "count": 0, "label": fallback_labels[index]}
-        for index in range(bucket_count)
-    ]
-    return {
-        "empty": True,
-        "bucket_hours": bucket_count,
-        "time_basis_label": "Time (local)",
-        "window_label": f"Last {bucket_count} hours",
-        "buckets": [{"label": label, "a_to_b": 0, "b_to_a": 0, "pending": 0} for label in fallback_labels],
-        "series": [
-            {
-                "key": key,
-                "label": label,
-                "css_class": css_class,
-                "path": _trend_svg_path(empty_points),
-                "points": list(empty_points),
-                "window_total": 0,
-                "latest_value": 0,
-            }
-            for key, label, css_class in (
-                ("a_to_b", "A_TO_B", "dir-a"),
-                ("b_to_a", "B_TO_A", "dir-b"),
-                ("pending", "Pending", "no"),
-            )
-        ],
-        "grid_lines": _trend_grid_lines(1),
-        "window_start_label": "Unavailable",
-        "window_end_label": "Unavailable",
-        "window_totals": {"a_to_b": 0, "b_to_a": 0, "pending": 0},
-    }
-
-
-def _trend_x_positions(bucket_count: int) -> List[int]:
-    chart_left = 60
-    chart_right = 720
-    if bucket_count <= 1:
-        return [chart_right]
-    span = chart_right - chart_left
-    return [
-        chart_left + round(span * index / (bucket_count - 1))
-        for index in range(bucket_count)
-    ]
-
-
-def _trend_y_position(value: int, y_max: int) -> int:
-    top = 26
-    bottom = 154
-    if y_max <= 0:
-        return bottom
-    ratio = max(0.0, min(1.0, float(value) / float(y_max)))
-    return round(bottom - ((bottom - top) * ratio))
-
-
-def _trend_svg_path(points: List[Mapping[str, Any]]) -> str:
-    if not points:
-        return ""
-    commands = [f"M{int(points[0]['x'])} {int(points[0]['y'])}"]
-    commands.extend(f"L{int(point['x'])} {int(point['y'])}" for point in points[1:])
-    return " ".join(commands)
-
-
-def _trend_grid_lines(y_max: int) -> List[Dict[str, int]]:
-    values = sorted({y_max, max(0, round(y_max * 0.6)), max(0, round(y_max * 0.2))}, reverse=True)
-    return [
-        {"value": int(value), "y": _trend_y_position(int(value), y_max)}
-        for value in values
-    ]
-
-
-def _short_event_uid(value: Any, head: int = 10, tail: int = 8) -> str:
-    text = _text(value)
-    if text is None:
-        return "Unavailable"
-    if len(text) <= int(head) + int(tail) + 3:
-        return text
-    return f"{text[:int(head)]}...{text[-int(tail):]}"
-
-
-def _compact_path(value: Any, parts: int = 2) -> str:
-    text = _text(value)
-    if text is None:
-        return "Unavailable"
-    normalized = text.replace("\\", "/").rstrip("/")
-    if normalized == "":
-        return text
-    path_parts = [part for part in normalized.split("/") if part]
-    if len(path_parts) <= max(1, int(parts)):
-        return text
-    return ".../" + "/".join(path_parts[-max(1, int(parts)):])
 
 
 app = create_app(spool_dir=ROOT_DIR / "spool")
