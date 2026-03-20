@@ -10,7 +10,8 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Sora:wght@400;500;600;700;800&display=swap"
     />
-    <link rel="stylesheet" href="/ui-static/app.css" />
+    <link rel="icon" type="image/svg+xml" href="/ui-static/favicon.svg?v={{ ui_static_version }}" />
+    <link rel="stylesheet" href="/ui-static/app.css?v={{ ui_static_version }}" />
   </head>
   <body class="page-login">
     <a class="skip-link" href="#main-content">Skip to Main Content</a>
@@ -28,28 +29,28 @@
               fetchpriority="high"
             />
             <p class="login-kicker">PORTAL ACCESS GATE</p>
-            <h1>Traffic Monitoring Portal</h1>
-            <p class="muted">Sign in to access dashboard, review queue, and evidence detail pages with the Action_Detection visual style.</p>
+            <h1>Vehicle Counting <br>Monitoring Portal</h1>
+            <p class="muted">Login untuk mengkses dashboard dan melakukan review.</p>
           </div>
 
           <div class="login-trust">
             <div class="login-stat">
               <strong>Dashboard</strong>
-              <span>Live totals, queue pressure, and recent run visibility from the edge spool.</span>
+              <span>Data vehicle counting dengan bentuk dashboard yang dapat dianalisa..</span>
             </div>
             <div class="login-stat">
-              <strong>Review Queue</strong>
-              <span>Fast YES/NO labeling with evidence and SQLite-backed local persistence.</span>
+              <strong>Antrian Reviewew</strong>
+              <span>Labeling dengan bukti data vehicle yang melewati area.</span>
             </div>
             <div class="login-stat">
               <strong>Audit-safe</strong>
-              <span>Machine result, notes, and local override stay attached to the same event UID.</span>
+              <span>Hasil pendeteksian real, akan selalu aman dari perubahan data.</span>
             </div>
           </div>
 
           <div class="login-note">
-            <span class="pill brand">traffic lane</span>
-            <span class="pill">local FastAPI</span>
+            <span class="pill brand">Vehicle</span>
+            <span class="pill">Backend: FastAPI</span>
             <span class="pill ink">cookie session</span>
           </div>
         </div>
@@ -58,27 +59,28 @@
           <div class="login-form-head">
             <p class="login-kicker">ACCOUNT LOGIN</p>
             <h2>Sign In</h2>
-            <p class="caption">Use your local operator account to open Dashboard, Review Queue, and Event Detail pages.</p>
+            <p class="caption">Masukkan nomor user ID dan Password anda.</p>
           </div>
 
-          <form class="login-form" id="login-form" data-next-path="{{ next_path }}">
-            <div class="login-preview-note" id="login-status" role="alert" aria-live="polite">
-              <p style="margin:0;">Sign in required to access dashboard, queue, and event evidence.</p>
+          <form class="login-form" id="login-form" method="post" action="{{ ui_base_path }}/login" data-next-path="{{ next_path }}">
+            <input type="hidden" name="next" value="{{ next_path }}" />
+            <div class="login-preview-note{% if login_status_kind %} {{ login_status_kind }}{% endif %}" id="login-status" role="alert" aria-live="polite">
+              <p style="margin:0;">{{ login_status_message }}</p>
             </div>
 
             <div class="login-field">
-              <label for="username">Username</label>
-              <input id="username" name="username" autocomplete="username" placeholder="Supervisor or reviewer account" />
+              <label for="username">User ID</label>
+              <input id="username" name="username" type="text" autocomplete="username" placeholder="Input kan User ID anda" value="{{ login_username }}" required autofocus />
             </div>
 
             <div class="login-field">
               <label for="password">Password</label>
-              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" />
+              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Input Password" required />
             </div>
 
             <div class="login-actions-row">
               <span class="hint">Configured username: {{ runtime.ui_auth_cfg.username }}</span>
-              <a class="login-inline-link" href="{{ ui_base_path }}/dashboard">Open dashboard</a>
+              <a class="login-inline-link" href="{{ ui_base_path }}/dashboard">Buka Dashboard</a>
             </div>
 
             <button class="btn primary login-submit" type="submit">Sign In</button>
@@ -91,6 +93,6 @@
         </div>
       </section>
     </main>
-    <script src="/ui-static/app.js" defer></script>
+    <script src="/ui-static/app.js?v={{ ui_static_version }}" defer></script>
   </body>
 </html>

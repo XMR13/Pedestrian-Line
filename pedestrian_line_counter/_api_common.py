@@ -25,7 +25,8 @@ DEFAULT_REVIEW_PAGE_SIZE = 25
 REVIEW_PAGE_SIZE_OPTIONS = (15, 20, 25)
 UI_STATIC_VERSION = max(
     int(path.stat().st_mtime)
-    for path in (UI_STATIC_DIR / "app.css", UI_STATIC_DIR / "app.js")
+    for path in UI_STATIC_DIR.iterdir()
+    if path.is_file()
 )
 TREND_BUCKET_HOURS = 12
 TREND_MAX_BUCKETS = 31

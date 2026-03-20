@@ -895,6 +895,15 @@ def test_event_detail_includes_cross_page_review_navigation(tmp_path) -> None:
     assert "data-next-detail-url=" in detail.text
 
 
+def test_favicon_redirects_to_static_asset(tmp_path) -> None:
+    client = TestClient(create_app(spool_dir=tmp_path))
+
+    response = client.get("/favicon.ico", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/ui-static/favicon.svg"
+
+
+
 def test_ui_login_gates_pages_and_sets_cookie(tmp_path) -> None:
     _write_run(
         tmp_path,
@@ -933,3 +942,48 @@ def test_ui_login_gates_pages_and_sets_cookie(tmp_path) -> None:
     review_resp = client.post("/events/run_ui_e1/review", json={"decision": "qualified_no", "notes": "not target"})
     assert review_resp.status_code == 200
     assert review_resp.json()["review"]["decision"] == "qualified_no"
+
+
+def test_ui_login_form_redirects_with_error_and_success(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_ui_form",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            review_db_path=tmp_path / "reviews.sqlite3",
+            ui_auth_cfg=UiAuthConfig(username="admin", password="secret"),
+        )
+    )
+
+    failed_login = client.post(
+        "/ui/login",
+        data={"username": "admin", "password": "wrong", "next": "/ui/review?status=pending"},
+        follow_redirects=False,
+    )
+    assert failed_login.status_code == 303
+    assert failed_login.headers["location"] == (
+        "/ui/login?next=%2Fui%2Freview%3Fstatus%3Dpending&error=invalid_credentials&username=admin"
+    )
+
+    failed_page = client.get(failed_login.headers["location"])
+    assert failed_page.status_code == 200
+    assert "Login failed. Check your credentials and try again." in failed_page.text
+    assert 'value="admin"' in failed_page.text
+
+    good_login = client.post(
+        "/ui/login",
+        data={"username": "admin", "password": "secret", "next": "/ui/review?status=pending"},
+        follow_redirects=False,
+    )
+    assert good_login.status_code == 303
+    assert good_login.headers["location"] == "/ui/review?status=pending"
+    assert "edge_ui_session" in good_login.headers.get("set-cookie", "")
+
+    review_page = client.get("/ui/review?status=pending")
+    assert review_page.status_code == 200
+    assert "Antrian Review" in review_page.text

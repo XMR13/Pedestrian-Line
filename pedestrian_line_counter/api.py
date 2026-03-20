@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import secrets
 from typing import Any, Dict, Iterable, List, Mapping, Optional
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -1028,6 +1028,10 @@ def create_app(
 
     router = APIRouter()
 
+    @router.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> RedirectResponse:
+        return RedirectResponse(url="/ui-static/favicon.svg", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
     @router.get("/", include_in_schema=False)
     def ui_root(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> RedirectResponse:
         target = f"{UI_BASE_PATH}/login" if runtime.ui_auth_cfg.enabled() else f"{UI_BASE_PATH}/dashboard"
@@ -1067,14 +1071,55 @@ def create_app(
         response.delete_cookie(key=runtime.ui_auth_cfg.cookie_name, path="/")
         return response
 
+    @router.post(f"{UI_BASE_PATH}/login", include_in_schema=False)
+    async def login_page_submit(
+        request: Request,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+    ) -> RedirectResponse:
+        cfg = runtime.ui_auth_cfg
+        if not cfg.enabled():
+            return RedirectResponse(url=_login_success_target(None), status_code=status.HTTP_303_SEE_OTHER)
+
+        raw_body = (await request.body()).decode("utf-8", errors="ignore")
+        form_fields = parse_qs(raw_body, keep_blank_values=True)
+        username = _text((form_fields.get("username") or [""])[0]) or ""
+        password = _text((form_fields.get("password") or [""])[0]) or ""
+        next_path = _safe_next_path(_text((form_fields.get("next") or [""])[0]))
+
+        if username != cfg.username or password != cfg.password:
+            return RedirectResponse(
+                url=_ui_login_url(next_path=next_path, error="invalid_credentials", username=username),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+        token = issue_session_token(cfg=cfg, username=cfg.username)
+        response = RedirectResponse(
+            url=_login_success_target(next_path),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        response.set_cookie(
+            key=cfg.cookie_name,
+            value=token,
+            max_age=int(cfg.cookie_max_age_s),
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
     @router.get(f"{UI_BASE_PATH}/login", response_class=HTMLResponse, include_in_schema=False)
     def login_page(
         request: Request,
         next_path: Optional[str] = Query(default=None, alias="next"),
+        error: Optional[str] = Query(default=None),
+        username: Optional[str] = Query(default=None),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
     ) -> HTMLResponse:
         if _is_authenticated(request, runtime=runtime):
-            return RedirectResponse(url=f"{UI_BASE_PATH}/dashboard", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+            return RedirectResponse(
+                url=_login_success_target(next_path),
+                status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+            )
         templates = _get_templates(request)
         context = _build_ui_context(
             runtime=runtime,
@@ -1083,7 +1128,15 @@ def create_app(
             page_title="Operator Login",
             page_subtitle="Sign in to open the dashboard, review queue, and event detail pages.",
         )
-        context["next_path"] = _safe_next_path(next_path) or f"{UI_BASE_PATH}/dashboard"
+        status_message = "Sign in diperulkan untuk mengakses dashboard, dan  melakukan review data."
+        status_kind = ""
+        if _text(error) == "invalid_credentials":
+            status_message = "Login failed. Check your credentials and try again."
+            status_kind = "error"
+        context["next_path"] = _login_success_target(next_path)
+        context["login_status_message"] = status_message
+        context["login_status_kind"] = status_kind
+        context["login_username"] = _text(username) or ""
         return templates.TemplateResponse(request, "login.html", context)
 
     @router.get("/healthz", tags=["health"])
@@ -1442,6 +1495,30 @@ def _safe_next_path(value: Optional[str]) -> Optional[str]:
     if text.startswith("//"):
         return None
     return text
+
+
+def _login_success_target(next_path: Optional[str]) -> str:
+    return _safe_next_path(next_path) or f"{UI_BASE_PATH}/dashboard"
+
+
+def _ui_login_url(
+    *,
+    next_path: Optional[str] = None,
+    error: Optional[str] = None,
+    username: Optional[str] = None,
+) -> str:
+    params: Dict[str, str] = {}
+    safe_next = _safe_next_path(next_path)
+    if safe_next:
+        params["next"] = safe_next
+    if _text(error):
+        params["error"] = str(error)
+    if _text(username):
+        params["username"] = str(username)
+    query = urlencode(params)
+    if query:
+        return f"{UI_BASE_PATH}/login?{query}"
+    return f"{UI_BASE_PATH}/login"
 
 
 def _require_ui_auth_page(
