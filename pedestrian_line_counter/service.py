@@ -4,14 +4,16 @@ import argparse
 import ipaddress
 import os
 from pathlib import Path
+import threading
 from typing import Optional
 
 import uvicorn
 
 from .api import DEFAULT_MUTATION_API_KEY_HEADER, MutationAuthConfig, create_app
-from .config import AppConfig, ROOT_DIR, get_default_config
+from .config import AppConfig, ROOT_DIR, SpoolRetentionConfig, get_default_config
 from .config_io import apply_config_overrides, load_config_overrides, split_overrides
 from .event_uploader import RetryConfig, UploaderConfig, resolve_api_key
+from .spool_retention import apply_retention_policy, format_retention_summary
 from .ui_auth import UiAuthConfig
 
 
@@ -99,6 +101,18 @@ def _parse_args() -> argparse.Namespace:
         help="Override spool retention max age in days for service endpoints.",
     )
     parser.add_argument(
+        "--spool-retention-max-total-bytes",
+        type=int,
+        default=None,
+        help="Delete oldest completed runs when total spool bytes exceed this limit.",
+    )
+    parser.add_argument(
+        "--spool-retention-min-free-bytes",
+        type=int,
+        default=None,
+        help="Delete oldest completed runs until filesystem free space reaches this value.",
+    )
+    parser.add_argument(
         "--spool-retention-state-file",
         type=str,
         default=None,
@@ -110,6 +124,12 @@ def _parse_args() -> argparse.Namespace:
         dest="spool_retention_protect_incomplete_runs",
         default=None,
         help="Protect incomplete or ambiguous runs from retention deletion.",
+    )
+    parser.add_argument(
+        "--spool-retention-auto-interval-s",
+        type=float,
+        default=None,
+        help="Run retention automatically on this interval while the service is up (0 disables the background loop).",
     )
     parser.add_argument(
         "--mutation-api-key",
@@ -175,10 +195,16 @@ def _load_runtime_config(args: argparse.Namespace) -> AppConfig:
         cfg.spool.retention.enabled = bool(args.spool_retention_enabled)
     if args.spool_retention_max_age_days is not None:
         cfg.spool.retention.max_age_days = int(args.spool_retention_max_age_days)
+    if args.spool_retention_max_total_bytes is not None:
+        cfg.spool.retention.max_total_bytes = int(args.spool_retention_max_total_bytes)
+    if args.spool_retention_min_free_bytes is not None:
+        cfg.spool.retention.min_free_bytes = int(args.spool_retention_min_free_bytes)
     if args.spool_retention_state_file is not None:
         cfg.spool.retention.state_filename = str(args.spool_retention_state_file)
     if args.spool_retention_protect_incomplete_runs is not None:
         cfg.spool.retention.protect_incomplete_runs = bool(args.spool_retention_protect_incomplete_runs)
+    if args.spool_retention_auto_interval_s is not None:
+        cfg.spool.retention.auto_run_interval_s = float(args.spool_retention_auto_interval_s)
     return cfg
 
 
@@ -260,6 +286,19 @@ def _validate_mutation_auth_guardrails(host: str, cfg: MutationAuthConfig) -> No
     )
 
 
+def _validate_retention_cfg(cfg: SpoolRetentionConfig) -> None:
+    if int(cfg.max_age_days) < 0:
+        raise SystemExit("config spool.retention.max_age_days must be >= 0")
+    if cfg.max_total_bytes is not None and int(cfg.max_total_bytes) < 0:
+        raise SystemExit("config spool.retention.max_total_bytes must be >= 0")
+    if cfg.min_free_bytes is not None and int(cfg.min_free_bytes) < 0:
+        raise SystemExit("config spool.retention.min_free_bytes must be >= 0")
+    if float(cfg.auto_run_interval_s) < 0:
+        raise SystemExit("config spool.retention.auto_run_interval_s must be >= 0")
+    if not str(cfg.state_filename).strip():
+        raise SystemExit("config spool.retention.state_filename must be non-empty")
+
+
 def _is_loopback_host(host: str) -> bool:
     value = str(host or "").strip().lower()
     if value in {"localhost"}:
@@ -270,9 +309,47 @@ def _is_loopback_host(host: str) -> bool:
         return False
 
 
+def _run_retention_pass(spool_dir: Path, cfg: SpoolRetentionConfig, *, reason: str) -> None:
+    try:
+        summary = apply_retention_policy(
+            spool_dir,
+            max_age_days=int(cfg.max_age_days),
+            max_total_bytes=cfg.max_total_bytes,
+            min_free_bytes=cfg.min_free_bytes,
+            state_filename=str(cfg.state_filename),
+            protect_incomplete_runs=bool(cfg.protect_incomplete_runs),
+            dry_run=False,
+        )
+    except Exception as exc:
+        print(f"[service] retention pass failed reason={reason}: {exc}")
+        return
+
+    print(f"[service] retention pass reason={reason}")
+    for line in format_retention_summary(summary):
+        print(line)
+
+
+def _start_retention_loop(spool_dir: Path, cfg: SpoolRetentionConfig) -> tuple[Optional[threading.Event], Optional[threading.Thread]]:
+    interval_s = float(cfg.auto_run_interval_s)
+    if not bool(cfg.enabled) or interval_s <= 0:
+        return None, None
+
+    stop_event = threading.Event()
+
+    def _loop() -> None:
+        while not stop_event.wait(max(interval_s, 0.5)):
+            _run_retention_pass(spool_dir, cfg, reason="service-interval")
+
+    thread = threading.Thread(target=_loop, name="edge-retention-loop", daemon=True)
+    thread.start()
+    print(f"[service] retention loop enabled interval={interval_s:.1f}s")
+    return stop_event, thread
+
+
 def main() -> int:
     args = _parse_args()
     cfg = _load_runtime_config(args)
+    _validate_retention_cfg(cfg.spool.retention)
     spool_dir = _resolve_spool_dir(args, cfg=cfg)
     uploader_cfg = _build_uploader_cfg(args, spool_dir=spool_dir)
     mutation_auth_cfg = _build_mutation_auth_cfg(args)
@@ -287,12 +364,22 @@ def main() -> int:
         title=str(args.title),
     )
 
-    uvicorn.run(
-        app,
-        host=str(args.host),
-        port=int(args.port),
-        reload=False,
-    )
+    if bool(cfg.spool.retention.enabled):
+        _run_retention_pass(spool_dir, cfg.spool.retention, reason="service-startup")
+    retention_stop_event, retention_thread = _start_retention_loop(spool_dir, cfg.spool.retention)
+
+    try:
+        uvicorn.run(
+            app,
+            host=str(args.host),
+            port=int(args.port),
+            reload=False,
+        )
+    finally:
+        if retention_stop_event is not None:
+            retention_stop_event.set()
+        if retention_thread is not None:
+            retention_thread.join(timeout=max(float(cfg.spool.retention.auto_run_interval_s) + 1.0, 2.0))
     return 0
 
 

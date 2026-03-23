@@ -274,7 +274,24 @@ Untuk deployment production dengan satu proses (auto-restart + tuning performa +
 - launcher script: `scripts/run_single_loop_live.sh`
 
 Jika kamu tidak ingin `export` setiap sesi, cukup isi `Portal.ApiKey` sekali di file lokal untracked `portal/appsettings.Local.json`.
-Uploader (`portal_uploader.py`) dan integrated uploader (`main.py --portal-upload`) sekarang akan otomatis fallback ke file tersebut.
+Uploader utama sekarang ada di `event_uploader.py`; `portal_uploader.py` tetap disediakan sebagai compatibility wrapper, dan integrated uploader (`main.py --portal-upload`) akan otomatis fallback ke file tersebut.
+
+Kalau backend IT belum tersedia, kamu bisa hardening uploader pakai mock backend lokal:
+
+```bash
+python3 scripts/mock_delivery_backend.py --port 18080 --state-dir tmp/mock_delivery_backend
+```
+
+Lalu arahkan uploader ke mock backend itu:
+
+```bash
+python3 -m pedestrian_line_counter.event_uploader \
+  --spool-dir data/traffic_runs \
+  --api-base-url http://127.0.0.1:18080 \
+  --api-key local-dev
+```
+
+Request yang diterima mock backend akan disimpan ke `tmp/mock_delivery_backend/` supaya payload run/event/evidence bisa dicek tanpa menunggu backend team.
 
 Portal website MVP (Phase 7.3)
 ------------------------------
@@ -377,7 +394,7 @@ dotnet run --urls "http://localhost:5001"
 Lalu sesuaikan uploader:
 
 ```bash
-python3 -m pedestrian_line_counter.portal_uploader \
+python3 -m pedestrian_line_counter.event_uploader \
   --spool-dir data/traffic_runs \
   --api-base-url http://localhost:5001 \
   --api-key "$PORTAL_API_KEY"

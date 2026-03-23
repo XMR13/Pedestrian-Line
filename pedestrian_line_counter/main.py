@@ -524,6 +524,18 @@ def _parse_args() -> argparse.Namespace:
         help="Delete only completed spool runs older than this many days (default: 90).",
     )
     parser.add_argument(
+        "--spool-retention-max-total-bytes",
+        type=int,
+        default=None,
+        help="Delete oldest completed runs when total spool bytes exceed this limit.",
+    )
+    parser.add_argument(
+        "--spool-retention-min-free-bytes",
+        type=int,
+        default=None,
+        help="Delete oldest completed runs until filesystem free space reaches this value.",
+    )
+    parser.add_argument(
         "--spool-retention-state-file",
         type=str,
         default=None,
@@ -1134,6 +1146,10 @@ def main() -> None:
         raise SystemExit("--portal-upload-events-batch-size must be > 0")
     if args.spool_retention_max_age_days is not None and int(args.spool_retention_max_age_days) < 0:
         raise SystemExit("--spool-retention-max-age-days must be >= 0")
+    if args.spool_retention_max_total_bytes is not None and int(args.spool_retention_max_total_bytes) < 0:
+        raise SystemExit("--spool-retention-max-total-bytes must be >= 0")
+    if args.spool_retention_min_free_bytes is not None and int(args.spool_retention_min_free_bytes) < 0:
+        raise SystemExit("--spool-retention-min-free-bytes must be >= 0")
 
     if args.config:
         cfg_before = copy.deepcopy(cfg)
@@ -1236,6 +1252,10 @@ def main() -> None:
         cfg.spool.retention.enabled = bool(args.spool_retention_enabled)
     if args.spool_retention_max_age_days is not None:
         cfg.spool.retention.max_age_days = int(args.spool_retention_max_age_days)
+    if args.spool_retention_max_total_bytes is not None:
+        cfg.spool.retention.max_total_bytes = int(args.spool_retention_max_total_bytes)
+    if args.spool_retention_min_free_bytes is not None:
+        cfg.spool.retention.min_free_bytes = int(args.spool_retention_min_free_bytes)
     if args.spool_retention_state_file is not None:
         cfg.spool.retention.state_filename = str(args.spool_retention_state_file)
     if args.class_vote_mode is not None:
@@ -1288,6 +1308,10 @@ def main() -> None:
         raise SystemExit("config io.live_queue_policy must be 'drop_oldest' or 'block'")
     if int(cfg.spool.retention.max_age_days) < 0:
         raise SystemExit("config spool.retention.max_age_days must be >= 0")
+    if cfg.spool.retention.max_total_bytes is not None and int(cfg.spool.retention.max_total_bytes) < 0:
+        raise SystemExit("config spool.retention.max_total_bytes must be >= 0")
+    if cfg.spool.retention.min_free_bytes is not None and int(cfg.spool.retention.min_free_bytes) < 0:
+        raise SystemExit("config spool.retention.min_free_bytes must be >= 0")
     if not str(cfg.spool.retention.state_filename).strip():
         raise SystemExit("config spool.retention.state_filename must be non-empty")
     input_gst_pipeline = None
@@ -1344,6 +1368,8 @@ def main() -> None:
         summary = apply_retention_policy(
             spool_root_for_retention,
             max_age_days=int(cfg.spool.retention.max_age_days),
+            max_total_bytes=cfg.spool.retention.max_total_bytes,
+            min_free_bytes=cfg.spool.retention.min_free_bytes,
             state_filename=str(cfg.spool.retention.state_filename),
             protect_incomplete_runs=bool(cfg.spool.retention.protect_incomplete_runs),
             dry_run=bool(args.spool_retention_dry_run),
@@ -1356,6 +1382,8 @@ def main() -> None:
         startup_retention = apply_retention_policy(
             spool_root_for_retention,
             max_age_days=int(cfg.spool.retention.max_age_days),
+            max_total_bytes=cfg.spool.retention.max_total_bytes,
+            min_free_bytes=cfg.spool.retention.min_free_bytes,
             state_filename=str(cfg.spool.retention.state_filename),
             protect_incomplete_runs=bool(cfg.spool.retention.protect_incomplete_runs),
             dry_run=False,

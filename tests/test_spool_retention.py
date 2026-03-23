@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pedestrian_line_counter.main as main_module
+import pedestrian_line_counter.spool_retention as retention_module
 from pedestrian_line_counter.spool_retention import apply_retention_policy
 
 
@@ -136,6 +137,75 @@ def test_retention_protects_missing_or_incomplete_state(tmp_path) -> None:
     assert statuses["run_incomplete"] == "protected_incomplete"
     assert "upload state" in reasons["run_missing_state"]
     assert "delivery not completed" == reasons["run_incomplete"]
+
+
+def test_retention_pressure_budget_selects_oldest_completed_run(tmp_path) -> None:
+    now = datetime(2026, 3, 10, tzinfo=timezone.utc)
+    old_run = _write_run(
+        tmp_path,
+        day="2026-03-01",
+        run_uid="run_old",
+        ended_at=now - timedelta(days=9),
+        state={"run_uid": "run_old", "completed_at_utc": "2026-03-01T00:00:00Z"},
+        extra_bytes=b"x" * 64,
+    )
+    recent_run = _write_run(
+        tmp_path,
+        day="2026-03-09",
+        run_uid="run_recent",
+        ended_at=now - timedelta(days=1),
+        state={"run_uid": "run_recent", "completed_at_utc": "2026-03-09T00:00:00Z"},
+        extra_bytes=b"y" * 64,
+    )
+
+    baseline = apply_retention_policy(tmp_path, max_age_days=365, dry_run=True, now=now)
+    summary = apply_retention_policy(
+        tmp_path,
+        max_age_days=365,
+        max_total_bytes=int(baseline.total_runs_bytes) - 1,
+        dry_run=False,
+        now=now,
+    )
+
+    assert summary.deleted_runs == 1
+    by_uid = {info.run_uid: info for info in summary.runs}
+    assert by_uid["run_old"].selected_for_deletion is True
+    assert by_uid["run_old"].deletion_basis == "pressure"
+    assert by_uid["run_recent"].selected_for_deletion is False
+    assert not old_run.exists()
+    assert recent_run.exists()
+
+
+def test_retention_pressure_free_space_uses_disk_free_threshold(monkeypatch, tmp_path) -> None:
+    now = datetime(2026, 3, 10, tzinfo=timezone.utc)
+    _write_run(
+        tmp_path,
+        day="2026-03-08",
+        run_uid="run_recent",
+        ended_at=now - timedelta(days=2),
+        state={"run_uid": "run_recent", "completed_at_utc": "2026-03-08T00:00:00Z"},
+        extra_bytes=b"z" * 64,
+    )
+
+    class _Usage:
+        total = 10_000
+        used = 9_500
+        free = 500
+
+    monkeypatch.setattr(retention_module, "_disk_usage_or_none", lambda root: _Usage())
+
+    summary = apply_retention_policy(
+        tmp_path,
+        max_age_days=365,
+        min_free_bytes=600,
+        dry_run=True,
+        now=now,
+    )
+
+    assert summary.pressure_bytes_target == 100
+    assert summary.eligible_runs == 1
+    assert summary.runs[0].deletion_basis == "pressure"
+    assert summary.projected_disk_free_bytes_after == 500 + summary.bytes_reclaimable
 
 
 def test_retention_cli_runs_without_opening_video(monkeypatch, tmp_path, capsys) -> None:

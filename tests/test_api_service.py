@@ -222,8 +222,11 @@ def test_metrics_and_config_expose_runtime_configuration(tmp_path) -> None:
     assert config_payload["retention"] == {
         "enabled": True,
         "max_age_days": 45,
+        "max_total_bytes": None,
+        "min_free_bytes": None,
         "protect_incomplete_runs": True,
         "state_filename": ".portal_upload_state.json",
+        "auto_run_interval_s": 0.0,
     }
 
 
@@ -351,6 +354,50 @@ def test_retention_preview_and_run_endpoint_apply_policy(tmp_path) -> None:
     assert run_payload["eligible_runs"] == 1
     assert run_payload["deleted_runs"] == 1
     assert not old_run_dir.exists()
+
+
+def test_retention_run_endpoint_supports_pressure_overrides(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-01",
+        run_uid="run_older",
+        started_at_utc="2026-03-01T08:00:00Z",
+        occurred_at_utc="2026-03-01T08:05:00Z",
+        completed_at_utc="2026-03-01T08:06:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-02",
+        run_uid="run_newer",
+        started_at_utc="2026-03-02T08:00:00Z",
+        occurred_at_utc="2026-03-02T08:05:00Z",
+        completed_at_utc="2026-03-02T08:06:00Z",
+    )
+    retention_cfg = SpoolRetentionConfig(
+        enabled=True,
+        max_age_days=365,
+        protect_incomplete_runs=True,
+        state_filename=".portal_upload_state.json",
+    )
+    app = create_app(spool_dir=tmp_path, retention_cfg=retention_cfg)
+    baseline = app.state.runtime.run_retention(dry_run=True)
+    client = TestClient(app)
+
+    run_resp = client.post(
+        "/retention/run",
+        json={
+            "dry_run": True,
+            "max_total_bytes": int(baseline["total_runs_bytes"]) - 1,
+        },
+    )
+    assert run_resp.status_code == 200
+    payload = run_resp.json()
+    assert payload["max_total_bytes"] == int(baseline["total_runs_bytes"]) - 1
+    assert payload["eligible_runs"] == 1
+    by_uid = {item["run_uid"]: item for item in payload["items"]}
+    assert by_uid["run_older"]["selected_for_deletion"] is True
+    assert by_uid["run_older"]["deletion_basis"] == "pressure"
+    assert by_uid["run_newer"]["selected_for_deletion"] is False
 
 
 def test_mutation_endpoints_require_api_key_when_configured(monkeypatch, tmp_path) -> None:

@@ -256,8 +256,11 @@ class SpoolRetentionConfig:
 
     enabled: bool = False
     max_age_days: int = 90
+    max_total_bytes: Optional[int] = None
+    min_free_bytes: Optional[int] = None
     protect_incomplete_runs: bool = True
     state_filename: str = ".portal_upload_state.json"
+    auto_run_interval_s: float = 0.0
 
 
 @dataclass

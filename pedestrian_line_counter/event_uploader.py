@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import time
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 import urllib.error
 import urllib.request
 import uuid
@@ -280,7 +280,7 @@ def process_single_run(
                 else f"upsert_run({run_payload['run_uid']})"
             )
             _retry_with_backoff(
-                lambda: client.upsert_run(run_payload),
+                lambda: _upsert_run_with_validation(client, run_payload),
                 cfg.retry,
                 what=what,
             )
@@ -292,68 +292,136 @@ def process_single_run(
                 state.pop("run_finalized_at_utc", None)
             _save_state(run_dir, cfg.state_filename, state)
 
+        event_progress_key = "uploaded_event_uids"
+        current_event_uids = _current_progress_markers(event_payloads, _event_progress_marker)
         prev_event_count = _state_int(state, "events_uploaded_count")
-        if prev_event_count > len(event_payloads):
-            prev_event_count = 0
-        should_sync_events = force or (len(event_payloads) > prev_event_count) or (not state.get("events_upserted_at_utc"))
+        uploaded_event_uids = _load_progress_markers(
+            state,
+            event_progress_key,
+            current_markers=current_event_uids,
+            seed_rows=event_payloads,
+            legacy_uploaded_count=prev_event_count,
+            marker_fn=_event_progress_marker,
+        )
+        if force:
+            uploaded_event_uids.clear()
+
+        events_delta = [
+            payload
+            for payload in event_payloads
+            if _event_progress_marker(payload) not in uploaded_event_uids
+        ]
+        should_sync_events = force or bool(events_delta) or (bool(event_payloads) and not state.get("events_upserted_at_utc"))
         if should_sync_events:
-            start_idx = 0 if force else prev_event_count
-            events_delta = event_payloads[start_idx:]
             for batch in split_batches(events_delta, int(cfg.events_batch_size)):
                 payload = build_events_batch_payload(batch)
                 _retry_with_backoff(
-                    lambda p=payload: client.upsert_events(p),
+                    lambda p=payload, batch_rows=batch: _upsert_events_with_validation(client, p, batch_rows),
                     cfg.retry,
                     what=f"upsert_events({run_payload['run_uid']})",
                 )
-            state["events_upserted_at_utc"] = _utcnow_iso()
-            state["events_uploaded_count"] = len(event_payloads)
-            _save_state(run_dir, cfg.state_filename, state)
+                uploaded_event_uids.update(_current_progress_markers(batch, _event_progress_marker))
+                state["events_upserted_at_utc"] = _utcnow_iso()
+                state[event_progress_key] = sorted(uploaded_event_uids)
+                state["events_uploaded_count"] = len(uploaded_event_uids)
+                _save_state(run_dir, cfg.state_filename, state)
 
-        prev_thumb_seen = _state_int(state, "thumbs_seen_event_count")
-        if prev_thumb_seen > len(event_payloads):
-            prev_thumb_seen = 0
-        if cfg.upload_thumbnails and (force or (len(event_payloads) > prev_thumb_seen) or (not state.get("thumbs_upserted_at_utc"))):
-            start_idx = 0 if force else prev_thumb_seen
-            uploaded = _upload_event_thumbnails(
+        thumb_progress_key = "uploaded_thumb_markers"
+        uploaded_thumb_markers = _load_progress_markers(
+            state,
+            thumb_progress_key,
+            current_markers=_current_progress_markers(
+                event_payloads,
+                lambda row: _evidence_progress_marker(row, "thumb_relpath"),
+            ),
+            seed_rows=event_payloads,
+            legacy_uploaded_count=_state_int(state, "thumbs_uploaded_count"),
+            marker_fn=lambda row: _evidence_progress_marker(row, "thumb_relpath"),
+        )
+        if force:
+            uploaded_thumb_markers.clear()
+        thumb_events_delta = [
+            payload
+            for payload in event_payloads
+            if _evidence_progress_marker(payload, "thumb_relpath") not in uploaded_thumb_markers
+        ]
+        if cfg.upload_thumbnails and (
+            force or bool(thumb_events_delta) or (bool(uploaded_thumb_markers) and not state.get("thumbs_upserted_at_utc"))
+        ):
+            _upload_event_thumbnails(
                 run_dir,
-                event_payloads[start_idx:],
+                thumb_events_delta,
                 cfg,
                 client,
                 relpath_key="thumb_relpath",
                 evidence_kind="object",
+                on_uploaded=lambda marker: _record_uploaded_marker(
+                    state=state,
+                    state_key=thumb_progress_key,
+                    markers=uploaded_thumb_markers,
+                    marker=marker,
+                    uploaded_count_key="thumbs_uploaded_count",
+                    uploaded_at_key="thumbs_upserted_at_utc",
+                    seen_count_key="thumbs_seen_event_count",
+                    seen_count=len(event_payloads),
+                    run_dir=run_dir,
+                    state_filename=cfg.state_filename,
+                ),
             )
-            state["thumbs_upserted_at_utc"] = _utcnow_iso()
-            if force:
-                state["thumbs_uploaded_count"] = uploaded
-            else:
-                state["thumbs_uploaded_count"] = _state_int(state, "thumbs_uploaded_count") + uploaded
-            state["thumbs_seen_event_count"] = len(event_payloads)
-            _save_state(run_dir, cfg.state_filename, state)
 
-        prev_scene_seen = _state_int(state, "scene_seen_event_count")
-        if prev_scene_seen > len(event_payloads):
-            prev_scene_seen = 0
-        if cfg.upload_scene_thumbnails and (force or (len(event_payloads) > prev_scene_seen) or (not state.get("scene_upserted_at_utc"))):
-            start_idx = 0 if force else prev_scene_seen
-            uploaded_scene = _upload_event_thumbnails(
+        scene_progress_key = "uploaded_scene_markers"
+        uploaded_scene_markers = _load_progress_markers(
+            state,
+            scene_progress_key,
+            current_markers=_current_progress_markers(
+                event_payloads,
+                lambda row: _evidence_progress_marker(row, "scene_relpath"),
+            ),
+            seed_rows=event_payloads,
+            legacy_uploaded_count=_state_int(state, "scene_uploaded_count"),
+            marker_fn=lambda row: _evidence_progress_marker(row, "scene_relpath"),
+        )
+        if force:
+            uploaded_scene_markers.clear()
+        scene_events_delta = [
+            payload
+            for payload in event_payloads
+            if _evidence_progress_marker(payload, "scene_relpath") not in uploaded_scene_markers
+        ]
+        if cfg.upload_scene_thumbnails and (
+            force or bool(scene_events_delta) or (bool(uploaded_scene_markers) and not state.get("scene_upserted_at_utc"))
+        ):
+            _upload_event_thumbnails(
                 run_dir,
-                event_payloads[start_idx:],
+                scene_events_delta,
                 cfg,
                 client,
                 relpath_key="scene_relpath",
                 evidence_kind="scene",
+                on_uploaded=lambda marker: _record_uploaded_marker(
+                    state=state,
+                    state_key=scene_progress_key,
+                    markers=uploaded_scene_markers,
+                    marker=marker,
+                    uploaded_count_key="scene_uploaded_count",
+                    uploaded_at_key="scene_upserted_at_utc",
+                    seen_count_key="scene_seen_event_count",
+                    seen_count=len(event_payloads),
+                    run_dir=run_dir,
+                    state_filename=cfg.state_filename,
+                ),
             )
-            state["scene_upserted_at_utc"] = _utcnow_iso()
-            if force:
-                state["scene_uploaded_count"] = uploaded_scene
-            else:
-                state["scene_uploaded_count"] = _state_int(state, "scene_uploaded_count") + uploaded_scene
-            state["scene_seen_event_count"] = len(event_payloads)
-            _save_state(run_dir, cfg.state_filename, state)
 
         state["contract_version"] = EVENT_CONTRACT_VERSION
         state["run_uid"] = run_payload["run_uid"]
+        state[event_progress_key] = sorted(uploaded_event_uids)
+        state["events_uploaded_count"] = len(uploaded_event_uids)
+        state[thumb_progress_key] = sorted(uploaded_thumb_markers)
+        state["thumbs_uploaded_count"] = len(uploaded_thumb_markers)
+        state["thumbs_seen_event_count"] = len(event_payloads)
+        state[scene_progress_key] = sorted(uploaded_scene_markers)
+        state["scene_uploaded_count"] = len(uploaded_scene_markers)
+        state["scene_seen_event_count"] = len(event_payloads)
         state["last_error"] = None
         if run_is_closed:
             state["completed_at_utc"] = _utcnow_iso()
@@ -415,6 +483,38 @@ def _retry_with_backoff(fn, retry_cfg: RetryConfig, *, what: str) -> Any:
             delay = delay * backoff_factor if delay > 0 else 0.0
 
 
+def _upsert_run_with_validation(client: DeliveryApiClient, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    response = client.upsert_run(payload)
+    expected_run_uid = str(payload.get("run_uid") or "").strip()
+    returned_run_uid = str(response.get("run_uid") or "").strip() if isinstance(response, Mapping) else ""
+    if expected_run_uid and returned_run_uid and returned_run_uid != expected_run_uid:
+        raise UploadError(
+            f"run upsert acknowledged unexpected run_uid: expected {expected_run_uid!r}, got {returned_run_uid!r}"
+        )
+    return response
+
+
+def _upsert_events_with_validation(
+    client: DeliveryApiClient,
+    payload: Mapping[str, Any],
+    batch_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    response = client.upsert_events(payload)
+    acknowledged = _response_uid_set(
+        response,
+        candidate_keys=("accepted_event_uids", "stored_event_uids", "event_uids"),
+    )
+    if acknowledged is None:
+        return response
+
+    expected = _current_progress_markers(batch_rows, _event_progress_marker)
+    missing = expected - acknowledged
+    if missing:
+        missing_text = ", ".join(sorted(missing))
+        raise RetryableUploadError(f"batch acknowledged only partially; missing event_uids: {missing_text}")
+    return response
+
+
 def _upload_event_thumbnails(
     run_dir: Path,
     events: Sequence[Mapping[str, Any]],
@@ -423,17 +523,19 @@ def _upload_event_thumbnails(
     *,
     relpath_key: str,
     evidence_kind: str,
+    on_uploaded: Optional[Callable[[str], None]] = None,
 ) -> int:
     uploaded = 0
     for ev in events:
+        marker = _evidence_progress_marker(ev, relpath_key)
+        if marker is None:
+            continue
+
+        event_uid = _event_progress_marker(ev)
+        if event_uid is None:
+            continue
+
         rel = ev.get(relpath_key)
-        if not rel:
-            continue
-
-        event_uid = ev.get("event_uid")
-        if not event_uid:
-            continue
-
         file_path = run_dir / str(rel)
         if not file_path.exists():
             # Evidence is optional; do not fail the full run for missing file.
@@ -442,7 +544,8 @@ def _upload_event_thumbnails(
 
         content = file_path.read_bytes()
         _retry_with_backoff(
-            lambda uid=str(event_uid), name=file_path.name, data=content: client.upload_thumbnail(
+            lambda uid=str(event_uid), name=file_path.name, data=content: _upload_thumbnail_with_validation(
+                client,
                 uid,
                 filename=name,
                 content=data,
@@ -452,6 +555,8 @@ def _upload_event_thumbnails(
             what=f"upload_thumbnail({event_uid})",
         )
         uploaded += 1
+        if on_uploaded is not None:
+            on_uploaded(marker)
     return uploaded
 
 
@@ -476,6 +581,109 @@ def _state_int(state: Mapping[str, Any], key: str) -> int:
         return 0
 
 
+def _state_text_set(state: Mapping[str, Any], key: str) -> set[str]:
+    raw = state.get(key)
+    if not isinstance(raw, list):
+        return set()
+
+    out: set[str] = set()
+    for item in raw:
+        text = str(item).strip()
+        if text:
+            out.add(text)
+    return out
+
+
+def _load_progress_markers(
+    state: Mapping[str, Any],
+    state_key: str,
+    *,
+    current_markers: set[str],
+    seed_rows: Sequence[Mapping[str, Any]],
+    legacy_uploaded_count: int,
+    marker_fn: Callable[[Mapping[str, Any]], Optional[str]],
+) -> set[str]:
+    markers = _state_text_set(state, state_key)
+    if not markers and legacy_uploaded_count > 0:
+        markers = _seed_progress_markers(seed_rows, legacy_uploaded_count, marker_fn)
+    return markers & current_markers
+
+
+def _seed_progress_markers(
+    rows: Sequence[Mapping[str, Any]],
+    uploaded_count: int,
+    marker_fn: Callable[[Mapping[str, Any]], Optional[str]],
+) -> set[str]:
+    if uploaded_count <= 0:
+        return set()
+
+    markers: set[str] = set()
+    for row in rows:
+        marker = marker_fn(row)
+        if marker is None:
+            continue
+        markers.add(marker)
+        if len(markers) >= uploaded_count:
+            break
+    return markers
+
+
+def _current_progress_markers(
+    rows: Sequence[Mapping[str, Any]],
+    marker_fn: Callable[[Mapping[str, Any]], Optional[str]],
+) -> set[str]:
+    markers: set[str] = set()
+    for row in rows:
+        marker = marker_fn(row)
+        if marker is not None:
+            markers.add(marker)
+    return markers
+
+
+def _event_progress_marker(row: Mapping[str, Any]) -> Optional[str]:
+    value = row.get("event_uid")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _evidence_progress_marker(row: Mapping[str, Any], relpath_key: str) -> Optional[str]:
+    event_uid = _event_progress_marker(row)
+    if event_uid is None:
+        return None
+
+    rel = row.get(relpath_key)
+    if rel is None:
+        return None
+
+    rel_text = str(rel).strip()
+    if not rel_text:
+        return None
+    return f"{event_uid}:{rel_text}"
+
+
+def _record_uploaded_marker(
+    *,
+    state: Dict[str, Any],
+    state_key: str,
+    markers: set[str],
+    marker: str,
+    uploaded_count_key: str,
+    uploaded_at_key: str,
+    seen_count_key: str,
+    seen_count: int,
+    run_dir: Path,
+    state_filename: str,
+) -> None:
+    markers.add(marker)
+    state[state_key] = sorted(markers)
+    state[uploaded_count_key] = len(markers)
+    state[uploaded_at_key] = _utcnow_iso()
+    state[seen_count_key] = int(seen_count)
+    _save_state(run_dir, state_filename, state)
+
+
 def _save_state(run_dir: Path, state_filename: str, state: Mapping[str, Any]) -> None:
     state_path = run_dir / state_filename
     payload = dict(state)
@@ -485,6 +693,57 @@ def _save_state(run_dir: Path, state_filename: str, state: Mapping[str, Any]) ->
 
 def _count_evidence(events: Sequence[Mapping[str, Any]], key: str) -> int:
     return sum(1 for ev in events if ev.get(key))
+
+
+def _upload_thumbnail_with_validation(
+    client: DeliveryApiClient,
+    event_uid: str,
+    *,
+    filename: str,
+    content: bytes,
+    kind: str,
+) -> Dict[str, Any]:
+    response = client.upload_thumbnail(
+        event_uid,
+        filename=filename,
+        content=content,
+        kind=kind,
+    )
+    if not isinstance(response, Mapping):
+        return response
+
+    response_event_uid = str(response.get("event_uid") or "").strip()
+    if response_event_uid and response_event_uid != str(event_uid).strip():
+        raise UploadError(
+            f"thumbnail upload acknowledged unexpected event_uid: expected {event_uid!r}, got {response_event_uid!r}"
+        )
+
+    response_kind = str(response.get("kind") or "").strip()
+    if response_kind and response_kind != str(kind).strip():
+        raise UploadError(
+            f"thumbnail upload acknowledged unexpected kind: expected {kind!r}, got {response_kind!r}"
+        )
+    return dict(response)
+
+
+def _response_uid_set(response: Mapping[str, Any], *, candidate_keys: Sequence[str]) -> Optional[set[str]]:
+    if not isinstance(response, Mapping):
+        return None
+
+    for key in candidate_keys:
+        raw = response.get(key)
+        if raw is None:
+            continue
+        if not isinstance(raw, list):
+            raise UploadError(f"expected response field {key!r} to be a list, got {type(raw).__name__}")
+
+        out: set[str] = set()
+        for item in raw:
+            text = str(item).strip()
+            if text:
+                out.add(text)
+        return out
+    return None
 
 
 def _encode_multipart(*, field_name: str, filename: str, content: bytes, mime_type: str) -> Tuple[bytes, str]:

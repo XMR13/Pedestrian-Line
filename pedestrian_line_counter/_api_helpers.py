@@ -208,6 +208,8 @@ def _serialize_retention_summary(summary: Any) -> Dict[str, Any]:
         "now_utc": summary.now_utc,
         "dry_run": bool(summary.dry_run),
         "max_age_days": int(summary.max_age_days),
+        "max_total_bytes": int(summary.max_total_bytes) if summary.max_total_bytes is not None else None,
+        "min_free_bytes": int(summary.min_free_bytes) if summary.min_free_bytes is not None else None,
         "state_filename": str(summary.state_filename),
         "scanned_runs": int(summary.scanned_runs),
         "eligible_runs": int(summary.eligible_runs),
@@ -216,6 +218,16 @@ def _serialize_retention_summary(summary: Any) -> Dict[str, Any]:
         "retained_recent_runs": int(summary.retained_recent_runs),
         "bytes_reclaimable": int(summary.bytes_reclaimable),
         "bytes_deleted": int(summary.bytes_deleted),
+        "total_runs_bytes": int(summary.total_runs_bytes),
+        "disk_total_bytes": int(summary.disk_total_bytes) if summary.disk_total_bytes is not None else None,
+        "disk_used_bytes": int(summary.disk_used_bytes) if summary.disk_used_bytes is not None else None,
+        "disk_free_bytes_before": int(summary.disk_free_bytes_before) if summary.disk_free_bytes_before is not None else None,
+        "projected_runs_bytes_after": int(summary.projected_runs_bytes_after),
+        "projected_disk_free_bytes_after": (
+            int(summary.projected_disk_free_bytes_after) if summary.projected_disk_free_bytes_after is not None else None
+        ),
+        "pressure_bytes_target": int(summary.pressure_bytes_target),
+        "pressure_bytes_remaining_after": int(summary.pressure_bytes_remaining_after),
         "items": [_serialize_retention_run_info(item) for item in summary.runs],
     }
 
@@ -230,6 +242,9 @@ def _serialize_retention_run_info(info: Any) -> Dict[str, Any]:
         "ended_at_utc": info.ended_at_utc,
         "age_days": float(info.age_days) if info.age_days is not None else None,
         "state_path": str(info.state_path) if info.state_path is not None else None,
+        "eligible_by_age": bool(info.eligible_by_age),
+        "selected_for_deletion": bool(info.selected_for_deletion),
+        "deletion_basis": info.deletion_basis,
     }
 
 

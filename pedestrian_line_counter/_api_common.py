@@ -46,6 +46,8 @@ class SingleRunSyncRequest(BaseModel):
 class RetentionRequest(BaseModel):
     dry_run: bool = True
     max_age_days: Optional[int] = Field(default=None, ge=0)
+    max_total_bytes: Optional[int] = Field(default=None, ge=0)
+    min_free_bytes: Optional[int] = Field(default=None, ge=0)
     state_filename: Optional[str] = None
     protect_incomplete_runs: Optional[bool] = None
 

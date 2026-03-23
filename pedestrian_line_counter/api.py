@@ -276,8 +276,15 @@ class EdgeApiRuntime:
             "retention": {
                 "enabled": bool(self.retention_cfg.enabled),
                 "max_age_days": int(self.retention_cfg.max_age_days),
+                "max_total_bytes": (
+                    int(self.retention_cfg.max_total_bytes) if self.retention_cfg.max_total_bytes is not None else None
+                ),
+                "min_free_bytes": (
+                    int(self.retention_cfg.min_free_bytes) if self.retention_cfg.min_free_bytes is not None else None
+                ),
                 "protect_incomplete_runs": bool(self.retention_cfg.protect_incomplete_runs),
                 "state_filename": str(self.retention_cfg.state_filename),
+                "auto_run_interval_s": float(self.retention_cfg.auto_run_interval_s),
             },
         }
 
@@ -289,12 +296,16 @@ class EdgeApiRuntime:
         *,
         dry_run: bool = True,
         max_age_days: Optional[int] = None,
+        max_total_bytes: Optional[int] = None,
+        min_free_bytes: Optional[int] = None,
         state_filename: Optional[str] = None,
         protect_incomplete_runs: Optional[bool] = None,
     ) -> Dict[str, Any]:
         return self._retention_payload(
             dry_run=bool(dry_run),
             max_age_days=max_age_days,
+            max_total_bytes=max_total_bytes,
+            min_free_bytes=min_free_bytes,
             state_filename=state_filename,
             protect_incomplete_runs=protect_incomplete_runs,
         )
@@ -955,6 +966,8 @@ class EdgeApiRuntime:
         *,
         dry_run: bool,
         max_age_days: Optional[int] = None,
+        max_total_bytes: Optional[int] = None,
+        min_free_bytes: Optional[int] = None,
         state_filename: Optional[str] = None,
         protect_incomplete_runs: Optional[bool] = None,
     ) -> Dict[str, Any]:
@@ -965,6 +978,12 @@ class EdgeApiRuntime:
         summary = apply_retention_policy(
             self.spool_dir,
             max_age_days=int(max_age_days if max_age_days is not None else self.retention_cfg.max_age_days),
+            max_total_bytes=(
+                int(max_total_bytes) if max_total_bytes is not None else self.retention_cfg.max_total_bytes
+            ),
+            min_free_bytes=(
+                int(min_free_bytes) if min_free_bytes is not None else self.retention_cfg.min_free_bytes
+            ),
             state_filename=resolved_state_filename,
             protect_incomplete_runs=(
                 bool(protect_incomplete_runs)
@@ -1431,6 +1450,8 @@ def create_app(
         return runtime.run_retention(
             dry_run=bool(payload.dry_run),
             max_age_days=payload.max_age_days,
+            max_total_bytes=payload.max_total_bytes,
+            min_free_bytes=payload.min_free_bytes,
             state_filename=payload.state_filename,
             protect_incomplete_runs=payload.protect_incomplete_runs,
         )
