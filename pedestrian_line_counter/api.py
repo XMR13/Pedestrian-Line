@@ -55,7 +55,8 @@ from ._api_helpers import (
     _coalesce_text,
     _compact_path,
     _datetime_in_date_range,
-    _delivery_state_name,
+    _delivery_state_label,
+    _delivery_state_pill_class,
     _display_event_timestamp,
     _empty_dashboard_trend,
     _event_occurrence_utc,
@@ -124,8 +125,9 @@ class EdgeApiRuntime:
         }
 
     def status_payload(self) -> Dict[str, Any]:
-        runs = self.list_recent_runs(limit=1)
-        counts = self._collect_delivery_counts()
+        run_summaries = list(self._iter_all_runs())
+        run_summaries.sort(key=_run_sort_key, reverse=True)
+        counts = self._collect_delivery_counts(run_summaries=run_summaries)
         review_counts = self.review_store.summary()
         return {
             "ok": True,
@@ -144,12 +146,13 @@ class EdgeApiRuntime:
                 "in_progress": counts["in_progress"],
                 "unknown": counts["unknown"],
             },
+            "sync_overview": self._build_sync_overview(run_summaries=run_summaries, counts=counts),
             "review_counts": {
                 "qualified_yes": review_counts[DECISION_YES],
                 "qualified_no": review_counts[DECISION_NO],
                 "reviewed_total": review_counts["reviewed_total"],
             },
-            "latest_run": runs[0] if runs else None,
+            "latest_run": run_summaries[0] if run_summaries else None,
         }
 
     def metrics_payload(
@@ -231,6 +234,7 @@ class EdgeApiRuntime:
                 "in_progress": delivery_counts["in_progress"],
                 "unknown": delivery_counts["unknown"],
             },
+            "sync_overview": self._build_sync_overview(run_summaries=run_summaries, counts=delivery_counts),
             "lifecycle_status_counts": lifecycle_status_counts,
             "latest_run": latest_run,
         }
@@ -679,6 +683,9 @@ class EdgeApiRuntime:
             "recent_events": recent_events,
             "recent_runs": recent_runs,
             "latest_run": latest_run,
+            "sync_overview": self._build_sync_overview(
+                run_summaries=list(self._iter_all_runs(date_range=date_range)),
+            ),
             "pending_reviews": pending_reviews,
             "review_counts": review_counts,
             "cameras": self.list_cameras(),
@@ -1016,6 +1023,83 @@ class EdgeApiRuntime:
             else:
                 counts["unknown"] += 1
         return counts
+
+    def _build_sync_overview(
+        self,
+        *,
+        run_summaries: Iterable[Mapping[str, Any]],
+        counts: Optional[Mapping[str, int]] = None,
+    ) -> Dict[str, Any]:
+        items = [dict(item) for item in run_summaries]
+        delivery_counts = dict(counts) if counts is not None else self._collect_delivery_counts(run_summaries=items)
+
+        latest_sync: Optional[Dict[str, Any]] = None
+        latest_sync_dt: Optional[datetime] = None
+        latest_issue: Optional[Dict[str, Any]] = None
+        latest_issue_dt: Optional[datetime] = None
+
+        for item in items:
+            sync_at = _parse_iso_datetime(item.get("last_sync_at_utc"))
+            if sync_at is not None and (latest_sync_dt is None or sync_at > latest_sync_dt):
+                latest_sync_dt = sync_at
+                latest_sync = {
+                    "run_uid": _text(item.get("run_uid")),
+                    "camera_id": _text(item.get("camera_id")),
+                    "at_utc": _text(item.get("last_sync_at_utc")),
+                    "delivery_state": _text(item.get("delivery_state")),
+                    "delivery_state_label": _delivery_state_label(item.get("delivery_state")),
+                    "delivery_state_pill_class": _delivery_state_pill_class(item.get("delivery_state")),
+                }
+
+            issue_message = _text(item.get("last_error_short"))
+            issue_at = _parse_iso_datetime(item.get("last_error_at_utc")) or _parse_iso_datetime(item.get("updated_at_utc"))
+            if issue_message is not None and (latest_issue is None or (issue_at is not None and (latest_issue_dt is None or issue_at > latest_issue_dt))):
+                latest_issue_dt = issue_at
+                latest_issue = {
+                    "run_uid": _text(item.get("run_uid")),
+                    "camera_id": _text(item.get("camera_id")),
+                    "at_utc": _coalesce_text(item.get("last_error_at_utc"), item.get("updated_at_utc")),
+                    "message": issue_message,
+                }
+
+        status_cards = [
+            {
+                "key": "pending",
+                "label": "Pending",
+                "value": int(delivery_counts.get("pending", 0)),
+                "card_class": "ink",
+                "pill_class": "ink",
+            },
+            {
+                "key": "in_progress",
+                "label": "Sedang dikirim",
+                "value": int(delivery_counts.get("in_progress", 0)),
+                "card_class": "brand",
+                "pill_class": "brand",
+            },
+            {
+                "key": "failed",
+                "label": "Gagal",
+                "value": int(delivery_counts.get("failed", 0)),
+                "card_class": "no",
+                "pill_class": "no",
+            },
+            {
+                "key": "completed",
+                "label": "Selesai",
+                "value": int(delivery_counts.get("completed", 0)),
+                "card_class": "yes",
+                "pill_class": "yes",
+            },
+        ]
+
+        return {
+            "uploader_enabled": self.uploader_cfg is not None,
+            "runs_total": int(delivery_counts.get("runs_total", 0)),
+            "status_cards": status_cards,
+            "latest_sync": latest_sync,
+            "latest_issue": latest_issue,
+        }
 
 
 def create_app(

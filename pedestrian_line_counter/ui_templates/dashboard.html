@@ -142,6 +142,56 @@
     <div class="pad">
       <div class="section-head">
         <div>
+          <h3>Sync pulse</h3>
+          <p class="caption">Ringkasan pengiriman data dari local spool ke backend.</p>
+        </div>
+        <span class="pill {% if sync_overview.uploader_enabled %}ok{% else %}ink{% endif %}">
+          {{ "uploader on" if sync_overview.uploader_enabled else "uploader off" }}
+        </span>
+      </div>
+      <div class="queue-status-grid sync-status-grid" aria-live="polite">
+        {% for item in sync_overview.status_cards %}
+        <article class="queue-status-card {{ item.card_class }}">
+          <div class="label">{{ item.label }}</div>
+          <div class="value">{{ format_count(item.value) }}</div>
+        </article>
+        {% endfor %}
+      </div>
+      <div class="sync-meta-grid">
+        <article class="sync-meta-card">
+          <div class="sync-meta-label">Sync terbaru</div>
+          {% if sync_overview.latest_sync %}
+          <div class="sync-meta-value">{{ format_datetime(sync_overview.latest_sync.at_utc) }}</div>
+          <div class="sync-meta-copy">
+            <span class="pill {{ sync_overview.latest_sync.delivery_state_pill_class }}">{{ sync_overview.latest_sync.delivery_state_label }}</span>
+            <span>run {{ sync_overview.latest_sync.run_uid or "Unknown" }}{% if sync_overview.latest_sync.camera_id %} • camera {{ sync_overview.latest_sync.camera_id }}{% endif %}</span>
+          </div>
+          {% else %}
+          <div class="sync-meta-value">Belum ada sync</div>
+          <div class="sync-meta-copy">Uploader belum mencatat aktivitas sync yang berhasil.</div>
+          {% endif %}
+        </article>
+        <article class="sync-meta-card">
+          <div class="sync-meta-label">Error terakhir</div>
+          {% if sync_overview.latest_issue %}
+          <div class="sync-meta-value">{{ sync_overview.latest_issue.message or "Gagal kirim data. Coba sync ulang." }}</div>
+          <div class="sync-meta-copy">
+            <span>{{ format_datetime(sync_overview.latest_issue.at_utc) }}</span>
+            <span>run {{ sync_overview.latest_issue.run_uid or "Unknown" }}{% if sync_overview.latest_issue.camera_id %} • camera {{ sync_overview.latest_issue.camera_id }}{% endif %}</span>
+          </div>
+          {% else %}
+          <div class="sync-meta-value">Belum ada error</div>
+          <div class="sync-meta-copy">Belum ada kegagalan sync yang tercatat di local spool.</div>
+          {% endif %}
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="pad">
+      <div class="section-head">
+        <div>
           <h3>Event terbaru</h3>
           <p class="caption">Data terbaru semenjak kejadian yang ada.</p>
         </div>
@@ -220,7 +270,21 @@
               <td>{{ run.camera_id or "Unknown" }}</td>
               <td>{{ format_datetime(run.updated_at_utc) }}</td>
               <td>{{ run.lifecycle_status or "Unknown" }}</td>
-              <td><span class="pill">{{ run.delivery_state }}</span></td>
+              <td>
+                <div class="delivery-status-cell">
+                  <span class="pill {{ run.delivery_state_pill_class }}">{{ run.delivery_state_label }}</span>
+                  {% if run.delivery_state == "failed" and run.last_error_short %}
+                  <div class="delivery-status-note error">{{ run.last_error_short }}</div>
+                  {% if run.last_error_at_utc %}
+                  <div class="delivery-status-note">Error {{ format_datetime(run.last_error_at_utc) }}</div>
+                  {% endif %}
+                  {% elif run.last_sync_at_utc %}
+                  <div class="delivery-status-note">Sync terakhir {{ format_datetime(run.last_sync_at_utc) }}</div>
+                  {% else %}
+                  <div class="delivery-status-note">Menunggu sync pertama</div>
+                  {% endif %}
+                </div>
+              </td>
             </tr>
             {% else %}
             <tr><td colspan="5">No runs found yet.</td></tr>

@@ -62,6 +62,19 @@ def _build_run_summary(
     if not isinstance(health, Mapping):
         health = {}
 
+    delivery_state = _delivery_state_name(state_meta)
+    last_sync_at_utc = _latest_delivery_timestamp(
+        state_meta,
+        "completed_at_utc",
+        "in_progress_last_sync_at_utc",
+        "scene_upserted_at_utc",
+        "thumbs_upserted_at_utc",
+        "events_upserted_at_utc",
+        "run_finalized_at_utc",
+        "run_upserted_at_utc",
+    )
+    last_error = _mapping_get_text(state_meta, "last_error")
+
     return {
         "run_uid": _text(run_meta.get("run_uid")),
         "site_id": _text(run_meta.get("site_id")),
@@ -76,7 +89,14 @@ def _build_run_summary(
         "source_type": _mapping_get_text(run_meta.get("source"), "type"),
         "source_value": _mapping_get_text(run_meta.get("source"), "value"),
         "line_mode": _text(run_meta.get("line_mode")),
-        "delivery_state": _delivery_state_name(state_meta),
+        "delivery_state": delivery_state,
+        "delivery_state_label": _delivery_state_label(delivery_state),
+        "delivery_state_pill_class": _delivery_state_pill_class(delivery_state),
+        "last_sync_at_utc": last_sync_at_utc,
+        "last_error": last_error,
+        "last_error_at_utc": _mapping_get_text(state_meta, "last_error_at_utc"),
+        "last_error_short": _friendly_delivery_error(last_error),
+        "retry_recommended": delivery_state in {"pending", "failed"},
         "lifecycle_status": _mapping_get_text(health, "lifecycle_status"),
         "frames_total": _mapping_get_int(health, "frames_total"),
         "frames_processed": _mapping_get_int(health, "frames_processed"),
@@ -126,16 +146,80 @@ def _build_event_summary(
     }
 
 
+#The delivery state section 
+
 def _delivery_state_name(state_meta: Optional[Mapping[str, Any]]) -> str:
     if not isinstance(state_meta, Mapping):
         return "pending"
     if _text(state_meta.get("completed_at_utc")):
         return "completed"
-    if _text(state_meta.get("in_progress_at_utc")):
+    if _text(state_meta.get("in_progress_last_sync_at_utc")):
         return "in_progress"
     if _text(state_meta.get("last_error")):
         return "failed"
     return "pending"
+
+
+def _delivery_state_label(state_name: Optional[str]) -> str:
+    mapping = {
+        "pending": "Pending",
+        "in_progress": "Sedang dikirim",
+        "failed": "Gagal",
+        "completed": "Selesai",
+    }
+    key = _text(state_name) or ""
+    return mapping.get(key, "Unknown")
+
+
+def _delivery_state_pill_class(state_name: Optional[str]) -> str:
+    mapping = {
+        "pending": "ink",
+        "in_progress": "brand",
+        "failed": "no",
+        "completed": "yes",
+    }
+    key = _text(state_name) or ""
+    return mapping.get(key, "")
+
+
+def _latest_delivery_timestamp(state_meta: Optional[Mapping[str, Any]], *keys: str) -> Optional[str]:
+    if not isinstance(state_meta, Mapping):
+        return None
+
+    latest_value: Optional[str] = None
+    latest_dt: Optional[datetime] = None
+    for key in keys:
+        value = _mapping_get_text(state_meta, key)
+        parsed = _parse_iso_datetime(value)
+        if value is None or parsed is None:
+            continue
+        if latest_dt is None or parsed > latest_dt:
+            latest_dt = parsed
+            latest_value = value
+    return latest_value
+
+
+def _friendly_delivery_error(value: Any) -> Optional[str]:
+    text = _text(value)
+    if text is None:
+        return None
+
+    normalized = text.lower()
+    if "thumbnail" in normalized or "thumb" in normalized:
+        return "Upload thumbnail gagal."
+    if "network error" in normalized:
+        return "Koneksi backend gagal."
+    if "timeout" in normalized:
+        return "Koneksi backend timeout."
+    if "http 401" in normalized or "http 403" in normalized:
+        return "Akses backend ditolak."
+    if "http 5" in normalized:
+        return "Backend sync sedang bermasalah."
+    if "upsert_events" in normalized:
+        return "Kirim event gagal."
+    if "upsert_run" in normalized:
+        return "Sync run gagal."
+    return "Gagal kirim data. coba sync ulang."
 
 
 def _run_sort_key(row: Mapping[str, Any]) -> tuple[str, str]:

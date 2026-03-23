@@ -142,7 +142,7 @@
           <div class="row"><div class="key">Camera</div><div class="val">{{ event.camera_id or "Unknown" }}</div></div>
           <div class="row"><div class="key">Run</div><div class="val">{{ event.run.run_uid if event.run else event.run_uid or "Unknown" }}</div></div>
           <div class="row"><div class="key">Line mode</div><div class="val">{{ event.run.line_mode if event.run else "Unknown" }}</div></div>
-          <div class="row"><div class="key">Delivery</div><div class="val">{{ event.run.delivery_state if event.run else "Unknown" }}</div></div>
+          <div class="row"><div class="key">Delivery</div><div class="val">{{ event.run.delivery_state_label if event.run else "Unknown" }}</div></div>
         </div>
       </div>
 

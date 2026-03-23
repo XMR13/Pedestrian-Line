@@ -25,6 +25,8 @@ def _write_run(
     direction: str = "A_TO_B",
     completed_at_utc: str | None = None,
     last_error: str | None = None,
+    last_error_at_utc: str | None = None,
+    in_progress_last_sync_at_utc: str | None = None,
     lifecycle_status: str = "stopped",
 ) -> Path:
     run_dir = root / day / run_uid
@@ -94,6 +96,10 @@ def _write_run(
         state["completed_at_utc"] = completed_at_utc
     if last_error is not None:
         state["last_error"] = last_error
+    if last_error_at_utc is not None:
+        state["last_error_at_utc"] = last_error_at_utc
+    if in_progress_last_sync_at_utc is not None:
+        state["in_progress_last_sync_at_utc"] = in_progress_last_sync_at_utc
     if state:
         state["run_uid"] = run_uid
         (run_dir / ".portal_upload_state.json").write_text(json.dumps(state), encoding="utf-8")
@@ -132,6 +138,8 @@ def test_healthz_and_status_expose_spool_state(tmp_path) -> None:
     assert payload["runs_total"] == 2
     assert payload["delivery_state_counts"]["completed"] == 1
     assert payload["delivery_state_counts"]["failed"] == 1
+    assert payload["sync_overview"]["status_cards"][2]["label"] == "Gagal"
+    assert payload["sync_overview"]["status_cards"][2]["value"] == 1
     assert payload["latest_run"]["run_uid"] == "run_a"
 
 
@@ -206,6 +214,8 @@ def test_metrics_and_config_expose_runtime_configuration(tmp_path) -> None:
     assert metrics_payload["count_b_to_a_total"] == 0
     assert metrics_payload["delivery_state_counts"]["completed"] == 1
     assert metrics_payload["delivery_state_counts"]["pending"] == 1
+    assert metrics_payload["sync_overview"]["status_cards"][3]["label"] == "Selesai"
+    assert metrics_payload["sync_overview"]["status_cards"][3]["value"] == 1
     assert metrics_payload["lifecycle_status_counts"]["stopped"] == 2
     assert metrics_payload["latest_run"]["run_uid"] == "run_new"
 
@@ -319,6 +329,68 @@ def test_dashboard_payload_adapts_trend_buckets_for_longer_date_ranges(tmp_path)
     assert monthly_trend["bucket_mode"] == "month"
     assert monthly_trend["buckets"][0]["label"] == "2026-03"
     assert monthly_trend["buckets"][1]["label"] == "2026-04"
+
+
+def test_recent_runs_expose_sync_visibility_fields(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_done",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+        completed_at_utc="2026-03-11T10:06:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_inflight",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+        in_progress_last_sync_at_utc="2026-03-11T10:16:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_failed",
+        started_at_utc="2026-03-11T10:20:00Z",
+        occurred_at_utc="2026-03-11T10:25:00Z",
+        last_error="HTTP 503 on http://it.local/api/events/upsert: backend down",
+        last_error_at_utc="2026-03-11T10:27:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_pending",
+        started_at_utc="2026-03-11T10:30:00Z",
+        occurred_at_utc="2026-03-11T10:35:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path))
+
+    runs = client.get("/runs/recent", params={"limit": 4})
+    assert runs.status_code == 200
+    by_uid = {item["run_uid"]: item for item in runs.json()["items"]}
+
+    assert by_uid["run_done"]["delivery_state"] == "completed"
+    assert by_uid["run_done"]["delivery_state_label"] == "Selesai"
+    assert by_uid["run_done"]["delivery_state_pill_class"] == "yes"
+    assert by_uid["run_done"]["last_sync_at_utc"] == "2026-03-11T10:06:00Z"
+    assert by_uid["run_done"]["retry_recommended"] is False
+
+    assert by_uid["run_inflight"]["delivery_state"] == "in_progress"
+    assert by_uid["run_inflight"]["delivery_state_label"] == "Sedang dikirim"
+    assert by_uid["run_inflight"]["last_sync_at_utc"] == "2026-03-11T10:16:00Z"
+    assert by_uid["run_inflight"]["retry_recommended"] is False
+
+    assert by_uid["run_failed"]["delivery_state"] == "failed"
+    assert by_uid["run_failed"]["delivery_state_label"] == "Gagal"
+    assert by_uid["run_failed"]["last_error_short"] == "Backend sync sedang bermasalah."
+    assert by_uid["run_failed"]["retry_recommended"] is True
+
+    assert by_uid["run_pending"]["delivery_state"] == "pending"
+    assert by_uid["run_pending"]["delivery_state_label"] == "Pending"
+    assert by_uid["run_pending"]["last_sync_at_utc"] is None
+    assert by_uid["run_pending"]["retry_recommended"] is True
 
 
 def test_retention_preview_and_run_endpoint_apply_policy(tmp_path) -> None:
@@ -845,12 +917,34 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
         occurred_at_utc="2026-03-11T10:05:00Z",
         occurred_at_local="2026-03-11T17:05:00+07:00",
     )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_sync_failed",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+        last_error="network error on http://it.local/api/events/upsert: connection refused",
+        last_error_at_utc="2026-03-11T10:16:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_sync_live",
+        started_at_utc="2026-03-11T10:20:00Z",
+        occurred_at_utc="2026-03-11T10:25:00Z",
+        in_progress_last_sync_at_utc="2026-03-11T10:26:00Z",
+    )
     client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
 
     dashboard = client.get("/ui/dashboard?date_from=2026-03-11&date_to=2026-03-11")
     assert dashboard.status_code == 200
     assert "Traffic Monitoring Dashboard" in dashboard.text
     assert "Event terbaru" in dashboard.text
+    assert "Sync pulse" in dashboard.text
+    assert "Sedang dikirim" in dashboard.text
+    assert "Gagal" in dashboard.text
+    assert "Koneksi backend gagal." in dashboard.text
+    assert "Sync terakhir" in dashboard.text
     assert "Traffic trend chart from local spool data" in dashboard.text
     assert "placeholder chart" not in dashboard.text
     assert "value=\"2026-03-11\"" in dashboard.text
@@ -868,6 +962,7 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     assert "Event Detail" in detail.text
     assert "run_ui_e1" in detail.text
     assert "2026-03-11T17:05:00+07:00" in detail.text
+    assert "Pending" in detail.text
     assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_ui_e1&amp;page=1&amp;page_size=25&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in detail.text
 
     css = client.get("/ui-static/app.css")
