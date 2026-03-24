@@ -34,7 +34,7 @@ even when `argparse.BooleanOptionalAction` is not available.
 This was applied to:
 
 - `pedestrian_line_counter/main.py`
-- `pedestrian_line_counter/portal_uploader.py`
+- `pedestrian_line_counter/event_uploader.py` (`portal_uploader.py` remains as a compatibility wrapper)
 
 ## 4. Clean up test import compatibility
 

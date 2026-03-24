@@ -11,8 +11,9 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, 
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .config import ROOT_DIR, SpoolRetentionConfig
+from .config import ROOT_DIR, ServiceConfig, SpoolRetentionConfig
 from .event_uploader import (
     DeliveryApiClient,
     UploaderConfig,
@@ -107,6 +108,7 @@ class EdgeApiRuntime:
     spool_dir: Path
     uploader_cfg: Optional[UploaderConfig] = None
     retention_cfg: SpoolRetentionConfig = field(default_factory=SpoolRetentionConfig)
+    service_cfg: ServiceConfig = field(default_factory=ServiceConfig)
     mutation_auth_cfg: MutationAuthConfig = field(default_factory=MutationAuthConfig)
     ui_auth_cfg: UiAuthConfig = field(default_factory=UiAuthConfig)
     review_store: ReviewStore = field(default_factory=lambda: ReviewStore(ROOT_DIR / DEFAULT_REVIEW_DB_FILENAME))
@@ -120,6 +122,8 @@ class EdgeApiRuntime:
             "spool_exists": self.spool_dir.exists(),
             "uploader_enabled": self.uploader_cfg is not None,
             "retention_enabled": bool(self.retention_cfg.enabled),
+            "service_exposure_mode": str(self.service_cfg.exposure_mode),
+            "docs_enabled": bool(self.service_cfg.enable_docs),
             "mutation_auth_enabled": self.mutation_auth_cfg.enabled(),
             "ui_auth_enabled": self.ui_auth_cfg.enabled(),
         }
@@ -136,6 +140,8 @@ class EdgeApiRuntime:
             "spool_exists": self.spool_dir.exists(),
             "uploader_enabled": self.uploader_cfg is not None,
             "retention_enabled": bool(self.retention_cfg.enabled),
+            "service_exposure_mode": str(self.service_cfg.exposure_mode),
+            "docs_enabled": bool(self.service_cfg.enable_docs),
             "mutation_auth_enabled": self.mutation_auth_cfg.enabled(),
             "ui_auth_enabled": self.ui_auth_cfg.enabled(),
             "runs_total": counts["runs_total"],
@@ -213,6 +219,8 @@ class EdgeApiRuntime:
             "spool_exists": self.spool_dir.exists(),
             "uploader_enabled": self.uploader_cfg is not None,
             "retention_enabled": bool(self.retention_cfg.enabled),
+            "service_exposure_mode": str(self.service_cfg.exposure_mode),
+            "docs_enabled": bool(self.service_cfg.enable_docs),
             "mutation_auth_enabled": self.mutation_auth_cfg.enabled(),
             "ui_auth_enabled": self.ui_auth_cfg.enabled(),
             "runs_total": delivery_counts["runs_total"],
@@ -268,6 +276,11 @@ class EdgeApiRuntime:
             "spool_dir": str(self.spool_dir),
             "spool_exists": self.spool_dir.exists(),
             "uploader": uploader_payload,
+            "service": {
+                "exposure_mode": str(self.service_cfg.exposure_mode),
+                "docs_enabled": bool(self.service_cfg.enable_docs),
+                "trusted_hosts": list(self.service_cfg.trusted_hosts),
+            },
             "mutation_auth": {
                 "enabled": self.mutation_auth_cfg.enabled(),
                 "header_name": str(self.mutation_auth_cfg.header_name or DEFAULT_MUTATION_API_KEY_HEADER),
@@ -1107,21 +1120,42 @@ def create_app(
     spool_dir: Path,
     uploader_cfg: Optional[UploaderConfig] = None,
     retention_cfg: Optional[SpoolRetentionConfig] = None,
+    service_cfg: Optional[ServiceConfig] = None,
     mutation_auth_cfg: Optional[MutationAuthConfig] = None,
     review_db_path: Optional[Path] = None,
     ui_auth_cfg: Optional[UiAuthConfig] = None,
     title: str = "Pedestrian Line Edge Service",
 ) -> FastAPI:
-    app = FastAPI(title=title, version="0.1.0")
+    resolved_service_cfg = service_cfg if service_cfg is not None else ServiceConfig()
+    docs_url = "/docs" if bool(resolved_service_cfg.enable_docs) else None
+    redoc_url = "/redoc" if bool(resolved_service_cfg.enable_docs) else None
+    openapi_url = "/openapi.json" if bool(resolved_service_cfg.enable_docs) else None
+    app = FastAPI(
+        title=title,
+        version="0.1.0",
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url
+    )
+
     app.state.runtime = EdgeApiRuntime(
         spool_dir=Path(spool_dir),
         uploader_cfg=uploader_cfg,
         retention_cfg=retention_cfg if retention_cfg is not None else SpoolRetentionConfig(),
+        service_cfg=resolved_service_cfg,
         mutation_auth_cfg=mutation_auth_cfg if mutation_auth_cfg is not None else MutationAuthConfig(),
         ui_auth_cfg=ui_auth_cfg if ui_auth_cfg is not None else UiAuthConfig(),
         review_store=ReviewStore(Path(review_db_path) if review_db_path is not None else Path(spool_dir) / DEFAULT_REVIEW_DB_FILENAME),
     )
     app.state.templates = Jinja2Templates(directory=str(UI_TEMPLATE_DIR))
+
+    trusted_hosts = [
+        str(host).strip()
+        for host in resolved_service_cfg.trusted_hosts
+        if str(host).strip()
+    ]
+    if trusted_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
 
     if UI_STATIC_DIR.exists():
         app.mount("/ui-static", StaticFiles(directory=str(UI_STATIC_DIR)), name="ui-static")

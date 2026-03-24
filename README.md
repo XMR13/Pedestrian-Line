@@ -273,6 +273,12 @@ Untuk deployment production dengan satu proses (auto-restart + tuning performa +
 - `docs/single_loop_production_runbook.md`
 - launcher script: `scripts/run_single_loop_live.sh`
 
+Integrated uploader pada single-loop sekarang bisa dimatikan jika backend upload belum siap:
+
+- set `PLC_PORTAL_UPLOAD_ENABLED=0`
+- hasil detect/count tetap masuk ke spool lokal
+- FastAPI edge service tetap bisa membaca spool tersebut untuk dashboard/UI
+
 Jika kamu tidak ingin `export` setiap sesi, cukup isi `Portal.ApiKey` sekali di file lokal untracked `portal/appsettings.Local.json`.
 Uploader utama sekarang ada di `event_uploader.py`; `portal_uploader.py` tetap disediakan sebagai compatibility wrapper, dan integrated uploader (`main.py --portal-upload`) akan otomatis fallback ke file tersebut.
 
@@ -292,6 +298,78 @@ python3 -m pedestrian_line_counter.event_uploader \
 ```
 
 Request yang diterima mock backend akan disimpan ke `tmp/mock_delivery_backend/` supaya payload run/event/evidence bisa dicek tanpa menunggu backend team.
+
+FastAPI edge service (Jetson-local hardened mode)
+-------------------------------------------------
+
+Untuk UI/operator view yang berjalan langsung dari repo Python ini, gunakan:
+
+- `python3 -m pedestrian_line_counter.service`
+
+Safe default sekarang adalah **loopback only**:
+
+- service bind ke `127.0.0.1` / host loopback,
+- FastAPI docs (`/docs`, `/redoc`, `/openapi.json`) tetap boleh aktif untuk local debugging,
+- cocok untuk Jetson yang nanti diletakkan di balik reverse proxy / domain ketika keputusan infra sudah ada.
+
+Contoh local-only:
+
+```bash
+python3 -m pedestrian_line_counter.service \
+  --spool-dir data/traffic_runs \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --ui-password "replace-me" \
+  --mutation-api-key "replace-me"
+```
+
+Kalau sementara harus diakses via **IP/LAN** karena domain belum ada, service juga bisa dijalankan dalam mode LAN yang lebih ketat:
+
+```bash
+python3 -m pedestrian_line_counter.service \
+  --spool-dir data/traffic_runs \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --service-exposure lan \
+  --no-service-docs \
+  --service-trusted-host 127.0.0.1 \
+  --service-trusted-host localhost \
+  --service-trusted-host 192.168.1.50 \
+  --ui-password "replace-me" \
+  --mutation-api-key "replace-me"
+```
+
+Aturan hardening untuk mode LAN/IP:
+
+- `--service-exposure lan` harus explicit.
+- UI auth (`--ui-password`) wajib aktif.
+- Mutation API key (`--mutation-api-key`) wajib aktif.
+- Docs/OpenAPI wajib dimatikan (`--no-service-docs`).
+- Trusted hosts wajib diisi explicit (`--service-trusted-host ...`).
+
+Jadi untuk kondisi sekarang:
+
+- belum ada domain: akses bisa lewat IP,
+- auth perusahaan belum final: pakai UI login lokal sementara,
+- nanti kalau domain / reverse proxy / auth final sudah ada, app ini tinggal dipasang di belakang layer tersebut tanpa ganti arsitektur inti.
+
+Template deploy untuk systemd sekarang tersedia di:
+
+- `deploy/systemd/pedestrian-edge-service.service.example`
+- `deploy/systemd/pedestrian-edge-service.env.example`
+- launcher script: `scripts/run_edge_service.sh`
+
+Untuk panduan lengkap menjalankan **dua service** di Jetson:
+
+- `docs/jetson_dual_service_runbook.md`
+
+Runbook ini menjelaskan:
+
+- local video mode untuk validasi sekarang,
+- RTSP mode untuk nanti,
+- systemd setup untuk kedua service,
+- env file mana yang harus diedit,
+- cara verifikasi spool + UI end-to-end.
 
 Portal website MVP (Phase 7.3)
 ------------------------------

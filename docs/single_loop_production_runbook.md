@@ -8,6 +8,11 @@ This runbook is for production operation in **one process** using:
 
 Target: low-latency, stable restart behavior, and predictable throughput.
 
+If you want the newer **two-service Jetson setup** (`main.py` + FastAPI service),
+see:
+
+- `docs/jetson_dual_service_runbook.md`
+
 ## 1) Scope and prerequisites
 
 - Python `3.10` environment managed by `uv`.
@@ -83,6 +88,18 @@ export PLC_HEADLESS_STATUS_EVERY_S="10"
 # export PLC_MAX_FRAMES="300"
 ```
 
+If backend upload is not ready yet, you can still run the detector service locally by disabling integrated upload:
+
+```bash
+export PLC_PORTAL_UPLOAD_ENABLED="0"
+```
+
+In that mode:
+
+- `pedestrian-single-loop.service` still detects, counts, and writes spool data,
+- `pedestrian-edge-service.service` can still read the spool for UI/API,
+- no backend upload is attempted from the detector process.
+
 ## 3) Throughput tuning checklist
 
 Use this order so tuning stays predictable:
@@ -150,13 +167,111 @@ This confirms final uploader pass can mark run complete.
 - Portal temporarily down:
   - main loop continues writing spool,
   - integrated uploader retries/backoffs and syncs when portal returns.
+- Backend upload not ready yet:
+  - set `PLC_PORTAL_UPLOAD_ENABLED=0`,
+  - the detector loop still writes spool locally,
+  - the FastAPI service can still display runs/events from that spool.
 - RTSP source drop:
   - reconnect policy retries automatically with backoff.
 - Process crash:
-  - systemd `Restart=always` brings process back.
+  - systemd `Restart=on-failure` brings process back.
 
 ## 7) Notes for Jetson rollout
 
 - Keep spool on fast local storage (not slow SD/network mount).
 - Prefer `PLC_RTSP_CAPTURE_BACKEND=gstreamer` on Jetson.
 - Move to `tensorrt` backend after `.engine` is validated for your camera/model pair.
+
+## 8) FastAPI operator service on Jetson
+
+If you run the separate FastAPI UI/service (`python -m pedestrian_line_counter.service`)
+alongside the main loop, use these deployment rules:
+
+- Default deployment mode is **loopback only**:
+  - bind to `127.0.0.1`,
+  - safe for local-only operation or future reverse-proxy fronting,
+  - FastAPI docs may stay enabled for local debugging.
+- If you must expose the service over **raw IP/LAN** before a domain exists:
+  - set `--service-exposure lan`,
+  - disable docs with `--no-service-docs`,
+  - configure explicit `--service-trusted-host` entries,
+  - configure `--ui-password`,
+  - configure `--mutation-api-key`.
+
+Example local-only operator service:
+
+```bash
+python3 -m pedestrian_line_counter.service \
+  --spool-dir /var/lib/pedline/traffic_runs \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --ui-password "replace-me" \
+  --mutation-api-key "replace-me"
+```
+
+Example temporary LAN/IP exposure:
+
+```bash
+python3 -m pedestrian_line_counter.service \
+  --spool-dir /var/lib/pedline/traffic_runs \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --service-exposure lan \
+  --no-service-docs \
+  --service-trusted-host localhost \
+  --service-trusted-host 127.0.0.1 \
+  --service-trusted-host 192.168.1.50 \
+  --ui-password "replace-me" \
+  --mutation-api-key "replace-me"
+```
+
+The service now rejects unsafe non-loopback startup combinations automatically,
+so misconfigured LAN exposure fails fast before `uvicorn` starts.
+
+### 8.1 systemd setup for the FastAPI service
+
+Copy the templates:
+
+```bash
+sudo mkdir -p /etc/pedline
+sudo cp deploy/systemd/pedestrian-edge-service.service.example /etc/systemd/system/pedestrian-edge-service.service
+sudo cp deploy/systemd/pedestrian-edge-service.env.example /etc/pedline/edge-service.env
+sudo nano /etc/pedline/edge-service.env
+```
+
+Recommended first rollout on Jetson:
+
+- keep `PLC_SERVICE_HOST=127.0.0.1`
+- keep `PLC_SERVICE_EXPOSURE=loopback`
+- set real values for:
+  - `EDGE_UI_PASSWORD`
+  - `EDGE_SERVICE_API_KEY`
+  - `PLC_SPOOL_DIR`
+- only switch to `PLC_SERVICE_EXPOSURE=lan` if you really need raw IP access before a domain/reverse-proxy exists
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable pedestrian-edge-service.service
+sudo systemctl start pedestrian-edge-service.service
+```
+
+Verify:
+
+```bash
+sudo systemctl status pedestrian-edge-service.service
+journalctl -u pedestrian-edge-service.service -f
+```
+
+### 8.2 Service interaction notes
+
+- The wrapper script prefers `/opt/pedestrian-line/.venv/bin/python` when available.
+- If no local virtualenv Python exists, it falls back to `uv run python`.
+- The service auto-creates the configured spool directory if needed.
+- LAN/IP mode automatically defaults to `--no-service-docs` in the wrapper unless you override it.
+- `pedestrian-single-loop.service` and `pedestrian-edge-service.service` should point to the same `PLC_SPOOL_DIR`.
+- Recommended ownership:
+  - `pedestrian-single-loop.service` writes spool data and performs automatic upload,
+  - `pedestrian-edge-service.service` reads spool data for UI/API and only uses `/sync/*` for manual retry/control when needed.
+- To avoid overlapping uploader ownership, leave `PLC_PORTAL_API_BASE_URL` unset in `edge-service.env` unless you explicitly want the FastAPI service to issue manual sync requests against the backend.

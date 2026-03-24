@@ -6,8 +6,13 @@ cd "$ROOT_DIR"
 
 UV_BIN="${UV_BIN:-uv}"
 
-: "${PLC_RTSP_URL:?Set PLC_RTSP_URL (example: rtsp://user:pass@camera-host:554/stream)}"
-: "${PORTAL_API_KEY:?Set PORTAL_API_KEY}"
+PLC_INPUT_PATH="${PLC_INPUT_PATH:-}"
+PLC_RTSP_URL="${PLC_RTSP_URL:-}"
+
+if [[ -z "$PLC_INPUT_PATH" && -z "$PLC_RTSP_URL" ]]; then
+  echo "Set PLC_INPUT_PATH for local file mode or PLC_RTSP_URL for RTSP live mode." >&2
+  exit 1
+fi
 
 PLC_BACKEND="${PLC_BACKEND:-onnx}"
 PLC_MODEL_PATH="${PLC_MODEL_PATH:-Models/vehicle_subclasses.onnx}"
@@ -25,6 +30,7 @@ PLC_RTSP_CAPTURE_BACKEND="${PLC_RTSP_CAPTURE_BACKEND:-gstreamer}"
 PLC_RTSP_TRANSPORT="${PLC_RTSP_TRANSPORT:-tcp}"
 PLC_RTSP_CODEC="${PLC_RTSP_CODEC:-h264}"
 PLC_RTSP_LATENCY_MS="${PLC_RTSP_LATENCY_MS:-120}"
+PLC_PORTAL_UPLOAD_ENABLED="${PLC_PORTAL_UPLOAD_ENABLED:-1}"
 PLC_PORTAL_API_BASE_URL="${PLC_PORTAL_API_BASE_URL:-http://127.0.0.1:5000}"
 PLC_PORTAL_UPLOAD_INTERVAL_S="${PLC_PORTAL_UPLOAD_INTERVAL_S:-10}"
 PLC_PORTAL_UPLOAD_MAX_RUNS_PER_PASS="${PLC_PORTAL_UPLOAD_MAX_RUNS_PER_PASS:-2}"
@@ -38,42 +44,63 @@ mkdir -p "$PLC_SPOOL_DIR"
 
 args=(
   -m pedestrian_line_counter.main
-  --rtsp-url-env PLC_RTSP_URL
   --backend "$PLC_BACKEND"
   --model "$PLC_MODEL_PATH"
   --class-ids "$PLC_CLASS_IDS"
-  --rtsp-capture-backend "$PLC_RTSP_CAPTURE_BACKEND"
-  --rtsp-transport "$PLC_RTSP_TRANSPORT"
-  --rtsp-codec "$PLC_RTSP_CODEC"
-  --rtsp-latency-ms "$PLC_RTSP_LATENCY_MS"
   --queue-size "$PLC_QUEUE_SIZE"
   --queue-policy "$PLC_QUEUE_POLICY"
   --target-fps "$PLC_TARGET_FPS"
   --frame-stride "$PLC_FRAME_STRIDE"
   --log-every-seconds 10
-  --rtsp-reconnect
-  --rtsp-reconnect-max-attempts 0
-  --rtsp-reconnect-initial-delay 1.0
-  --rtsp-reconnect-max-delay 30.0
-  --rtsp-reconnect-backoff 2.0
-  --rtsp-stall-timeout 5.0
   --spool-dir "$PLC_SPOOL_DIR"
   --site-id "$PLC_SITE_ID"
   --camera-id "$PLC_CAMERA_ID"
   --spool-thumbnails
   --no-spool-scene-thumbnails
   --spool-thumb-max-side 256
-  --portal-upload
-  --portal-api-base-url "$PLC_PORTAL_API_BASE_URL"
-  --portal-api-key-env PORTAL_API_KEY
-  --portal-upload-interval-s "$PLC_PORTAL_UPLOAD_INTERVAL_S"
-  --portal-upload-max-runs-per-pass "$PLC_PORTAL_UPLOAD_MAX_RUNS_PER_PASS"
-  --portal-upload-events-batch-size "$PLC_PORTAL_UPLOAD_EVENTS_BATCH_SIZE"
-  --portal-upload-thumbnails
-  --no-portal-upload-scene-thumbnails
   --headless-status-every-seconds "$PLC_HEADLESS_STATUS_EVERY_S"
   --no-write
 )
+
+if [[ -n "$PLC_INPUT_PATH" ]]; then
+  args+=(--input "$PLC_INPUT_PATH")
+else
+  args+=(
+    --rtsp-url-env PLC_RTSP_URL
+    --rtsp-capture-backend "$PLC_RTSP_CAPTURE_BACKEND"
+    --rtsp-transport "$PLC_RTSP_TRANSPORT"
+    --rtsp-codec "$PLC_RTSP_CODEC"
+    --rtsp-latency-ms "$PLC_RTSP_LATENCY_MS"
+    --rtsp-reconnect
+    --rtsp-reconnect-max-attempts 0
+    --rtsp-reconnect-initial-delay 1.0
+    --rtsp-reconnect-max-delay 30.0
+    --rtsp-reconnect-backoff 2.0
+    --rtsp-stall-timeout 5.0
+  )
+fi
+
+case "${PLC_PORTAL_UPLOAD_ENABLED}" in
+  1|true|TRUE|yes|YES|on|ON)
+    : "${PORTAL_API_KEY:?Set PORTAL_API_KEY when PLC_PORTAL_UPLOAD_ENABLED=1}"
+    args+=(
+      --portal-upload
+      --portal-api-base-url "$PLC_PORTAL_API_BASE_URL"
+      --portal-api-key-env PORTAL_API_KEY
+      --portal-upload-interval-s "$PLC_PORTAL_UPLOAD_INTERVAL_S"
+      --portal-upload-max-runs-per-pass "$PLC_PORTAL_UPLOAD_MAX_RUNS_PER_PASS"
+      --portal-upload-events-batch-size "$PLC_PORTAL_UPLOAD_EVENTS_BATCH_SIZE"
+      --portal-upload-thumbnails
+      --no-portal-upload-scene-thumbnails
+    )
+    ;;
+  0|false|FALSE|no|NO|off|OFF)
+    ;;
+  *)
+    echo "Unsupported PLC_PORTAL_UPLOAD_ENABLED value: $PLC_PORTAL_UPLOAD_ENABLED" >&2
+    exit 1
+    ;;
+esac
 
 if [[ -n "$PLC_LINE_JSON" ]]; then
   args+=(--line-json "$PLC_LINE_JSON")

@@ -10,7 +10,7 @@ from typing import Optional
 import uvicorn
 
 from .api import DEFAULT_MUTATION_API_KEY_HEADER, MutationAuthConfig, create_app
-from .config import AppConfig, ROOT_DIR, SpoolRetentionConfig, get_default_config
+from .config import AppConfig, ROOT_DIR, ServiceConfig, SpoolRetentionConfig, get_default_config
 from .config_io import apply_config_overrides, load_config_overrides, split_overrides
 from .event_uploader import RetryConfig, UploaderConfig, resolve_api_key
 from .spool_retention import apply_retention_policy, format_retention_summary
@@ -55,6 +55,25 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=str, default=None, help="Optional JSON config override file (same shape as main.py).")
     parser.add_argument("--spool-dir", type=str, default=None, help="Spool root directory. Overrides config app.spool.root_dir.")
     parser.add_argument("--title", type=str, default="Pedestrian Line Edge Service", help="OpenAPI title.")
+    parser.add_argument(
+        "--service-exposure",
+        type=str,
+        default=None,
+        help="Service exposure mode: 'loopback' for localhost only, 'lan' for deliberate IP/LAN exposure.",
+    )
+    _add_bool_arg(
+        parser,
+        "--service-docs",
+        dest="service_docs",
+        default=None,
+        help="Enable/disable FastAPI docs endpoints (/docs, /redoc, /openapi.json).",
+    )
+    parser.add_argument(
+        "--service-trusted-host",
+        action="append",
+        default=None,
+        help="Allowed Host header for TrustedHostMiddleware. Repeat or use comma-separated values.",
+    )
 
     parser.add_argument("--api-base-url", type=str, default=None, help="Optional delivery API base URL for sync endpoints.")
     parser.add_argument("--api-key", type=str, default=None, help="Optional delivery API key.")
@@ -205,6 +224,12 @@ def _load_runtime_config(args: argparse.Namespace) -> AppConfig:
         cfg.spool.retention.protect_incomplete_runs = bool(args.spool_retention_protect_incomplete_runs)
     if args.spool_retention_auto_interval_s is not None:
         cfg.spool.retention.auto_run_interval_s = float(args.spool_retention_auto_interval_s)
+    if args.service_exposure is not None:
+        cfg.service.exposure_mode = str(args.service_exposure)
+    if args.service_docs is not None:
+        cfg.service.enable_docs = bool(args.service_docs)
+    if args.service_trusted_host:
+        cfg.service.trusted_hosts = _parse_service_trusted_hosts(args.service_trusted_host)
     return cfg
 
 
@@ -272,6 +297,25 @@ def _build_ui_auth_cfg(args: argparse.Namespace) -> UiAuthConfig:
     )
 
 
+def _parse_service_trusted_hosts(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for raw in values:
+        for part in str(raw).split(","):
+            item = str(part).strip()
+            if item:
+                out.append(item)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in out:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
+
+
+
 def _validate_mutation_auth_guardrails(host: str, cfg: MutationAuthConfig) -> None:
     header_name = str(cfg.header_name or "").strip()
     if not header_name:
@@ -284,6 +328,66 @@ def _validate_mutation_auth_guardrails(host: str, cfg: MutationAuthConfig) -> No
         "Refusing to bind the service to a non-loopback host without mutation endpoint protection. "
         "Set --mutation-api-key, configure --mutation-api-key-env, or use --host 127.0.0.1."
     )
+
+
+def _validate_service_cfg(cfg: ServiceConfig) -> None:
+    exposure_mode = str(cfg.exposure_mode or "").strip().lower()
+    if exposure_mode not in {"loopback", "lan"}:
+        raise SystemExit("config service.exposure_mode must be 'loopback' or 'lan'")
+    cfg.exposure_mode = exposure_mode
+
+    normalized_hosts: list[str] = []
+    seen: set[str] = set()
+    for raw in cfg.trusted_hosts:
+        host = str(raw or "").strip()
+        if not host:
+            continue
+        if host not in seen:
+            seen.add(host)
+            normalized_hosts.append(host)
+    cfg.trusted_hosts = normalized_hosts
+
+
+def _validate_service_guardrails(
+    host: str,
+    service_cfg: ServiceConfig,
+    mutation_auth_cfg: MutationAuthConfig,
+    ui_auth_cfg: UiAuthConfig,
+) -> None:
+    non_loopback_bind = not _is_loopback_host(host)
+    if not non_loopback_bind:
+        return
+
+    if str(service_cfg.exposure_mode) != "lan":
+        raise SystemExit(
+            "Refusing to bind the service to a non-loopback host while service.exposure_mode='loopback'. "
+            "Set --service-exposure lan only when you deliberately want IP/LAN access."
+        )
+    if bool(service_cfg.enable_docs):
+        raise SystemExit(
+            "Refusing to bind the service to a non-loopback host while FastAPI docs are enabled. "
+            "Disable them with --no-service-docs or config service.enable_docs=false."
+        )
+    if not mutation_auth_cfg.enabled():
+        raise SystemExit(
+            "Refusing to bind the service to a non-loopback host without mutation endpoint protection. "
+            "Set --mutation-api-key, configure --mutation-api-key-env, or use --host 127.0.0.1."
+        )
+    if not ui_auth_cfg.enabled():
+        raise SystemExit(
+            "Refusing to bind the service to a non-loopback host without UI authentication. "
+            "Set --ui-password or keep the service on loopback only."
+        )
+    if not service_cfg.trusted_hosts:
+        raise SystemExit(
+            "Refusing to bind the service to a non-loopback host without configured trusted hosts. "
+            "Set --service-trusted-host with the Jetson IP/hostname values you expect clients to use."
+        )
+    if "*" in service_cfg.trusted_hosts:
+        raise SystemExit(
+            "Refusing to use wildcard trusted hosts for non-loopback service exposure. "
+            "Set explicit IP/hostname values instead."
+        )
 
 
 def _validate_retention_cfg(cfg: SpoolRetentionConfig) -> None:
@@ -349,16 +453,19 @@ def _start_retention_loop(spool_dir: Path, cfg: SpoolRetentionConfig) -> tuple[O
 def main() -> int:
     args = _parse_args()
     cfg = _load_runtime_config(args)
+    _validate_service_cfg(cfg.service)
     _validate_retention_cfg(cfg.spool.retention)
     spool_dir = _resolve_spool_dir(args, cfg=cfg)
     uploader_cfg = _build_uploader_cfg(args, spool_dir=spool_dir)
     mutation_auth_cfg = _build_mutation_auth_cfg(args)
     ui_auth_cfg = _build_ui_auth_cfg(args)
     _validate_mutation_auth_guardrails(str(args.host), mutation_auth_cfg)
+    _validate_service_guardrails(str(args.host), cfg.service, mutation_auth_cfg, ui_auth_cfg)
     app = create_app(
         spool_dir=spool_dir,
         uploader_cfg=uploader_cfg,
         retention_cfg=cfg.spool.retention,
+        service_cfg=cfg.service,
         mutation_auth_cfg=mutation_auth_cfg,
         ui_auth_cfg=ui_auth_cfg,
         title=str(args.title),

@@ -284,6 +284,23 @@ class SpoolConfig:
 
 
 @dataclass
+class ServiceConfig:
+    """
+    konfigurasi deployment untuk local FastAPI Service.
+
+    Exposure modes:
+    - "loopback": service hanya boleh bind ke localhost / loopback.
+    - "lan": service boleh diakses via IP/LAN, tetapi wajib memakai hardening 
+        tambahan (trusted hosts, authentication, docs disabled).
+    """
+
+    exposure_mode: str = "loopback"
+    enable_docs: bool = True
+    trusted_hosts: List[str] = field(default_factory=list)
+
+
+
+@dataclass
 class ReportConfig:
     """
     Konfigurasi report CSV per-run (human-readable) dari crossing events.
@@ -343,6 +360,7 @@ class AppConfig:
     line: LineConfig = field(default_factory=LineConfig)
     io: IOConfig = field(default_factory=IOConfig)
     spool: SpoolConfig = field(default_factory=SpoolConfig)
+    service: ServiceConfig = field(default_factory=ServiceConfig)
     report: ReportConfig = field(default_factory=ReportConfig)
     visual: VisualConfig = field(default_factory=VisualConfig)
 

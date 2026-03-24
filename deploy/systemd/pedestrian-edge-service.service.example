@@ -1,5 +1,5 @@
 [Unit]
-Description=Pedestrian Line Counter (single-loop live)
+Description=Pedestrian Line Counter (edge FastAPI service)
 Wants=network-online.target
 After=network-online.target
 
@@ -8,15 +8,15 @@ Type=simple
 User=pedline
 Group=pedline
 WorkingDirectory=/opt/pedestrian-line
-EnvironmentFile=/etc/pedline/single-loop.env
-ExecStart=/opt/pedestrian-line/scripts/run_single_loop_live.sh
-Restart=on-failure
+EnvironmentFile=/etc/pedline/edge-service.env
+ExecStart=/opt/pedestrian-line/scripts/run_edge_service.sh
+Restart=always
 RestartSec=5
 StartLimitIntervalSec=60
 StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=pedline-single-loop
+SyslogIdentifier=pedline-edge-service
 LimitNOFILE=65536
 NoNewPrivileges=true
 PrivateTmp=true

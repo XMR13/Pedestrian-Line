@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import pedestrian_line_counter.api as api_module
 import pedestrian_line_counter.service as service_module
 from pedestrian_line_counter.api import MutationAuthConfig, create_app
-from pedestrian_line_counter.config import SpoolRetentionConfig
+from pedestrian_line_counter.config import ServiceConfig, SpoolRetentionConfig
 from pedestrian_line_counter.event_uploader import RetryConfig, SyncSummary, UploaderConfig
 from pedestrian_line_counter.ui_auth import UiAuthConfig
 
@@ -225,6 +225,11 @@ def test_metrics_and_config_expose_runtime_configuration(tmp_path) -> None:
     assert config_payload["uploader"]["enabled"] is True
     assert config_payload["uploader"]["api_key_configured"] is True
     assert "api_key" not in config_payload["uploader"]
+    assert config_payload["service"] == {
+        "exposure_mode": "loopback",
+        "docs_enabled": True,
+        "trusted_hosts": [],
+    }
     assert config_payload["mutation_auth"] == {
         "enabled": False,
         "header_name": "X-API-Key",
@@ -539,6 +544,124 @@ def test_service_guardrails_require_mutation_key_for_non_loopback_host() -> None
         assert "non-loopback host" in str(exc)
     else:
         raise AssertionError("Expected SystemExit for non-loopback host without mutation API key")
+
+
+def test_parse_service_trusted_hosts_supports_repeated_and_comma_separated_values() -> None:
+    parsed = service_module._parse_service_trusted_hosts(
+        [
+            "localhost, 127.0.0.1",
+            "edge.local",
+            "127.0.0.1, 10.0.0.25",
+        ]
+    )
+
+    assert parsed == [
+        "localhost",
+        "127.0.0.1",
+        "edge.local",
+        "10.0.0.25",
+    ]
+
+
+def test_service_guardrails_require_lan_mode_ui_auth_docs_off_and_trusted_hosts() -> None:
+    base_service_cfg = ServiceConfig(
+        exposure_mode="lan",
+        enable_docs=False,
+        trusted_hosts=["10.0.0.25", "localhost"],
+    )
+    base_mutation_cfg = MutationAuthConfig(api_key="edge-local-secret", header_name="X-API-Key")
+    base_ui_cfg = UiAuthConfig(username="admin", password="secret")
+
+    service_module._validate_service_guardrails(
+        "0.0.0.0",
+        base_service_cfg,
+        base_mutation_cfg,
+        base_ui_cfg,
+    )
+
+    for broken_cfg, broken_mutation, broken_ui, expected_text in (
+        (
+            ServiceConfig(exposure_mode="loopback", enable_docs=False, trusted_hosts=["10.0.0.25"]),
+            base_mutation_cfg,
+            base_ui_cfg,
+            "service.exposure_mode='loopback'",
+        ),
+        (
+            ServiceConfig(exposure_mode="lan", enable_docs=True, trusted_hosts=["10.0.0.25"]),
+            base_mutation_cfg,
+            base_ui_cfg,
+            "docs are enabled",
+        ),
+        (
+            ServiceConfig(exposure_mode="lan", enable_docs=False, trusted_hosts=["10.0.0.25"]),
+            MutationAuthConfig(api_key="", header_name="X-API-Key"),
+            base_ui_cfg,
+            "mutation endpoint protection",
+        ),
+        (
+            ServiceConfig(exposure_mode="lan", enable_docs=False, trusted_hosts=["10.0.0.25"]),
+            base_mutation_cfg,
+            UiAuthConfig(username="admin", password=""),
+            "without UI authentication",
+        ),
+        (
+            ServiceConfig(exposure_mode="lan", enable_docs=False, trusted_hosts=[]),
+            base_mutation_cfg,
+            base_ui_cfg,
+            "without configured trusted hosts",
+        ),
+        (
+            ServiceConfig(exposure_mode="lan", enable_docs=False, trusted_hosts=["*"]),
+            base_mutation_cfg,
+            base_ui_cfg,
+            "wildcard trusted hosts",
+        ),
+    ):
+        try:
+            service_module._validate_service_guardrails(
+                "0.0.0.0",
+                broken_cfg,
+                broken_mutation,
+                broken_ui,
+            )
+        except SystemExit as exc:
+            assert expected_text in str(exc)
+        else:
+            raise AssertionError(f"Expected SystemExit containing {expected_text!r}")
+
+
+def test_create_app_can_disable_docs_endpoints(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            service_cfg=ServiceConfig(enable_docs=False),
+        )
+    )
+
+    docs = client.get("/docs")
+    assert docs.status_code == 404
+
+    redoc = client.get("/redoc")
+    assert redoc.status_code == 404
+
+    openapi = client.get("/openapi.json")
+    assert openapi.status_code == 404
+
+
+def test_create_app_enforces_trusted_hosts(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            service_cfg=ServiceConfig(trusted_hosts=["edge.local"]),
+        ),
+        base_url="http://edge.local",
+    )
+
+    good = client.get("/healthz")
+    assert good.status_code == 200
+
+    bad = client.get("/healthz", headers={"host": "unexpected.local"})
+    assert bad.status_code == 400
 
 
 def test_sync_endpoints_use_existing_uploader_flow(monkeypatch, tmp_path) -> None:
