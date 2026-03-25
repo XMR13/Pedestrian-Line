@@ -4,6 +4,112 @@
     return;
   }
 
+  const DETAIL_SCROLL_Y_KEY = "plc:event-detail:scroll-y";
+  const DETAIL_SCROLL_PENDING_KEY = "plc:event-detail:scroll-pending";
+
+  const getSessionStorage = () => {
+    try {
+      return window.sessionStorage;
+    } catch (_error) {
+      return null;
+    }
+  };
+
+  const clearDetailScrollState = () => {
+    const storage = getSessionStorage();
+    if (!storage) {
+      return;
+    }
+    storage.removeItem(DETAIL_SCROLL_Y_KEY);
+    storage.removeItem(DETAIL_SCROLL_PENDING_KEY);
+  };
+
+  const saveDetailScrollState = () => {
+    const storage = getSessionStorage();
+    if (!storage || !body.classList.contains("page-event-detail")) {
+      return;
+    }
+    storage.setItem(DETAIL_SCROLL_Y_KEY, String(Math.max(0, Math.round(window.scrollY || window.pageYOffset || 0))));
+    storage.setItem(DETAIL_SCROLL_PENDING_KEY, "1");
+  };
+
+  const normalizeInternalUrl = (value) => {
+    if (!value) {
+      return "";
+    }
+    try {
+      const parsed = new URL(value, window.location.href);
+      if (parsed.origin !== window.location.origin) {
+        return "";
+      }
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch (_error) {
+      return "";
+    }
+  };
+
+  const restoreDetailScrollState = () => {
+    if (!body.classList.contains("page-event-detail")) {
+      clearDetailScrollState();
+      return;
+    }
+    const storage = getSessionStorage();
+    if (!storage || storage.getItem(DETAIL_SCROLL_PENDING_KEY) !== "1") {
+      return;
+    }
+    const rawValue = storage.getItem(DETAIL_SCROLL_Y_KEY) || "";
+    const targetScrollY = Number.parseInt(rawValue, 10);
+    if (!Number.isFinite(targetScrollY) || targetScrollY < 1) {
+      clearDetailScrollState();
+      return;
+    }
+
+    let attempts = 0;
+    let settled = false;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearDetailScrollState();
+    };
+
+    const attemptRestore = () => {
+      if (settled) {
+        return;
+      }
+      attempts += 1;
+      window.scrollTo(0, targetScrollY);
+
+      const currentY = Math.round(window.scrollY || window.pageYOffset || 0);
+      const maxScrollY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      if (Math.abs(currentY - targetScrollY) <= 2) {
+        finish();
+        return;
+      }
+      if (attempts >= 12 && maxScrollY >= targetScrollY - 2) {
+        finish();
+        return;
+      }
+      if (attempts >= 20) {
+        finish();
+        return;
+      }
+      window.setTimeout(attemptRestore, 60);
+    };
+
+    const evidenceImage = document.querySelector(".detail-player .evidence-image");
+    if (evidenceImage instanceof HTMLImageElement && !evidenceImage.complete) {
+      evidenceImage.addEventListener("load", attemptRestore, { once: true });
+      evidenceImage.addEventListener("error", attemptRestore, { once: true });
+    }
+    window.addEventListener("load", attemptRestore, { once: true });
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(attemptRestore);
+    });
+  };
+
   const setBanner = (node, text, kind) => {
     if (!(node instanceof HTMLElement)) {
       return;
@@ -104,6 +210,11 @@
     const previousDetailUrl = actionRoot.dataset.previousDetailUrl || "";
     const nextDetailUrl = actionRoot.dataset.nextDetailUrl || "";
     const isDetailPage = body.classList.contains("page-event-detail");
+    const detailNavigationTargets = new Set(
+      [previousDetailUrl, nextDetailUrl]
+        .map((value) => normalizeInternalUrl(value))
+        .filter(Boolean),
+    );
     const yesButton = buttons.find((button) => String(button.dataset.decision || "") === "qualified_yes") || null;
     const noButton = buttons.find((button) => String(button.dataset.decision || "") === "qualified_no") || null;
 
@@ -112,6 +223,7 @@
       if (!(submitter instanceof HTMLButtonElement) || !buttons.includes(submitter)) {
         return;
       }
+      saveDetailScrollState();
       setBanner(feedback, "Saving review…", "info");
       window.setTimeout(() => {
         buttons.forEach((button) => {
@@ -119,6 +231,33 @@
         });
       }, 0);
     });
+
+    if (isDetailPage && detailNavigationTargets.size > 0) {
+      document.addEventListener("click", (event) => {
+        if (event.defaultPrevented || event.button !== 0) {
+          return;
+        }
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const link = target.closest("a[href]");
+        if (!(link instanceof HTMLAnchorElement)) {
+          return;
+        }
+        if (link.target && link.target !== "_self") {
+          return;
+        }
+        const normalizedHref = normalizeInternalUrl(link.getAttribute("href") || "");
+        if (!normalizedHref || !detailNavigationTargets.has(normalizedHref)) {
+          return;
+        }
+        saveDetailScrollState();
+      });
+    }
 
     document.addEventListener("keydown", (event) => {
       const active = document.activeElement;
@@ -139,9 +278,11 @@
         actionRoot.requestSubmit(noButton);
       } else if (key === "j" && nextDetailUrl && isDetailPage) {
         event.preventDefault();
+        saveDetailScrollState();
         window.location.assign(nextDetailUrl);
       } else if (key === "k" && previousDetailUrl && isDetailPage) {
         event.preventDefault();
+        saveDetailScrollState();
         window.location.assign(previousDetailUrl);
       } else if (key === "enter" && currentEventUid && body.classList.contains("page-review")) {
         event.preventDefault();
@@ -315,6 +456,7 @@
 
   initLogout();
   initLogin();
+  restoreDetailScrollState();
   initReviewActions();
   initReviewQueueSelection();
 })();
