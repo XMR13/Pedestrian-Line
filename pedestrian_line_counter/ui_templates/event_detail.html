@@ -125,7 +125,7 @@
       <div class="detail-evidence-strip">
         <span class="pill">run {{ event.run_uid or "Unknown" }}</span>
         <span class="pill">camera {{ event.camera_id or "Unknown" }}</span>
-        <span class="pill">Akurasi {{ format_float(event.confidence, 2) }}</span>
+        <span class="pill">Akurasi {{ format_float(event.confidence * 100, 2) }}</span>
       </div>
     </article>
 
@@ -160,7 +160,7 @@
           <div class="row"><div class="key">Video time</div><div class="val">{{ format_float(event.video_time_s, 3) }}s</div></div>
           <div class="row"><div class="key">Track</div><div class="val">{{ event.track_id or "-" }}</div></div>
           <div class="row"><div class="key">Tipe Kendaraan</div><div class="val">{{ event.class_name or "Unknown" }}</div></div>
-          <div class="row"><div class="key">Akurasi (Confidence)</div><div class="val">{{ format_float(event.confidence, 2) }}</div></div>
+          <div class="row"><div class="key">Akurasi (Confidence %)</div><div class="val">{{ format_float(event.confidence * 100, 2)}} %</div></div>
           <div class="row"><div class="key">Frame index</div><div class="val">{{ event.frame_index or "-" }}</div></div>
         </div>
       </div>

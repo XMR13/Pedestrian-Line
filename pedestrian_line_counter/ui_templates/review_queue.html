@@ -126,7 +126,7 @@
             <th scope="col">Camera</th>
             <th scope="col">Arah</th>
             <th scope="col">Tipe<br>kendaraan</th>
-            <th scope="col">Akurasi <br>(Confidence)</th>
+            <th scope="col">Akurasi <br>(Confidence %)</th>
             <th scope="col">Review</th>
             <th scope="col">Bukti</th>
             <th scope="col">Action</th>
@@ -138,7 +138,7 @@
             class="{% if item.event_uid == selected_event_uid %}queue-row-active{% endif %}"
             data-queue-row
             data-select-url="{{ item.queue_select_url }}"
-            data-detail-url="{{ item.detail_url }}"
+            data-detail-url="{{ item.detail_url }}" 
             data-event-uid="{{ item.event_uid }}"
             data-event-short="{{ short_event_uid(item.event_uid, 12, 6) }}"
             data-row-index="{{ loop.index }}"
@@ -158,7 +158,7 @@
             <td>{{ item.camera_id or "Unknown" }}</td>
             <td><span class="pill ink">{{ item.direction or "Unknown" }}</span></td>
             <td>{{ item.class_name or "Unknown" }}</td>
-            <td>{{ format_float(item.confidence, 2) }}</td>
+            <td>{{ format_float(item.confidence * 100, 2) }} %</td>
             <td>
               <div class="queue-review-cell">
                 <span class="pill {{ review_pill_class(item.review_status) }}">{{ review_label(item.review_status) }}</span>
