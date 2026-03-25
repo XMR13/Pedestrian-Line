@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sqlite3
 
 from fastapi.testclient import TestClient
 
@@ -10,6 +11,7 @@ import pedestrian_line_counter.service as service_module
 from pedestrian_line_counter.api import MutationAuthConfig, create_app
 from pedestrian_line_counter.config import ServiceConfig, SpoolRetentionConfig
 from pedestrian_line_counter.event_uploader import RetryConfig, SyncSummary, UploaderConfig
+from pedestrian_line_counter.review_store import ReviewStore
 from pedestrian_line_counter.ui_auth import UiAuthConfig
 
 
@@ -754,19 +756,124 @@ def test_review_api_and_event_detail_include_sqlite_backed_review_state(tmp_path
 
     review_resp = client.post(
         "/events/run_ui_e1/review",
-        json={"decision": "qualified_yes", "notes": "matches target vehicle"},
+        json={
+            "decision": "qualified_yes",
+            "reviewed_class": "pickup",
+            "notes": "matches target vehicle",
+        },
     )
     assert review_resp.status_code == 200
     review_payload = review_resp.json()
     assert review_payload["review"]["decision"] == "qualified_yes"
+    assert review_payload["review"]["reviewed_class"] == "pickup"
     assert review_payload["review"]["notes"] == "matches target vehicle"
 
     event_resp = client.get("/events/run_ui_e1")
     assert event_resp.status_code == 200
     event_payload = event_resp.json()
     assert event_payload["review_status"] == "qualified_yes"
+    assert event_payload["model_class_name"] == "truck"
+    assert event_payload["reviewed_class_name"] == "pickup"
+    assert event_payload["effective_class_name"] == "pickup"
     assert event_payload["review"]["notes"] == "matches target vehicle"
     assert event_payload["timeline"][-1]["description"].startswith("Reviewed as Diterima")
+
+
+def test_review_api_keeps_model_class_as_effective_when_override_matches_prediction(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_same_class",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    review_resp = client.post(
+        "/events/run_same_class_e1/review",
+        json={
+            "decision": "qualified_yes",
+            "reviewed_class": "truck",
+            "notes": "same as detected class",
+        },
+    )
+    assert review_resp.status_code == 200
+    payload = review_resp.json()
+    assert payload["review"]["reviewed_class"] is None
+
+    event_payload = client.get("/events/run_same_class_e1").json()
+    assert event_payload["model_class_name"] == "truck"
+    assert event_payload["reviewed_class_name"] is None
+    assert event_payload["effective_class_name"] == "truck"
+
+
+def test_review_api_does_not_use_corrected_class_as_effective_for_rejected_events(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_rejected",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    review_resp = client.post(
+        "/events/run_rejected_e1/review",
+        json={
+            "decision": "qualified_no",
+            "reviewed_class": "pickup",
+            "notes": "wrong target for operations",
+        },
+    )
+    assert review_resp.status_code == 200
+    payload = review_resp.json()
+    assert payload["review"]["reviewed_class"] == "pickup"
+
+    event_payload = client.get("/events/run_rejected_e1").json()
+    assert event_payload["review_status"] == "qualified_no"
+    assert event_payload["model_class_name"] == "truck"
+    assert event_payload["reviewed_class_name"] == "pickup"
+    assert event_payload["effective_class_name"] is None
+
+
+def test_review_store_migrates_existing_db_to_support_reviewed_class(tmp_path) -> None:
+    db_path = tmp_path / "reviews.sqlite3"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE event_reviews (
+            event_uid TEXT PRIMARY KEY,
+            run_uid TEXT,
+            site_id TEXT,
+            camera_id TEXT,
+            decision TEXT NOT NULL,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = ReviewStore(db_path)
+    record = store.save_review(
+        event_uid="event_1",
+        run_uid="run_1",
+        site_id="site_a",
+        camera_id="cam_01",
+        decision="qualified_yes",
+        reviewed_class="pickup",
+        notes="migrated db should accept corrected class",
+        now_utc="2026-03-11T10:05:00Z",
+    )
+
+    assert record.reviewed_class == "pickup"
+    loaded = store.get_review("event_1")
+    assert loaded is not None
+    assert loaded.reviewed_class == "pickup"
 
 
 def test_review_api_returns_next_pending_event_for_detail_flow(tmp_path) -> None:

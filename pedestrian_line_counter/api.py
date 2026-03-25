@@ -582,6 +582,7 @@ class EdgeApiRuntime:
         event_uid: str,
         *,
         decision: str,
+        reviewed_class: Optional[str] = None,
         notes: str = "",
         camera_id: Optional[str] = None,
         status_filter: Optional[str] = None,
@@ -596,6 +597,10 @@ class EdgeApiRuntime:
 
         queue_camera_id = _text(camera_id)
         normalized_status = _normalize_review_filter(status_filter)
+        normalized_reviewed_class = _normalize_reviewed_class_name(
+            reviewed_class,
+            model_class_name=_text(event.get("class_name")),
+        )
         normalized_page = max(1, int(page or 1))
         normalized_page_size = _normalize_review_page_size(page_size) if page_size is not None else DEFAULT_REVIEW_PAGE_SIZE
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
@@ -620,6 +625,7 @@ class EdgeApiRuntime:
             site_id=_text(event.get("site_id")),
             camera_id=_text(event.get("camera_id")),
             decision=decision,
+            reviewed_class=normalized_reviewed_class,
             notes=notes,
             now_utc=_utcnow_iso(),
         )
@@ -862,6 +868,13 @@ class EdgeApiRuntime:
             row["review"] = review.to_dict() if review is not None else None
             row["review_status"] = review.decision if review is not None else REVIEW_STATUS_PENDING
             row["review_label"] = _review_label(row["review_status"])
+            row["model_class_name"] = _text(item.get("class_name"))
+            row["reviewed_class_name"] = review.reviewed_class if review is not None else None
+            row["effective_class_name"] = _effective_class_name(
+                row["model_class_name"],
+                row["reviewed_class_name"],
+                row["review_status"],
+            )
             row["thumb_url"] = _path_to_public_url(self.spool_dir, row.get("thumb_path"))
             row["scene_url"] = _path_to_public_url(self.spool_dir, row.get("scene_path"))
             merged.append(row)
@@ -876,11 +889,13 @@ class EdgeApiRuntime:
         ]
         review = event.get("review")
         if isinstance(review, Mapping):
+            reviewed_class = _text(review.get("reviewed_class"))
             timeline.append(
                 {
                     "time": _text(review.get("updated_at_utc")) or "Unknown",
                     "description": (
                         f"Reviewed as {_review_label(_text(review.get('decision')))}"
+                        + (f"; corrected class: {reviewed_class}" if reviewed_class else "")
                         + (f" with notes: {_text(review.get('notes'))}" if _text(review.get("notes")) else ".")
                     ),
                 }
@@ -1374,6 +1389,7 @@ def create_app(
         return runtime.save_review(
             event_uid,
             decision=payload.decision,
+            reviewed_class=payload.reviewed_class,
             notes=payload.notes,
             camera_id=payload.camera_id,
             status_filter=payload.status_filter,
@@ -1395,6 +1411,7 @@ def create_app(
         decision = _text((form_fields.get("decision") or [None])[0])
         if decision == "":
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="decision is required")
+        reviewed_class = _text((form_fields.get("reviewed_class") or [""])[0]) or None
         notes = _text((form_fields.get("notes") or [""])[0])
         camera_id = _text((form_fields.get("camera_id") or [""])[0]) or None
         status_filter = _text((form_fields.get("status_filter") or [REVIEW_STATUS_PENDING])[0]) or REVIEW_STATUS_PENDING
@@ -1405,6 +1422,7 @@ def create_app(
         payload = runtime.save_review(
             event_uid,
             decision=decision,
+            reviewed_class=reviewed_class,
             notes=notes,
             camera_id=camera_id,
             status_filter=status_filter,
@@ -1602,6 +1620,28 @@ def create_app(
     app.include_router(router)
     return app
 
+
+def _normalize_reviewed_class_name(
+    value: Optional[str],
+    *,
+    model_class_name: Optional[str],
+) -> Optional[str]:
+    normalized = _text(value)
+    if normalized is None:
+        return None
+    if normalized == _text(model_class_name):
+        return None
+    return normalized
+
+def _effective_class_name(
+    model_class_name: Optional[str],
+    reviewed_class_name: Optional[str],
+    reviewed_status: Optional[str],
+
+)-> Optional[str]:
+    if _text(reviewed_status) != DECISION_YES:
+        return None
+    return _text(reviewed_class_name) or _text(model_class_name)
 
 def _get_runtime(request: Request) -> EdgeApiRuntime:
     runtime = getattr(request.app.state, "runtime", None)

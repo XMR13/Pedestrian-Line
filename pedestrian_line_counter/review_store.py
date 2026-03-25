@@ -18,22 +18,28 @@ class ReviewRecord:
     site_id: Optional[str]
     camera_id: Optional[str]
     decision: str
+    reviewed_class: Optional[str]
     notes: str
     created_at_utc: str
     updated_at_utc: str
 
     def to_dict(self) -> Dict[str, Optional[str]]:
-        """Get all the attributes output as a json"""
+        """
+        Get all the attributes output as a json type file
+        to return it again as a dictionary
+        """
         return {
             "event_uid": self.event_uid,
             "run_uid": self.run_uid,
             "site_id": self.site_id,
             "camera_id": self.camera_id,
             "decision": self.decision,
+            "reciewed_class": self.reviewed_class,
             "notes": self.notes,
             "created_at_utc": self.created_at_utc,
-            "updated_at_utc": self.updated_at_utc,
+            "updated_at_utc": self.updated_at_utc
         }
+
 
 
 class ReviewStore:
@@ -57,12 +63,19 @@ class ReviewStore:
                     site_id TEXT,
                     camera_id TEXT,
                     decision TEXT NOT NULL,
+                    reviewed_class TEXT,
                     notes TEXT NOT NULL DEFAULT '',
                     created_at_utc TEXT NOT NULL,
                     updated_at_utc TEXT NOT NULL
                 )
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(event_reviews)").fetchall()
+            }
+            if "reviewed_class" not in columns:
+                conn.execute("ALTER TABLE event_reviews ADD COLUMN reviewed_class TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_event_reviews_camera_id ON event_reviews(camera_id)"
             )
@@ -78,6 +91,7 @@ class ReviewStore:
         site_id: Optional[str],
         camera_id: Optional[str],
         decision: str,
+        reviewed_class: Optional[str],
         notes: str,
         now_utc: str,
     ) -> ReviewRecord:
@@ -85,6 +99,7 @@ class ReviewStore:
         if normalized_decision not in VALID_DECISIONS:
             raise ValueError(f"Unsupported review decision: {decision}")
 
+        normalized_reviewed_class = _optional_text(reviewed_class)
         normalized_notes = str(notes or "").strip()
 
         with self._connect() as conn:
@@ -101,15 +116,17 @@ class ReviewStore:
                     site_id,
                     camera_id,
                     decision,
+                    reviewed_class,
                     notes,
                     created_at_utc,
                     updated_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(event_uid) DO UPDATE SET
                     run_uid = excluded.run_uid,
                     site_id = excluded.site_id,
                     camera_id = excluded.camera_id,
                     decision = excluded.decision,
+                    reviewed_class = excluded.reviewed_class,
                     notes = excluded.notes,
                     updated_at_utc = excluded.updated_at_utc
                 """,
@@ -119,6 +136,7 @@ class ReviewStore:
                     site_id,
                     camera_id,
                     normalized_decision,
+                    normalized_reviewed_class,
                     normalized_notes,
                     created_at_utc,
                     now_utc,
@@ -131,6 +149,7 @@ class ReviewStore:
             site_id=site_id,
             camera_id=camera_id,
             decision=normalized_decision,
+            reviewed_class=normalized_reviewed_class,
             notes=normalized_notes,
             created_at_utc=created_at_utc,
             updated_at_utc=now_utc,
@@ -140,7 +159,7 @@ class ReviewStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT event_uid, run_uid, site_id, camera_id, decision, notes, created_at_utc, updated_at_utc
+                SELECT event_uid, run_uid, site_id, camera_id, decision, reviewed_class, notes, created_at_utc, updated_at_utc
                 FROM event_reviews
                 WHERE event_uid = ?
                 """,
@@ -155,7 +174,7 @@ class ReviewStore:
 
         placeholders = ",".join("?" for _ in keys)
         query = (
-            "SELECT event_uid, run_uid, site_id, camera_id, decision, notes, created_at_utc, updated_at_utc "
+            "SELECT event_uid, run_uid, site_id, camera_id, decision, reviewed_class, notes, created_at_utc, updated_at_utc "
             f"FROM event_reviews WHERE event_uid IN ({placeholders})"
         )
         with self._connect() as conn:
@@ -195,6 +214,7 @@ def _row_to_review(row: Optional[sqlite3.Row]) -> Optional[ReviewRecord]:
         site_id=_optional_text(row["site_id"]),
         camera_id=_optional_text(row["camera_id"]),
         decision=str(row["decision"]),
+        reviewed_class=_optional_text(row["reviewed_class"]),
         notes=str(row["notes"] or ""),
         created_at_utc=str(row["created_at_utc"]),
         updated_at_utc=str(row["updated_at_utc"]),

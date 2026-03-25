@@ -54,6 +54,7 @@ class RetentionRequest(BaseModel):
 
 class ReviewUpdateRequest(BaseModel):
     decision: str
+    reviewed_class: Optional[str] = None
     notes: str = ""
     camera_id: Optional[str] = None
     status_filter: Optional[str] = None
