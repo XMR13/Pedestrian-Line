@@ -8,7 +8,11 @@ PYTHON_BIN="${PYTHON_BIN:-}"
 UV_BIN="${UV_BIN:-uv}"
 
 if [[ -z "$PYTHON_BIN" ]]; then
-  if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+  elif [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
     PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
   fi
 fi

@@ -16,8 +16,18 @@ from .config import (
     TrackerConfig,
     get_default_config,
 )
-from .api import create_app
 from .detector import Detector  
 from .line_counter import LineCounter  
 from .structures import Detection, Track  
 from .tracker import Tracker  
+
+
+def create_app(*args, **kwargs):
+    """
+    Lazy import to keep detector/runtime entry points usable even when FastAPI
+    is not installed in the active Python environment.
+    """
+
+    from .api import create_app as _create_app
+
+    return _create_app(*args, **kwargs)
