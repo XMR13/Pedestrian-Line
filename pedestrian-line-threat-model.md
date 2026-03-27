@@ -16,7 +16,7 @@ This repo's active production surface is the FastAPI-based edge service and the 
   - `pedestrian_line_counter/review_store.py`
   - `scripts/run_edge_service.sh`
   - `scripts/run_single_loop_live.sh`
-  - `docs/jetson_dual_service_runbook.md`
+  - `docs/jetson_deployment_runbook.md`
 - Out of scope:
   - The older `portal/` application as a production surface for this review.
   - Public internet exposure, CDN/WAF, and external reverse-proxy controls not represented in repo code.
@@ -185,7 +185,7 @@ For this repo and your stated internal-only usage:
 | `pedestrian_line_counter/review_store.py` | Stores operator review data and notes in local SQLite | TM-002 |
 | `scripts/run_edge_service.sh` | Encodes practical LAN vs loopback deployment defaults | TM-001, TM-006 |
 | `scripts/run_single_loop_live.sh` | Controls spool generation and optional backend upload | TM-003 |
-| `docs/jetson_dual_service_runbook.md` | Documents real deployment assumptions that affect threat likelihood | TM-001, TM-003 |
+| `docs/jetson_deployment_runbook.md` | Documents real deployment assumptions that affect threat likelihood | TM-001, TM-003 |
 
 ## Quality check
 
@@ -194,4 +194,3 @@ For this repo and your stated internal-only usage:
 - Separated runtime behavior from the older portal stack and dev/test tooling: yes.
 - Reflected user clarifications: yes, FastAPI-only and internal/admin-focused usage are incorporated.
 - Made assumptions and open questions explicit: yes.
-

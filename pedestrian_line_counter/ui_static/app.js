@@ -217,6 +217,28 @@
     );
     const yesButton = buttons.find((button) => String(button.dataset.decision || "") === "qualified_yes") || null;
     const noButton = buttons.find((button) => String(button.dataset.decision || "") === "qualified_no") || null;
+    const reviewClassInput = actionRoot.querySelector("[data-review-class-input]");
+    const reviewClassPreview = actionRoot.querySelector("[data-review-class-preview]");
+    const modelClass = String(actionRoot.dataset.modelClass || "").trim();
+
+    const updateReviewClassPreview = () => {
+      if (
+        !(
+          reviewClassInput instanceof HTMLInputElement
+          || reviewClassInput instanceof HTMLSelectElement
+        )
+        || !(reviewClassPreview instanceof HTMLElement)
+      ) {
+        return;
+      }
+      const reviewedClass = String(reviewClassInput.value || "").trim();
+      if (reviewedClass) {
+        reviewClassPreview.textContent = `Jika disimpan YES, queue/API akan memakai class operasional ${reviewedClass}. Jika disimpan NO, correction ini tetap disimpan sebagai audit.`;
+        return;
+      }
+      const detectedClass = modelClass || "detected class";
+      reviewClassPreview.textContent = `Jika field correction dikosongkan lalu disimpan YES, queue/API tetap memakai detected class ${detectedClass}. Jika disimpan NO, tidak ada override class operasional yang dipakai.`;
+    };
 
     actionRoot.addEventListener("submit", (event) => {
       const submitter = event.submitter;
@@ -231,6 +253,12 @@
         });
       }, 0);
     });
+
+    if (reviewClassInput instanceof HTMLInputElement || reviewClassInput instanceof HTMLSelectElement) {
+      reviewClassInput.addEventListener("input", updateReviewClassPreview);
+      reviewClassInput.addEventListener("change", updateReviewClassPreview);
+      updateReviewClassPreview();
+    }
 
     if (isDetailPage && detailNavigationTargets.size > 0) {
       document.addEventListener("click", (event) => {
@@ -328,7 +356,11 @@
           sessionLink.classList.toggle("active", active);
         }
         if (active) {
-          const positionText = `${index + 1} / ${rows.length}`;
+          const absoluteIndex = Number.parseInt(candidate.dataset.absoluteIndex || "", 10);
+          const queueTotal = Number.parseInt(candidate.dataset.queueTotal || "", 10);
+          const positionIndex = Number.isFinite(absoluteIndex) && absoluteIndex > 0 ? absoluteIndex : index + 1;
+          const positionTotal = Number.isFinite(queueTotal) && queueTotal > 0 ? queueTotal : rows.length;
+          const positionText = `${positionIndex} / ${positionTotal}`;
           if (selectionInput instanceof HTMLInputElement) {
             selectionInput.value = positionText;
           }

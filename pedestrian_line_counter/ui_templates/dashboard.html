@@ -66,7 +66,7 @@
     <article class="dashboard-trend">
       <div class="pad">
         <div class="trend-context">
-          <p class="trend-meaning"><b>Traffic Monitoring Dashboard</b> Trend menggunakan event spool asli yang dibucket per jam untuk {{ trend.window_label|lower }}.</p>
+          <p class="trend-meaning"><b>Traffic Monitoring Dashboard</b></p>
           <p class="caption">{% if trend.empty %}Menunggu event masuk untuk membentuk trend.{% else %}Rentang {{ trend.window_start_label }} sampai {{ trend.window_end_label }}.{% endif %}</p>
           <div class="trend-meta-pills">
             {% for series in trend.series %}
@@ -108,7 +108,6 @@
           <h3>Review lane</h3>
           <p class="caption">Status antrian review</p>
         </div>
-        <a class="pill" href="{{ review_queue_url }}">Buka antrian review</a>
       </div>
       <div class="queue-status-grid compact-grid">
         <div class="queue-status-card">
@@ -133,7 +132,7 @@
           <span class="head">Langkah selanjutnya</span>
           <span class="body">Buka antrian review untuk memeriksa apakah vehicle tersebut termasuk dalam kategori atau tidak.</span>
         </div>
-        <a class="btn primary" href="{{ review_queue_url }}">Bukan antrian review</a>
+        <a class="btn primary" href="{{ review_queue_url }}">Buka antrian review</a>
       </div>
     </article>
   </section>
@@ -142,7 +141,7 @@
     <div class="pad">
       <div class="section-head">
         <div>
-          <h3>Sync pulse</h3>
+          <h3>Status Upload</h3>
           <p class="caption">Ringkasan pengiriman data dari local spool ke backend.</p>
         </div>
         <span class="pill {% if sync_overview.uploader_enabled %}ok{% else %}ink{% endif %}">

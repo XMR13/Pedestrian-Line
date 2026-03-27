@@ -676,6 +676,10 @@ class EdgeApiRuntime:
         cameras = {_text(item.get("camera_id")) for item in self._iter_all_events()}
         return sorted(item for item in cameras if item)
 
+    def list_reviewable_classes(self) -> List[str]:
+        class_names = {_text(item.get("class_name")) for item in self._iter_all_events()}
+        return sorted(item for item in class_names if item)
+
     def dashboard_payload(
         self,
         *,
@@ -1570,6 +1574,13 @@ def create_app(
             "date_to": queue_context.get("date_to"),
             "date_filter": queue_context.get("date_filter"),
         }
+        review_class_options = runtime.list_reviewable_classes()
+        current_reviewed_class = _text(item.get("reviewed_class_name"))
+        if current_reviewed_class is not None:
+            if current_reviewed_class not in review_class_options:
+                review_class_options.append(current_reviewed_class)
+                review_class_options.sort()
+        context["review_class_options"] = review_class_options
         context["queue_page_number"] = int(queue_context["pagination"]["current_page"])
         return templates.TemplateResponse(request, "event_detail.html", context)
 

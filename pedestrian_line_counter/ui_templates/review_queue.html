@@ -59,7 +59,7 @@
   </div>
   <div class="field">
     <label>Selection</label>
-    <input type="text" value="{% if current %}{{ current_index }} / {{ page_item_count }}{% else %}0 / {{ page_item_count }}{% endif %}" readonly data-queue-selection-input />
+    <input type="text" value="{% if current %}{{ current_absolute_index }} / {{ queue_total }}{% else %}0 / {{ queue_total }}{% endif %}" readonly data-queue-selection-input />
   </div>
   <button class="btn" type="submit">Apply</button>
 </form>
@@ -69,11 +69,11 @@
 <section class="mode-banner queue">
   <div class="mode-copy">
     <div class="mode-eyebrow">MODE REVIEW</div>
-    <div class="mode-title">Table-first event triage</div>
+    <div class="mode-title">Skema tabel-event</div>
     <div class="mode-desc">Gunakan tabel untuk scan cepat, lalu buka event detail hanya saat perlu melakukan review manual.</div>
   </div>
   <div class="mode-tags">
-    <span class="pill" data-queue-position-pill>item {{ current_index }} / {{ page_item_count }}</span>
+    <span class="pill" data-queue-position-pill>item {{ current_absolute_index }} / {{ queue_total }}</span>
     <span class="pill ink">hotkeys J/K + Enter</span>
     <span class="pill">pending {{ format_count(counts.pending) }}</span>
     <span class="pill">{% if date_filter.active %}{{ date_filter.label }}{% else %}all UTC dates{% endif %}</span>
@@ -81,7 +81,7 @@
 </section>
 
 <section class="queue-status-grid" aria-live="polite">
-  <article class="queue-status-card"><div class="label">Posisi data sekarang</div><div class="value" data-queue-position-value>{{ current_index }} / {{ page_item_count }}</div></article>
+  <article class="queue-status-card"><div class="label">Posisi data sekarang</div><div class="value" data-queue-position-value>{{ current_absolute_index }} / {{ queue_total }}</div></article>
   <article class="queue-status-card"><div class="label">Pending</div><div class="value">{{ format_count(counts.pending) }}</div></article>
   <article class="queue-status-card yes"><div class="label">Diterima</div><div class="value">{{ format_count(counts.qualified_yes) }}</div></article>
   <article class="queue-status-card no"><div class="label">Ditolak</div><div class="value">{{ format_count(counts.qualified_no) }}</div></article>
@@ -125,7 +125,7 @@
             <th scope="col">Date / Time</th>
             <th scope="col">Camera</th>
             <th scope="col">Arah</th>
-            <th scope="col">Tipe<br>kendaraan</th>
+            <th scope="col">Tipe<br>Kendaraan</th>
             <th scope="col">Akurasi <br>(Confidence %)</th>
             <th scope="col">Review</th>
             <th scope="col">Bukti</th>
@@ -142,6 +142,9 @@
             data-event-uid="{{ item.event_uid }}"
             data-event-short="{{ short_event_uid(item.event_uid, 12, 6) }}"
             data-row-index="{{ loop.index }}"
+            data-page-index="{{ loop.index }}"
+            data-absolute-index="{{ item.queue_position }}"
+            data-queue-total="{{ queue_total }}"
             tabindex="0"
             aria-current="{% if item.event_uid == selected_event_uid %}true{% else %}false{% endif %}"
           >
@@ -157,7 +160,35 @@
             </td>
             <td>{{ item.camera_id or "Unknown" }}</td>
             <td><span class="pill ink">{{ item.direction or "Unknown" }}</span></td>
-            <td>{{ item.class_name or "Unknown" }}</td>
+            <td>
+              <div class="queue-class-cell">
+                <strong class="queue-class-main">{{ item.effective_class_name or item.model_class_name or item.class_name or "Unknown" }}</strong>
+                <div class="queue-class-meta">
+                  {% if item.review_status == decision_yes %}
+                  <span class="pill yes">effective</span>
+                  <span class="queue-class-note">
+                    {% if item.reviewed_class_name %}
+                    model {{ item.model_class_name or item.class_name or "Unknown" }} -> review {{ item.effective_class_name or item.reviewed_class_name }}
+                    {% else %}
+                    using detected class
+                    {% endif %}
+                  </span>
+                  {% elif item.review_status == decision_no %}
+                  <span class="pill no">rejected</span>
+                  <span class="queue-class-note">
+                    {% if item.reviewed_class_name %}
+                    audit correction {{ item.reviewed_class_name }}
+                    {% else %}
+                    detected {{ item.model_class_name or item.class_name or "Unknown" }}
+                    {% endif %}
+                  </span>
+                  {% else %}
+                  <span class="pill ink">detected</span>
+                  <span class="queue-class-note">awaiting review</span>
+                  {% endif %}
+                </div>
+              </div>
+            </td>
             <td>{{ format_float(item.confidence * 100, 2) }} %</td>
             <td>
               <div class="queue-review-cell">
@@ -189,7 +220,7 @@
     <div class="queue-pagination" aria-label="Queue meta">
       <span class="hint">Showing {{ pagination.start_item }}-{{ pagination.end_item }} of {{ format_count(queue_total) }} item(s).</span>
       <div class="queue-pagination-actions">
-        <span class="pill ink" data-queue-footer-selection>Selected {{ current_index }} / {{ page_item_count }}</span>
+        <span class="pill ink" data-queue-footer-selection>Selected {{ current_absolute_index }} / {{ queue_total }}</span>
         {% if current %}
         <a class="pill" href="{{ current.detail_url }}" data-queue-footer-detail>Inspect selected</a>
         {% endif %}

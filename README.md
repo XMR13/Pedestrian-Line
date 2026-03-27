@@ -270,7 +270,7 @@ python3 -m pedestrian_line_counter.main \
 
 Untuk deployment production dengan satu proses (auto-restart + tuning performa + template systemd), pakai runbook:
 
-- `docs/single_loop_production_runbook.md`
+- `docs/jetson_deployment_runbook.md`
 - launcher script: `scripts/run_single_loop_live.sh`
 
 Integrated uploader pada single-loop sekarang bisa dimatikan jika backend upload belum siap:
@@ -361,7 +361,7 @@ Template deploy untuk systemd sekarang tersedia di:
 
 Untuk panduan lengkap menjalankan **dua service** di Jetson:
 
-- `docs/jetson_dual_service_runbook.md`
+- `docs/jetson_deployment_runbook.md`
 
 Runbook ini menjelaskan:
 

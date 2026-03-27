@@ -67,12 +67,12 @@ The active FastAPI edge service has two material security gaps for an internal-o
   - `pedestrian_line_counter/main.py:1638`
   - `pedestrian_line_counter/traffic_spool.py:117-126`
   - `pedestrian_line_counter/event_contract.py:65-90`
-  - `docs/jetson_dual_service_runbook.md:117-143`
+  - `docs/jetson_deployment_runbook.md`
 - Evidence:
   - The spool writer stores raw source details in run metadata, including RTSP sources: `source = {"type": "rtsp", "value": str(rtsp_url)}` at `pedestrian_line_counter/main.py:1638`.
   - `run.json` persists `source` and `source_value` at `pedestrian_line_counter/traffic_spool.py:117-126`.
   - The outbound delivery contract forwards `source_value` in the run payload at `pedestrian_line_counter/event_contract.py:65-90`.
-  - The deployment docs show credential-bearing RTSP URLs as a normal configuration shape at `docs/jetson_dual_service_runbook.md:117-143`.
+  - The deployment docs show credential-bearing RTSP URLs as a normal configuration shape at `docs/jetson_deployment_runbook.md`.
 - Impact:
   - If RTSP URLs contain camera credentials, those credentials are written to disk, exposed to the FastAPI service, and propagated to the backend payload contract.
   - Combined with `SBP-001` and `SBP-002`, this can become direct credential disclosure.
@@ -162,4 +162,3 @@ The active FastAPI edge service has two material security gaps for an internal-o
 3. Stop persisting and forwarding raw `source_value` for RTSP inputs; redact or replace it with a non-secret source identifier.
 4. Add basic rate limiting for login and expensive read endpoints.
 5. Later, replace the shared local admin login with per-user internal authentication and reviewer attribution.
-

@@ -30,6 +30,7 @@ def _write_run(
     last_error_at_utc: str | None = None,
     in_progress_last_sync_at_utc: str | None = None,
     lifecycle_status: str = "stopped",
+    class_name: str = "truck",
 ) -> Path:
     run_dir = root / day / run_uid
     (run_dir / "thumbs").mkdir(parents=True, exist_ok=True)
@@ -81,7 +82,7 @@ def _write_run(
                 "direction": direction,
                 "track_id": 1,
                 "class_id": 2,
-                "class_name": "truck",
+                "class_name": class_name,
                 "confidence": 0.91,
                 "thumb_relpath": "thumbs/e1.jpg",
                 "scene_relpath": "scene/e1.jpg",
@@ -838,6 +839,33 @@ def test_review_api_does_not_use_corrected_class_as_effective_for_rejected_event
     assert event_payload["effective_class_name"] is None
 
 
+def test_review_queue_page_uses_effective_class_after_yes_review(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_queue_class",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+    review_resp = client.post(
+        "/events/run_queue_class_e1/review",
+        json={
+            "decision": "qualified_yes",
+            "reviewed_class": "pickup",
+            "notes": "corrected for operations",
+        },
+    )
+    assert review_resp.status_code == 200
+
+    review_page = client.get("/ui/review?status=all&page=1&page_size=25")
+    assert review_page.status_code == 200
+    assert "pickup" in review_page.text
+    assert "model truck" in review_page.text
+    assert "review pickup" in review_page.text
+
+
 def test_review_store_migrates_existing_db_to_support_reviewed_class(tmp_path) -> None:
     db_path = tmp_path / "reviews.sqlite3"
     conn = sqlite3.connect(db_path)
@@ -874,6 +902,33 @@ def test_review_store_migrates_existing_db_to_support_reviewed_class(tmp_path) -
     loaded = store.get_review("event_1")
     assert loaded is not None
     assert loaded.reviewed_class == "pickup"
+
+
+def test_event_detail_page_exposes_reviewed_class_input_and_suggestions(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_detail_class",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_detail_pickup",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+        class_name="pickup",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+    detail = client.get("/ui/events/run_detail_class_e1?status=pending&page=1&page_size=25")
+
+    assert detail.status_code == 200
+    assert '<select' in detail.text
+    assert 'name="reviewed_class"' in detail.text
+    assert 'Keep detected class' in detail.text
+    assert '<option value="pickup"' in detail.text
 
 
 def test_review_api_returns_next_pending_event_for_detail_flow(tmp_path) -> None:
@@ -1227,6 +1282,13 @@ def test_review_queue_paginates_and_preserves_page_state(tmp_path) -> None:
     assert payload["pagination"]["end_item"] == 30
     assert len(payload["items"]) == 15
     assert payload["items"][0]["detail_url"].endswith("&page=2&page_size=15")
+    assert payload["current_absolute_index"] == 16
+
+    review_page = client.get("/ui/review", params={"status": "pending", "page": 2, "page_size": 15})
+    assert review_page.status_code == 200
+    assert 'value="16 / 30"' in review_page.text
+    assert "item 16 / 30" in review_page.text
+    assert "Selected 16 / 30" in review_page.text
 
     detail = client.get("/ui/events/run_page_00_e1?camera_id=cam_01&status=pending&page=2&page_size=15")
     assert detail.status_code == 200

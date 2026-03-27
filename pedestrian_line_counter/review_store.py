@@ -34,7 +34,7 @@ class ReviewRecord:
             "site_id": self.site_id,
             "camera_id": self.camera_id,
             "decision": self.decision,
-            "reciewed_class": self.reviewed_class,
+            "reviewed_class": self.reviewed_class,
             "notes": self.notes,
             "created_at_utc": self.created_at_utc,
             "updated_at_utc": self.updated_at_utc

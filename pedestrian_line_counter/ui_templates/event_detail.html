@@ -1,22 +1,5 @@
 {% extends "base.html" %}
 
-{% block sidebar_extra %}
-<section class="panel sidebar-note">
-  <h3>Review</h3>
-  <p class="caption">Page ini digunakan untuk review sekaligus menentukan keputusan akhir.</p>
-  <div class="timeline compact">
-    <div class="tl-item">
-      <span class="t">Current status</span>
-      <span class="d"><span class="pill {{ review_pill_class(event.review_status) }}">{{ review_label(event.review_status) }}</span></span>
-    </div>
-    <div class="tl-item">
-      <span class="t">Proses review</span>
-      <span class="d">Periksa bukti, pastikan keputusan sesuai, lalu simpan hasil review.</span>
-    </div>
-  </div>
-</section>
-{% endblock %}
-
 {% block topbar_filters %}
 <div class="filters detail-header-tools">
   <div class="field">
@@ -88,8 +71,14 @@
   </article>
   <article class="detail-overview-card">
     <span class="detail-overview-label">Tipe Kendaraan</span>
-    <strong class="detail-overview-value">{{ event.class_name or "Unknown" }}</strong>
-    <span class="detail-overview-meta">Tipe kendaraan yang terdeteksi.</span>
+    <strong class="detail-overview-value">
+      {% if event.review_status == decision_yes %}
+      {{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}
+      {% else %}
+      {{ event.model_class_name or event.class_name or "Unknown" }}
+      {% endif %}
+    </strong>
+    <span class="detail-overview-meta">Satu class utama untuk operator. Jika review YES, tampilan mengikuti class operasional.</span>
   </article>
   <article class="detail-overview-card detail-overview-status status-{{ 'yes' if event.review_status == decision_yes else 'no' if event.review_status == decision_no else 'unknown' }}">
     <span class="detail-overview-label">Review</span>
@@ -118,7 +107,10 @@
         {% endif %}
         <div class="frame-overlay">
           <span class="pill ink">{{ event.direction or "Unknown" }}</span>
-          <span class="pill">{{ event.class_name or "Unknown" }}</span>
+          <span class="pill">{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}</span>
+          {% if event.reviewed_class_name %}
+          <span class="pill brand">review {{ event.reviewed_class_name }}</span>
+          {% endif %}
           <span class="pill">frame {{ event.frame_index or "-" }}</span>
         </div>
       </div>
@@ -159,7 +151,10 @@
           <div class="row"><div class="key">Occurred (UTC)</div><div class="val">{{ format_datetime(event.occurred_at_utc) }}</div></div>
           <div class="row"><div class="key">Video time</div><div class="val">{{ format_float(event.video_time_s, 3) }}s</div></div>
           <div class="row"><div class="key">Track</div><div class="val">{{ event.track_id or "-" }}</div></div>
-          <div class="row"><div class="key">Tipe Kendaraan</div><div class="val">{{ event.class_name or "Unknown" }}</div></div>
+          <div class="row"><div class="key">Tipe kendaraan</div><div class="val">{% if event.review_status == decision_yes %}{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}{% else %}{{ event.model_class_name or event.class_name or "Unknown" }}{% endif %}</div></div>
+          {% if event.reviewed_class_name %}
+          <div class="row"><div class="key">Stored correction</div><div class="val">{{ event.reviewed_class_name }}</div></div>
+          {% endif %}
           <div class="row"><div class="key">Akurasi (Confidence %)</div><div class="val">{{ format_float(event.confidence * 100, 2)}} %</div></div>
           <div class="row"><div class="key">Frame index</div><div class="val">{{ event.frame_index or "-" }}</div></div>
         </div>
@@ -184,6 +179,7 @@
       data-page-size="{{ page_size }}"
       data-date-from="{{ detail_queue.date_from or '' }}"
       data-date-to="{{ detail_queue.date_to or '' }}"
+      data-model-class="{{ event.model_class_name or event.class_name or '' }}"
     >
       <input type="hidden" name="camera_id" value="{{ detail_queue.camera_id or '' }}" />
       <input type="hidden" name="status_filter" value="{{ detail_queue.status_filter }}" />
@@ -227,6 +223,38 @@
         <span class="pill ink">{{ event.direction or "Unknown" }}</span>
         <span class="pill {{ review_pill_class(event.review_status) }}">{{ review_label(event.review_status) }}</span>
         <span class="pill">{% if event.scene_url or event.thumb_url %}image ready{% else %}no image{% endif %}</span>
+      </div>
+      <div class="detail-class-review">
+        <div class="section-head">
+          <div>
+            <h3>Perubahan tipe kendaraan (optional)</h3>
+            <p class="caption">Jika terdapat tipe kendaraan yang tidak sesuai maka bisa dipilih kembali dengan memilih tipe dibawah ini</p>
+          </div>
+          <span class="pill brand">Antrian menggunakan tipe terbaru</span>
+        </div>
+        <div class="field">
+          <label for="event-detail-reviewed-class" class="detail-field-label">Perbaikan tipe kendaraan (optional)</label>
+          <select
+            id="event-detail-reviewed-class"
+            name="reviewed_class"
+            data-review-class-input
+          >
+            <option value="">Tipe sudah benar</option>
+            {% for option in review_class_options %}
+            <option value="{{ option }}" {% if option == event.reviewed_class_name %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+          <p class="caption detail-class-input-note">Kosong berarti tetap gunakan class model saat keputusan YES. Jika keputusan NO, correction tetap boleh diisi sebagai data audit.</p>
+        </div>
+        <div class="detail-class-preview" data-review-class-preview>
+          {% if event.review_status == decision_yes %}
+          Saat ini queue/API memakai class operasional <strong>{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}</strong>. Ubah field correction jika output operasional perlu diganti sebelum menekan YES lagi.
+          {% elif event.review_status == decision_no %}
+          Review terakhir adalah NO. Jika disimpan YES, queue/API akan memakai detected class atau correction yang dipilih. Jika disimpan NO, correction hanya disimpan sebagai audit.
+          {% else %}
+          Belum ada keputusan. Jika disimpan YES, queue/API akan memakai detected class atau correction yang dipilih di field ini.
+          {% endif %}
+        </div>
       </div>
       <div class="detail-decision-grid">
         <button class="btn yes detail-decision-btn" type="submit" name="decision" value="{{ decision_yes }}" data-review-submit data-decision="{{ decision_yes }}">YES</button>
