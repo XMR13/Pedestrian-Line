@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, Tuple, Union
+from urllib.parse import quote
 
 import cv2
 import numpy as np
@@ -61,7 +62,7 @@ def build_jetson_file_gstreamer_pipeline(
     decode plugins when available, while python keeps a fallback path if it fails.
     """
 
-    video_uri = Path(video_path).expanduser().resolve().as_uri()
+    video_uri = _path_to_file_uri(video_path)
     sink_drop = "true" if appsink_drop else "false"
     max_buf = max(int(appsink_max_buffers), 1)
     return (
@@ -69,6 +70,12 @@ def build_jetson_file_gstreamer_pipeline(
         "video/x-raw,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! "
         f"appsink sync=false max-buffers={max_buf} drop={sink_drop}"
     )
+
+def _path_to_fule_uri(video_path: Union[str, Path]) -> str:
+    raw_path = str(video_path).strip() # strip the whitespaces for convinient sake
+    if raw_path.startswith("/") and not raw_path.startswith("//"):
+        return f"file://{quote(raw_path, safe="/")}"
+    return Path(video_path).expanduser().resolve().as_uri()
 
 
 def open_video_capture(

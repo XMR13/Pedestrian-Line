@@ -8,7 +8,7 @@ import difflib
 import math
 import os
 from pathlib import Path
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 import threading
 import time
 
@@ -22,7 +22,7 @@ from .config_io import apply_config_overrides, load_config_overrides, split_over
 from .detector import Detector
 from .draw_utils import draw_line_and_counts, draw_tracks
 from .line_counter import LineCounter, TwoLineGateCounter
-from .event_uploader import RetryConfig, UploaderConfig, process_pending_runs, resolve_portal_api_key
+from .event_uploader import RetryConfig, UploaderConfig, iter_spool_runs, process_pending_runs, resolve_portal_api_key
 from .output_writer import OutputWriterConfig, create_video_writer, is_ffmpeg_available
 from .report_writer import ReportWriter, ReportWriterConfig
 from .spool_retention import apply_retention_policy, format_retention_summary
@@ -683,6 +683,14 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--allow-duplicate-local-input",
+        action="store_true",
+        help=(
+            "Offline local-file mode only: allow reprocessing the same local file again even if "
+            "a completed spool run already exists for the same camera and video-start."
+        ),
+    )
+    parser.add_argument(
         "--source-fps-override",
         type=float,
         default=None,
@@ -817,6 +825,113 @@ def _missing_path_hint(path: Path) -> str:
                 return f"Did you mean folder: {candidate_parent} ?"
 
     return ""
+
+
+def _optional_text(value: object) -> Optional[str]:
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+def _normalize_local_source_identity_path(value: object) -> Optional[str]:
+    """
+    Normalisasi sumber data lokal untuk mencegah jalannya duplikasi
+    akibat perbedaan path yang sebenarnya menunjuk ke file yang sama 
+    """
+    raw = _optional_text(value)
+    if raw is None:
+        return None
+
+    s = raw.replace("\\", "/")
+    if s.startswith(".//"):
+        s = "./" + s[3:]
+    if s.startswith("..//"):
+        s = "../" + s[4:]
+    if len(s) >= 3 and s[1] == ":" and s[2] == "/":
+        drive = s[0].lower()
+        rest = s[3:].lstrip("/")
+        mnt = Path(f"/mnt/{drive}")
+        if mnt.exists():
+            s = str(mnt / rest)
+
+    path = Path(s).expanduser()
+    try:
+        return str(path.resolve(strict=False))
+    except Exception:
+        return str(path.absolute())
+
+
+def _load_json_dict(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _parse_video_start_epoch_optional(value: object) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = _optional_text(value)
+    if text is None:
+        return None
+    try:
+        return float(_parse_rfc3339_to_epoch_utc(text))
+    except ValueError:
+        return None
+
+
+def _is_completed_spooled_run(run_meta: Mapping[str, Any]) -> bool:
+    if _optional_text(run_meta.get("ended_at_utc")) is not None:
+        return True
+    return (_optional_text(run_meta.get("lifecycle_status")) or "").lower() == "stopped"
+
+
+def _find_completed_duplicate_local_run(
+    spool_root: Path,
+    *,
+    input_path: Path,
+    camera_id: str,
+    video_start_epoch_utc: float,
+) -> Optional[Dict[str, Any]]:
+    expected_source_value = _normalize_local_source_identity_path(input_path)
+    if expected_source_value is None:
+        return None
+
+    latest_match: Optional[Dict[str, Any]] = None
+    latest_sort_key = ""
+    for run_dir in iter_spool_runs(spool_root):
+        run_meta = _load_json_dict(run_dir / "run.json")
+        if run_meta is None:
+            continue
+        if (_optional_text(run_meta.get("source_type")) or "").lower() != "video":
+            continue
+        if _optional_text(run_meta.get("camera_id")) != camera_id:
+            continue
+        if _normalize_local_source_identity_path(run_meta.get("source_value")) != expected_source_value:
+            continue
+
+        prior_video_start_epoch = _parse_video_start_epoch_optional(run_meta.get("video_start_epoch_utc"))
+        if prior_video_start_epoch is None:
+            prior_video_start_epoch = _parse_video_start_epoch_optional(run_meta.get("video_start"))
+        if prior_video_start_epoch is None:
+            continue
+        if abs(float(prior_video_start_epoch) - float(video_start_epoch_utc)) > 1e-6:
+            continue
+        if not _is_completed_spooled_run(run_meta):
+            continue
+
+        sort_key = (
+            _optional_text(run_meta.get("updated_at_utc"))
+            or _optional_text(run_meta.get("ended_at_utc"))
+            or _optional_text(run_meta.get("started_at_utc"))
+            or ""
+        )
+        if latest_match is None or sort_key >= latest_sort_key:
+            latest_match = dict(run_meta)
+            latest_sort_key = sort_key
+
+    return latest_match
 
 
 def _open_source_with_first_frame(
@@ -1391,6 +1506,39 @@ def main() -> None:
         for line in format_retention_summary(startup_retention):
             print(line)
 
+    spool_dir = _normalize_cli_path(args.spool_dir) if args.spool_dir else cfg.spool.root_dir
+    resolved_camera_id = (
+        args.camera_id or cfg.spool.camera_id or (args.camera if args.camera else "camera")
+    )
+    resolved_site_id = (
+        str(args.site_id) if args.site_id is not None else str(cfg.spool.site_id)
+    )
+    resolved_video_start: Optional[str] = None
+    video_start_epoch_utc: Optional[float] = None
+    video_start_local_tz: Optional[tzinfo] = None
+    if (not is_live) and spool_dir is not None:
+        video_start_val = cfg.io.video_start
+        if not video_start_val:
+            if args.prompt_video_start and sys.stdin.isatty():
+                cfg.io.video_start = _prompt_video_start_rfc3339()
+                video_start_val = cfg.io.video_start
+            else:
+                raise SystemExit(
+                    "Offline video + spool enabled requires --video-start (RFC3339 with timezone). "
+                    "Example: --video-start 2026-02-18T08:00:00+07:00 "
+                    "(or pass --prompt-video-start for interactive entry)."
+                )
+        try:
+            resolved_video_start = str(video_start_val)
+            video_start_epoch_utc = _parse_rfc3339_to_epoch_utc(resolved_video_start)
+            video_start_raw = resolved_video_start.strip()
+            if video_start_raw.endswith("Z"):
+                video_start_raw = video_start_raw[:-1] + "+00:00"
+            video_start_dt = datetime.fromisoformat(video_start_raw)
+            video_start_local_tz = video_start_dt.tzinfo
+        except ValueError as exc:
+            raise SystemExit(f"Invalid --video-start: {exc}")
+
     standalone_headless_status_path: Optional[Path] = None
     if args.headless_status_json is not None:
         standalone_headless_status_path = _normalize_cli_path(args.headless_status_json)
@@ -1403,6 +1551,31 @@ def main() -> None:
         if hint:
             msg += f"\n{hint}"
         raise SystemExit(msg)
+
+    if (
+        (not is_live)
+        and spool_dir is not None
+        and (not args.allow_duplicate_local_input)
+        and video_start_epoch_utc is not None
+    ):
+        duplicate_run = _find_completed_duplicate_local_run(
+            Path(spool_dir),
+            input_path=input_path,
+            camera_id=str(resolved_camera_id),
+            video_start_epoch_utc=float(video_start_epoch_utc),
+        )
+        if duplicate_run is not None:
+            previous_run_uid = _optional_text(duplicate_run.get("run_uid")) or "<unknown>"
+            previous_ended_at = _optional_text(duplicate_run.get("ended_at_utc")) or "unknown"
+            print(
+                "[main] Duplicate local input already processed; skipping startup. "
+                f"file={_normalize_local_source_identity_path(input_path) or input_path} "
+                f"camera_id={resolved_camera_id} "
+                f"video_start={resolved_video_start or cfg.io.video_start} "
+                f"previous_run_uid={previous_run_uid} "
+                f"ended_at_utc={previous_ended_at}"
+            )
+            return
 
     if args.line_mode == "gate" and args.select_line:
         raise SystemExit("--select-line is only supported for --line-mode single. Use line_picker.py to save 2 lines.")
@@ -1614,10 +1787,7 @@ def main() -> None:
     next_headless_status_s = time.time() + max(headless_status_every_s, 0.0)
     standalone_status_target: Optional[Path] = standalone_headless_status_path
     spool_events_written_total = 0
-    spool_dir = _normalize_cli_path(args.spool_dir) if args.spool_dir else cfg.spool.root_dir
     if spool_dir is not None:
-        cam_id = args.camera_id or cfg.spool.camera_id or (args.camera if args.camera else "camera")
-        site_id = str(args.site_id) if args.site_id is not None else str(cfg.spool.site_id)
         write_thumbs = cfg.spool.write_thumbnails if args.spool_thumbnails is None else bool(args.spool_thumbnails)
         write_scene_thumbs = (
             cfg.spool.write_scene_thumbnails
@@ -1658,8 +1828,8 @@ def main() -> None:
 
         spool_cfg = TrafficSpoolConfig(
             root_dir=Path(spool_dir),
-            site_id=str(site_id),
-            camera_id=str(cam_id),
+            site_id=str(resolved_site_id),
+            camera_id=str(resolved_camera_id),
             write_thumbnails=bool(write_thumbs),
             write_scene_thumbnails=bool(write_scene_thumbs),
             thumb_pad=int(thumb_pad),
@@ -1747,36 +1917,13 @@ def main() -> None:
         )
         spool.update_run_metadata({"report_csv_relpath": report_name})
 
-    video_start_epoch_utc: Optional[float] = None
-    video_start_local_tz: Optional[tzinfo] = None
-    if (not is_live) and spool is not None:
-        video_start_val = cfg.io.video_start
-        if not video_start_val:
-            if args.prompt_video_start and sys.stdin.isatty():
-                cfg.io.video_start = _prompt_video_start_rfc3339()
-                video_start_val = cfg.io.video_start
-            else:
-                raise SystemExit(
-                    "Offline video + spool enabled requires --video-start (RFC3339 with timezone). "
-                    "Example: --video-start 2026-02-18T08:00:00+07:00 "
-                    "(or pass --prompt-video-start for interactive entry)."
-                )
-        try:
-            video_start_epoch_utc = _parse_rfc3339_to_epoch_utc(str(video_start_val))
-            video_start_raw = str(video_start_val).strip()
-            if video_start_raw.endswith("Z"):
-                video_start_raw = video_start_raw[:-1] + "+00:00"
-            video_start_dt = datetime.fromisoformat(video_start_raw)
-            video_start_local_tz = video_start_dt.tzinfo
-            # Persist the parsed value so run.json explains where occurred_at_utc came from.
-            spool.update_run_metadata(
-                {
-                    "video_start": str(video_start_val),
-                    "video_start_epoch_utc": float(video_start_epoch_utc),
-                }
-            )
-        except ValueError as exc:
-            raise SystemExit(f"Invalid --video-start: {exc}")
+    if (not is_live) and spool is not None and resolved_video_start is not None and video_start_epoch_utc is not None:
+        spool.update_run_metadata(
+            {
+                "video_start": str(resolved_video_start),
+                "video_start_epoch_utc": float(video_start_epoch_utc),
+            }
+        )
 
     print(
         f"[main] Processing {source_label} -> "

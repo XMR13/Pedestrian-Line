@@ -239,7 +239,7 @@
             name="reviewed_class"
             data-review-class-input
           >
-            <option value="">Tipe sudah benar</option>
+            <option value="">Keep detected class</option>
             {% for option in review_class_options %}
             <option value="{{ option }}" {% if option == event.reviewed_class_name %}selected{% endif %}>{{ option }}</option>
             {% endfor %}

@@ -128,6 +128,8 @@ Notes:
 - `PLC_INPUT_PATH` is the switch for local-file validation.
 - `PLC_PORTAL_UPLOAD_ENABLED=0` keeps the run local and avoids backend dependencies.
 - In local-file mode, the detector is expected to exit cleanly at EOF.
+- If the machine reboots with the same `PLC_INPUT_PATH` + `PLC_VIDEO_START`, the service now skips reprocessing by default once that exact local-file run has already completed.
+- Set `PLC_ALLOW_DUPLICATE_LOCAL_INPUT=1` only when you intentionally want to rerun the same local validation clip.
 
 ### 5.2 RTSP mode
 

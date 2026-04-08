@@ -109,6 +109,35 @@ def _run_main(monkeypatch, argv_tail: List[str]) -> None:
     main_module.main()
 
 
+def _write_prior_local_run(
+    root_dir: Path,
+    *,
+    run_uid: str,
+    input_path: Path,
+    camera_id: str,
+    video_start: str,
+    completed: bool = True,
+) -> Path:
+    run_dir = root_dir / "2026-03-11" / run_uid
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "events.jsonl").write_text("", encoding="utf-8")
+    payload = {
+        "run_uid": run_uid,
+        "site_id": "site_a",
+        "camera_id": camera_id,
+        "started_at_utc": "2026-03-11T03:00:00Z",
+        "updated_at_utc": "2026-03-11T03:02:00Z",
+        "ended_at_utc": "2026-03-11T03:02:00Z" if completed else None,
+        "lifecycle_status": "stopped" if completed else "running",
+        "source_type": "video",
+        "source_value": str(input_path),
+        "video_start": video_start,
+        "video_start_epoch_utc": main_module._parse_rfc3339_to_epoch_utc(video_start),
+    }
+    (run_dir / "run.json").write_text(json.dumps(payload), encoding="utf-8")
+    return run_dir
+
+
 def test_live_single_loop_integrated_upload_smoke(monkeypatch, tmp_path, capsys) -> None:
     fake_cap = _FakeCap()
     frame0 = np.zeros((16, 16, 3), dtype=np.uint8)
@@ -341,3 +370,200 @@ def test_file_fast_skip_is_enabled_with_no_write(monkeypatch, tmp_path, capsys) 
     out = capsys.readouterr().out
     assert "fast-skip: enabled" in out
     assert fake_cap.grab_calls == 1
+
+
+def test_local_file_duplicate_completed_run_skips_startup(monkeypatch, tmp_path, capsys) -> None:
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+    _write_prior_local_run(
+        tmp_path,
+        run_uid="run_done",
+        input_path=input_path,
+        camera_id="cam_01",
+        video_start="2026-03-11T10:00:00+07:00",
+        completed=True,
+    )
+
+    def _open_impl(_source, **_kwargs):
+        raise AssertionError("duplicate guard should skip before opening the video source")
+
+    monkeypatch.setattr(main_module, "_open_source_with_first_frame", _open_impl)
+
+    _run_main(
+        monkeypatch,
+        [
+            "--backend",
+            "motion",
+            "--input",
+            str(input_path),
+            "--spool-dir",
+            str(tmp_path),
+            "--site-id",
+            "site_a",
+            "--camera-id",
+            "cam_01",
+            "--video-start",
+            "2026-03-11T10:00:00+07:00",
+            "--no-write",
+            "--no-draw",
+            "--no-progress",
+            "--max-frames",
+            "1",
+        ],
+    )
+
+    out = capsys.readouterr().out
+    assert "Duplicate local input already processed; skipping startup." in out
+    assert "previous_run_uid=run_done" in out
+    assert len(list(tmp_path.glob("*/*/run.json"))) == 1
+
+
+def test_local_file_duplicate_can_be_overridden(monkeypatch, tmp_path) -> None:
+    fake_cap = _FakeCap()
+    frame0 = np.zeros((16, 16, 3), dtype=np.uint8)
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+    _write_prior_local_run(
+        tmp_path,
+        run_uid="run_done",
+        input_path=input_path,
+        camera_id="cam_01",
+        video_start="2026-03-11T10:00:00+07:00",
+        completed=True,
+    )
+
+    def _open_impl(source, **_kwargs):
+        _ = source
+        return fake_cap, frame0, 30.0, 16, 16, "FAKE"
+
+    monkeypatch.setattr(main_module, "_open_source_with_first_frame", _open_impl)
+    monkeypatch.setattr(main_module, "Detector", _FakeDetector)
+    monkeypatch.setattr(main_module, "Tracker", _FakeTracker)
+    monkeypatch.setattr(main_module, "LineCounter", _FakeLineCounter)
+
+    _run_main(
+        monkeypatch,
+        [
+            "--backend",
+            "motion",
+            "--input",
+            str(input_path),
+            "--spool-dir",
+            str(tmp_path),
+            "--site-id",
+            "site_a",
+            "--camera-id",
+            "cam_01",
+            "--video-start",
+            "2026-03-11T10:00:00+07:00",
+            "--allow-duplicate-local-input",
+            "--no-write",
+            "--no-draw",
+            "--no-progress",
+            "--max-frames",
+            "1",
+        ],
+    )
+
+    assert fake_cap.released is True
+    assert len(list(tmp_path.glob("*/*/run.json"))) == 2
+
+
+def test_local_file_duplicate_check_uses_video_start_identity(monkeypatch, tmp_path) -> None:
+    fake_cap = _FakeCap()
+    frame0 = np.zeros((16, 16, 3), dtype=np.uint8)
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+    _write_prior_local_run(
+        tmp_path,
+        run_uid="run_done",
+        input_path=input_path,
+        camera_id="cam_01",
+        video_start="2026-03-11T10:00:00+07:00",
+        completed=True,
+    )
+
+    def _open_impl(source, **_kwargs):
+        _ = source
+        return fake_cap, frame0, 30.0, 16, 16, "FAKE"
+
+    monkeypatch.setattr(main_module, "_open_source_with_first_frame", _open_impl)
+    monkeypatch.setattr(main_module, "Detector", _FakeDetector)
+    monkeypatch.setattr(main_module, "Tracker", _FakeTracker)
+    monkeypatch.setattr(main_module, "LineCounter", _FakeLineCounter)
+
+    _run_main(
+        monkeypatch,
+        [
+            "--backend",
+            "motion",
+            "--input",
+            str(input_path),
+            "--spool-dir",
+            str(tmp_path),
+            "--site-id",
+            "site_a",
+            "--camera-id",
+            "cam_01",
+            "--video-start",
+            "2026-03-11T11:00:00+07:00",
+            "--no-write",
+            "--no-draw",
+            "--no-progress",
+            "--max-frames",
+            "1",
+        ],
+    )
+
+    assert fake_cap.released is True
+    assert len(list(tmp_path.glob("*/*/run.json"))) == 2
+
+
+def test_local_file_duplicate_check_ignores_incomplete_prior_runs(monkeypatch, tmp_path) -> None:
+    fake_cap = _FakeCap()
+    frame0 = np.zeros((16, 16, 3), dtype=np.uint8)
+    input_path = tmp_path / "input.mp4"
+    input_path.write_bytes(b"fake")
+    _write_prior_local_run(
+        tmp_path,
+        run_uid="run_incomplete",
+        input_path=input_path,
+        camera_id="cam_01",
+        video_start="2026-03-11T10:00:00+07:00",
+        completed=False,
+    )
+
+    def _open_impl(source, **_kwargs):
+        _ = source
+        return fake_cap, frame0, 30.0, 16, 16, "FAKE"
+
+    monkeypatch.setattr(main_module, "_open_source_with_first_frame", _open_impl)
+    monkeypatch.setattr(main_module, "Detector", _FakeDetector)
+    monkeypatch.setattr(main_module, "Tracker", _FakeTracker)
+    monkeypatch.setattr(main_module, "LineCounter", _FakeLineCounter)
+
+    _run_main(
+        monkeypatch,
+        [
+            "--backend",
+            "motion",
+            "--input",
+            str(input_path),
+            "--spool-dir",
+            str(tmp_path),
+            "--site-id",
+            "site_a",
+            "--camera-id",
+            "cam_01",
+            "--video-start",
+            "2026-03-11T10:00:00+07:00",
+            "--no-write",
+            "--no-draw",
+            "--no-progress",
+            "--max-frames",
+            "1",
+        ],
+    )
+
+    assert fake_cap.released is True
+    assert len(list(tmp_path.glob("*/*/run.json"))) == 2

@@ -46,11 +46,11 @@
         <nav class="nav" aria-label="Primary">
           <a class="{% if page_name == 'dashboard' %}active{% endif %}" href="{{ ui_base_path }}/dashboard">
             <strong>Dashboard</strong>
-            <span class="pill ink">LIVE</span>
+            <span class="pill ink">live</span>
           </a>
           <a class="{% if page_name == 'review' %}active{% endif %}" href="{{ ui_base_path }}/review">
             <strong>Antrian Review</strong>
-            <span class="pill">MVP</span>
+            <span class="pill">live</span>
           </a>
           {% if page_name == 'event_detail' and event %}
           <a class="active" href="{{ ui_base_path }}/events/{{ event.event_uid }}">

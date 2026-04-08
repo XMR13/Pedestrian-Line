@@ -141,7 +141,7 @@
     <div class="pad">
       <div class="section-head">
         <div>
-          <h3>Status Upload</h3>
+          <h3>Sync pulse</h3>
           <p class="caption">Ringkasan pengiriman data dari local spool ke backend.</p>
         </div>
         <span class="pill {% if sync_overview.uploader_enabled %}ok{% else %}ink{% endif %}">
@@ -158,7 +158,7 @@
       </div>
       <div class="sync-meta-grid">
         <article class="sync-meta-card">
-          <div class="sync-meta-label">Sync terbaru</div>
+          <div class="sync-meta-label">Sync terakhir</div>
           {% if sync_overview.latest_sync %}
           <div class="sync-meta-value">{{ format_datetime(sync_overview.latest_sync.at_utc) }}</div>
           <div class="sync-meta-copy">

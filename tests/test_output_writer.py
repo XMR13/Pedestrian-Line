@@ -6,6 +6,7 @@ import subprocess
 
 import pytest
 
+import pedestrian_line_counter.output_writer as output_writer
 from pedestrian_line_counter.output_writer import FFmpegVideoWriter, OutputWriterConfig, build_ffmpeg_command, create_video_writer
 
 
@@ -32,7 +33,7 @@ def test_build_ffmpeg_command_uses_h264_crf_and_faststart(tmp_path) -> None:
     assert str(tmp_path / "out.mp4") == cmd[-1]
 
 
-def test_create_video_writer_ffmpeg_mode_requires_binary(tmp_path) -> None:
+def test_create_video_writer_ffmpeg_mode_requires_binary(monkeypatch, tmp_path) -> None:
     cfg = OutputWriterConfig(
         path=tmp_path / "out.mp4",
         fps=25.0,
@@ -41,6 +42,7 @@ def test_create_video_writer_ffmpeg_mode_requires_binary(tmp_path) -> None:
         encoder="ffmpeg",
     )
 
+    monkeypatch.setattr(output_writer.shutil, "which", lambda _name: None)
     with pytest.raises(RuntimeError, match="ffmpeg executable not found"):
         create_video_writer(cfg)
 
