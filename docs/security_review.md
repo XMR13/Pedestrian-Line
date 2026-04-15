@@ -9,7 +9,7 @@ together.
 ## Executive Summary
 
 The active production surface in this repo is the FastAPI-based edge service and
-the local detector/spool runtime, not the older `portal/` application.
+the local detector/spool runtime.
 
 The main realistic risk for the current deployment shape is not a public-internet
 attacker. It is an internal user, adjacent service, or compromised workstation
@@ -40,7 +40,6 @@ In scope:
 
 Out of scope:
 
-- the older `portal/` application as the primary production surface,
 - public-internet reverse-proxy controls that are not enforced in repo code,
 - local root compromise on the Jetson.
 

@@ -30,9 +30,6 @@ older filenames.
 
 ## Integration And Architecture
 
-- `portal_architecture.md`
-  - Canonical reference for the legacy ASP.NET portal surface, including
-    architecture, local setup, uploader integration, tests, and routes.
 - `security_review.md`
   - Canonical security document for the active FastAPI edge-service deployment.
 
@@ -45,8 +42,6 @@ older filenames.
 
 ## Notes
 
-- The FastAPI edge service is the preferred MVP operator-facing surface.
-- The ASP.NET `portal/` app still exists in the repo, but it is no longer the
-  primary UI path for the current MVP.
+- The FastAPI edge service is the active operator-facing surface in this repo.
 - If two docs start covering the same operational task, prefer merging them
   here instead of keeping parallel runbooks.

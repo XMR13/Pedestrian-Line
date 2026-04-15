@@ -1178,8 +1178,6 @@ def create_app(
 
     if UI_STATIC_DIR.exists():
         app.mount("/ui-static", StaticFiles(directory=str(UI_STATIC_DIR)), name="ui-static")
-    if UI_ASSET_DIR.exists():
-        app.mount("/ui-assets", StaticFiles(directory=str(UI_ASSET_DIR)), name="ui-assets")
     app.mount("/evidence", StaticFiles(directory=str(spool_dir), check_dir=False), name="evidence")
 
     router = APIRouter()

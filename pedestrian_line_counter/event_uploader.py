@@ -771,9 +771,7 @@ def _candidate_local_settings_paths(path_arg: Optional[str]) -> List[Path]:
     module_root = Path(__file__).resolve().parents[1]
     candidates = [
         Path.cwd() / "edge_service" / "appsettings.Local.json",
-        Path.cwd() / "portal" / "appsettings.Local.json",
         module_root / "edge_service" / "appsettings.Local.json",
-        module_root / "portal" / "appsettings.Local.json",
     ]
     # Deduplicate while preserving order.
     seen: set[str] = set()
@@ -819,7 +817,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional path to local settings JSON containing ApiKey. "
-            "If omitted, uploader tries ./edge_service/appsettings.Local.json then ./portal/appsettings.Local.json."
+            "If omitted, uploader tries ./edge_service/appsettings.Local.json."
         ),
     )
 

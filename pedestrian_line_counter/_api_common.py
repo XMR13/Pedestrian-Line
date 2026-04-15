@@ -7,9 +7,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from .config import ROOT_DIR
-
-
 DEFAULT_STATE_FILENAME = ".portal_upload_state.json"
 DEFAULT_MUTATION_API_KEY_HEADER = "X-API-Key"
 MAX_RUNS_LIMIT = 200
@@ -18,7 +15,6 @@ DEFAULT_REVIEW_DB_FILENAME = ".edge_ui_reviews.sqlite3"
 UI_BASE_PATH = "/ui"
 UI_TEMPLATE_DIR = Path(__file__).resolve().parent / "ui_templates"
 UI_STATIC_DIR = Path(__file__).resolve().parent / "ui_static"
-UI_ASSET_DIR = ROOT_DIR / "portal" / "mockups" / "assets"
 REVIEW_STATUS_PENDING = "pending"
 REVIEW_STATUS_ALL = "all"
 DEFAULT_REVIEW_PAGE_SIZE = 25
