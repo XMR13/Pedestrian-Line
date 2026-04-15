@@ -8,7 +8,7 @@ This guide matches the real project flow:
 - the **AI box** and **camera** are installed at a remote site,
 - the remote site has its own modem/router and internet connection,
 - the AI box runs the detector pipeline and saves results locally,
-- the AI box also runs the website/backend that reads those local results,
+- the AI box also runs the local FastAPI operator service that reads those local results,
 - office users connect remotely through a public domain.
 
 The goal is to make that setup work in a safer and more production-friendly way.
@@ -586,4 +586,3 @@ After this document, the practical next steps are:
 3. verify whether the remote site internet supports port forwarding,
 4. harden the FastAPI app for safer public use,
 5. test access from the office.
-

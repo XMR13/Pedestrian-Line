@@ -2,6 +2,9 @@
 
 This document summarizes, step by step, how we got the TensorRT `.engine` path running on the Jetson environment.
 
+This document is the canonical TensorRT bring-up note for the repo and
+supersedes older duplicate troubleshooting notes.
+
 ## 1. Start from the existing TensorRT backend
 
 The project already had a TensorRT path in place:
@@ -76,6 +79,24 @@ The target device is on:
 - TensorRT `8.5.2.2`
 
 That matters because newer generic `cuda-python` package paths are not always compatible with this environment.
+
+## 8.1 Historical troubleshooting notes that still matter
+
+These details are worth keeping because they explain failures that are likely to
+reappear on similar Jetson setups:
+
+- The original `.engine` failure in the Python 3.10 environment was an import
+  problem first, not an engine-format problem:
+  `ModuleNotFoundError: No module named 'tensorrt'`.
+- A full downgrade of the project to Python 3.8 was intentionally avoided.
+  The better approach was to keep the main project layout stable while making
+  the runtime path compatible with the Jetson TensorRT environment.
+- During bring-up, a broken environment had to be restored from a local
+  `.venv_backup`. That recovery step was operationally useful, but it was a
+  one-time rescue action rather than part of the normal deployment workflow.
+- Installing the latest `cuda-python` package directly was not a clean fix on
+  this Jetson stack because pip tried to resolve package versions that did not
+  match the device runtime.
 
 ## 9. Add support for the older CUDA Python import layout
 

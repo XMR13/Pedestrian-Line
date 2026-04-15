@@ -1,10 +1,19 @@
-# Portal Architecture (Edge → Uploader → Website)
+# Portal Legacy Reference
 
-This document makes the portal/website integration concrete.
+This is the canonical portal document for the repo.
 
-The repo you are in is the **edge pipeline** (Python). The portal website is a
-separate service (ASP.NET Core + SQL Server) that ingests edge outputs via an
-uploader.
+It merges the previous architecture note and the portal-local README so the
+older ASP.NET portal surface is documented in one place.
+
+Important status note:
+
+- the FastAPI edge service is the preferred MVP operator-facing surface,
+- the ASP.NET `portal/` app is now a secondary or legacy path,
+- keep this document for compatibility, migration, and local portal work,
+  not as the primary day-one deployment guide.
+
+The repo you are in is the **edge pipeline** (Python). The `portal/` website is
+a separate ASP.NET Core service that ingests edge outputs via an uploader.
 
 ## Goals (MVP)
 
@@ -226,3 +235,220 @@ by:
 
 Later, those human labels can train a dedicated classifier so the portal can
 auto-suggest `Qualified` while keeping human review as source of truth.
+
+## Local Portal Stack
+
+### Stack
+
+- ASP.NET Core MVC (`net8.0`)
+- EF Core (`Sqlite` for local dev, `SqlServer` for deployment)
+- cookie authentication for the MVP login gate
+
+### Configuration
+
+Edit `portal/appsettings.json` for non-secret values:
+
+- `Database:Provider`
+- `ConnectionStrings:PortalDb`
+- `Portal:EvidenceRootPath`
+- `LoginGate:DisplayName`
+
+Do not commit secrets. Provide them through:
+
+1. environment variables:
+   - `Portal__ApiKey`
+   - `LoginGate__Username`
+   - `LoginGate__Password`
+2. local untracked file:
+   - `portal/appsettings.Local.json`
+   - copy from `portal/appsettings.Local.example.json`
+
+Startup fails fast if API key or login credentials are missing.
+
+## Local Runbook
+
+Use Windows PowerShell when running the portal locally from the Windows drive.
+
+### Start The Portal
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+dotnet restore
+dotnet build
+dotnet run
+```
+
+Or use the helper script:
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+.\scripts\start-portal.ps1 -Port 5000
+```
+
+Expected startup line:
+
+```text
+Now listening on: http://localhost:5000
+```
+
+Login page:
+
+- `http://localhost:5000/Account/Login`
+
+### Stop The Portal
+
+- press `Ctrl + C` in the same terminal, or
+- stop the process manually:
+
+```powershell
+$pid = (Get-NetTCPConnection -LocalPort 5000 -State Listen).OwningProcess
+Stop-Process -Id $pid -Force
+```
+
+Or use:
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+.\scripts\stop-portal.ps1 -Port 5000 -Force
+```
+
+### Run On A Different Port
+
+```powershell
+dotnet run --urls "http://localhost:5001"
+```
+
+If the port changes, update the uploader base URL to match.
+
+### Logs
+
+To save portal logs into a file:
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+New-Item -ItemType Directory -Force logs | Out-Null
+dotnet run *>&1 | Tee-Object -FilePath ".\logs\portal-$(Get-Date -Format yyyyMMdd-HHmmss).log"
+```
+
+The helper script also writes log files under `portal/logs/`.
+
+### Local Files Created By Portal
+
+- `portal/portal.db`
+- `portal/portal.db-shm`
+- `portal/portal.db-wal`
+- `portal/evidence/`
+- `portal/logs/`
+
+## Database Setup
+
+### Local SQLite
+
+No manual setup is required. `dotnet run` creates `portal/portal.db`
+automatically when SQLite mode is selected.
+
+### SQL Server Mode
+
+Set:
+
+```json
+"Database": { "Provider": "SqlServer" },
+"ConnectionStrings": {
+  "PortalDb": "Server=.\\SQLEXPRESS;Database=PedestrianLinePortal;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=True"
+}
+```
+
+Preferred path:
+
+```bash
+cd portal
+dotnet ef migrations add InitialPortal
+dotnet ef database update
+```
+
+Fallback path:
+
+- apply `portal/sql/001_init.sql` manually,
+- then start the portal.
+
+### Quick SQL Server Setup On Windows
+
+```powershell
+winget install -e --id Microsoft.SQLServer.2022.Express --accept-package-agreements --accept-source-agreements
+winget install -e --id Microsoft.Sqlcmd --accept-package-agreements --accept-source-agreements
+```
+
+Then:
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+sqlcmd -S ".\SQLEXPRESS" -E -d PedestrianLinePortal -i .\sql\001_init.sql
+```
+
+## Uploader Integration
+
+Use the existing edge uploader:
+
+```bash
+python3 -m pedestrian_line_counter.portal_uploader \
+  --spool-dir /path/to/spool \
+  --api-base-url http://localhost:5000 \
+  --api-key "$PORTAL_API_KEY"
+```
+
+Uploader watch mode:
+
+```bash
+python3 -m pedestrian_line_counter.portal_uploader \
+  --spool-dir /path/to/spool \
+  --api-base-url http://localhost:5000 \
+  --api-key "$PORTAL_API_KEY" \
+  --watch \
+  --poll-interval-s 10
+```
+
+If you do not want to export the API key each session, set `Portal.ApiKey` once
+in `portal/appsettings.Local.json`.
+
+## Tests
+
+Focused portal integration tests live in:
+
+- `portal/tests/Portal.Web.Tests/`
+
+Run:
+
+```powershell
+cd "D:\RZQ\Coding\Python\Projects\Pedestrian Line\portal"
+dotnet test .\tests\Portal.Web.Tests\Portal.Web.Tests.csproj
+```
+
+## Route Map
+
+Pages:
+
+- `/Account/Login`
+- `/`
+- `/Events`
+- `/Events/ReviewQueue`
+- `/Events/Detail/{eventUid}`
+- `/Events/ExportCsv`
+
+API:
+
+- `POST /api/runs/upsert`
+- `POST /api/events/upsert`
+- `POST /api/events/{event_uid}/thumbnail`
+- `POST /api/events/{event_uid}/review`
+- `GET /api/events`
+- `GET /api/events/{event_uid}/thumbnail`
+- `GET /api/dashboard/summary`
+
+## Current Status
+
+This merged document replaces the duplicated role that used to be split across:
+
+- `docs/portal_architecture.md`
+- `portal/README.md`
+
+Keep future portal documentation changes here first.

@@ -202,6 +202,55 @@ Why:
 - let `edge_service.service` focus on UI/API
 - avoid overlapping uploader ownership
 
+### 6.1 Manual FastAPI bring-up without systemd
+
+Use this when you want to validate the UI/API manually before enabling
+`edge_service.service`, or when you are debugging a deployment issue.
+
+Run from the repo root:
+
+```bash
+uv run python -m pedestrian_line_counter.service \
+  --spool-dir data/traffic_runs \
+  --host 127.0.0.1 \
+  --port 8080
+```
+
+Open:
+
+- Login: `http://127.0.0.1:8080/ui/login`
+- Dashboard: `http://127.0.0.1:8080/ui/dashboard`
+- Review Queue: `http://127.0.0.1:8080/ui/review`
+
+Useful notes:
+
+- If the spool is empty, the service still starts, but the dashboard and review
+  pages will be sparse.
+- If `EDGE_UI_PASSWORD` is set, the UI requires login.
+- If `EDGE_UI_PASSWORD` is not set, login gating is disabled for the UI.
+- Review decisions are stored locally under:
+
+```text
+<spool-dir>/.edge_ui_reviews.sqlite3
+```
+
+To save logs while running manually:
+
+```bash
+mkdir -p logs
+uv run python -m pedestrian_line_counter.service \
+  --spool-dir data/traffic_runs \
+  --host 127.0.0.1 \
+  --port 8080 \
+  2>&1 | tee "logs/mvp-ui-$(date +%Y%m%d-%H%M%S).log"
+```
+
+To stop the service manually:
+
+```bash
+Ctrl+C
+```
+
 ## 7. Service unit files
 
 Create the service files under `/etc/systemd/system/`.
