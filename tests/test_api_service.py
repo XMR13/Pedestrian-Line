@@ -31,6 +31,8 @@ def _write_run(
     in_progress_last_sync_at_utc: str | None = None,
     lifecycle_status: str = "stopped",
     class_name: str = "truck",
+    thumb_relpath: str | None = "thumbs/e1.jpg",
+    scene_relpath: str | None = "scene/e1.jpg",
 ) -> Path:
     run_dir = root / day / run_uid
     (run_dir / "thumbs").mkdir(parents=True, exist_ok=True)
@@ -84,15 +86,21 @@ def _write_run(
                 "class_id": 2,
                 "class_name": class_name,
                 "confidence": 0.91,
-                "thumb_relpath": "thumbs/e1.jpg",
-                "scene_relpath": "scene/e1.jpg",
+                "thumb_relpath": thumb_relpath,
+                "scene_relpath": scene_relpath,
             }
         )
         + "\n",
         encoding="utf-8",
     )
-    (run_dir / "thumbs" / "e1.jpg").write_bytes(b"jpg")
-    (run_dir / "scene" / "e1.jpg").write_bytes(b"jpg")
+    if thumb_relpath:
+        thumb_path = run_dir / Path(thumb_relpath)
+        thumb_path.parent.mkdir(parents=True, exist_ok=True)
+        thumb_path.write_bytes(b"jpg")
+    if scene_relpath:
+        scene_path = run_dir / Path(scene_relpath)
+        scene_path.parent.mkdir(parents=True, exist_ok=True)
+        scene_path.write_bytes(b"jpg")
 
     state = {}
     if completed_at_utc is not None:
@@ -108,6 +116,18 @@ def _write_run(
         (run_dir / ".portal_upload_state.json").write_text(json.dumps(state), encoding="utf-8")
 
     return run_dir
+
+
+def _login_ui(client: TestClient, *, username: str = "admin", password: str = "secret") -> None:
+    resp = client.post(
+        "/api/auth/login",
+        json={
+            "username": username,
+            "password": password,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
 
 
 def test_healthz_and_status_expose_spool_state(tmp_path) -> None:
@@ -144,6 +164,119 @@ def test_healthz_and_status_expose_spool_state(tmp_path) -> None:
     assert payload["sync_overview"]["status_cards"][2]["label"] == "Gagal"
     assert payload["sync_overview"]["status_cards"][2]["value"] == 1
     assert payload["latest_run"]["run_uid"] == "run_a"
+
+
+def test_operational_read_endpoints_require_ui_auth_when_enabled(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_secure",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+        completed_at_utc="2026-03-11T10:06:00Z",
+    )
+
+    retention_cfg = SpoolRetentionConfig(
+        enabled=True,
+        max_age_days=45,
+        protect_incomplete_runs=True,
+        state_filename=".portal_upload_state.json",
+    )
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            retention_cfg=retention_cfg,
+            ui_auth_cfg=UiAuthConfig(username="admin", password="secret"),
+        )
+    )
+
+    health = client.get("/healthz")
+    assert health.status_code == 200
+
+    for path in (
+        "/status",
+        "/metrics",
+        "/config",
+        "/runs/recent",
+        "/events/recent",
+        "/events/run_secure_e1",
+        "/retention/preview",
+    ):
+        resp = client.get(path)
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "ui_auth_required"
+
+    _login_ui(client)
+
+    assert client.get("/status").status_code == 200
+    assert client.get("/metrics").status_code == 200
+    assert client.get("/config").status_code == 200
+    assert client.get("/runs/recent").status_code == 200
+    assert client.get("/events/recent").status_code == 200
+    assert client.get("/events/run_secure_e1").status_code == 200
+    assert client.get("/retention/preview").status_code == 200
+
+
+def test_event_evidence_routes_require_ui_auth_and_serve_event_images(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_evidence",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            ui_auth_cfg=UiAuthConfig(username="admin", password="secret"),
+        )
+    )
+
+    unauth_thumb = client.get("/events/run_evidence_e1/thumbnail")
+    assert unauth_thumb.status_code == 401
+    assert unauth_thumb.json()["detail"] == "ui_auth_required"
+
+    unauth_scene = client.get("/events/run_evidence_e1/scene")
+    assert unauth_scene.status_code == 401
+    assert unauth_scene.json()["detail"] == "ui_auth_required"
+
+    _login_ui(client)
+
+    thumb = client.get("/events/run_evidence_e1/thumbnail")
+    assert thumb.status_code == 200
+    assert thumb.content == b"jpg"
+    assert thumb.headers["content-type"] == "image/jpeg"
+
+    scene = client.get("/events/run_evidence_e1/scene")
+    assert scene.status_code == 200
+    assert scene.content == b"jpg"
+    assert scene.headers["content-type"] == "image/jpeg"
+
+
+def test_event_evidence_routes_reject_non_evidence_files(tmp_path) -> None:
+    run_dir = _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_bad_evidence",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+        thumb_relpath="report.csv",
+        scene_relpath=None,
+    )
+    (run_dir / "report.csv").write_text("not an image", encoding="utf-8")
+
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            ui_auth_cfg=UiAuthConfig(username="admin", password="secret"),
+        )
+    )
+    _login_ui(client)
+
+    blocked = client.get("/events/run_bad_evidence_e1/thumbnail")
+    assert blocked.status_code == 404
+    assert blocked.json()["detail"] == "evidence_not_found"
 
 
 def test_recent_runs_and_events_are_sorted_newest_first(tmp_path) -> None:

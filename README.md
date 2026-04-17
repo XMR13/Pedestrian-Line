@@ -237,36 +237,14 @@ stall counts, reader dropped frames, reader read failures, and effective FPS) fo
 One-command mode (single process: detect + spool + upload)
 -----------------------------------------------------------
 
-Kalau kamu tidak mau menjalankan 2 proses terpisah, gunakan integrated uploader langsung dari `main.py`:
+Single-process upload tetap tersedia di `main.py`, tetapi README ini sengaja
+memfokuskan dokumentasi pada alur edge-service yang netral:
 
-```bash
-python3 -m pedestrian_line_counter.main \
-  --backend onnx \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --input media/input.mp4 \
-  --spool-dir data/traffic_runs \
-  --site-id subang \
-  --camera-id cam_01 \
-  --video-start 2026-02-24T08:00:00+07:00 \
-  --portal-upload \
-  --portal-api-base-url http://127.0.0.1:18080 \
-  --portal-api-key local-dev
-```
+- pipeline menulis event ke `--spool-dir`
+- uploader/service terpisah mengirim batch event ke backend IT
 
-Untuk live RTSP, cukup pakai flag yang sama dan `main.py` akan melakukan sync berkala selama proses berjalan:
-
-```bash
-python3 -m pedestrian_line_counter.main \
-  --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
-  --spool-dir data/traffic_runs \
-  --site-id subang \
-  --camera-id cam_01 \
-  --portal-upload \
-  --portal-api-base-url http://127.0.0.1:18080 \
-  --portal-api-key local-dev \
-  --portal-upload-interval-s 10
-```
+Pendekatan ini lebih cocok dengan arsitektur repo saat ini karena inference,
+spool, API lokal, dan delivery worker sudah dipisahkan dengan jelas.
 
 Untuk deployment production dengan satu proses (auto-restart + tuning performa + template systemd), pakai runbook:
 

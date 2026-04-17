@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -42,7 +42,6 @@ from ._api_common import (
     ReviewUpdateRequest,
     SingleRunSyncRequest,
     SyncRequest,
-    UI_ASSET_DIR,
     UI_BASE_PATH,
     UI_STATIC_DIR,
     UI_TEMPLATE_DIR,
@@ -75,8 +74,6 @@ from ._api_helpers import (
     _normalize_review_page_size,
     _normalize_ui_date_range,
     _parse_iso_datetime,
-    _path_to_public_url,
-    _relpath_to_public_url,
     _review_label,
     _review_pill_class,
     _run_occurrence_utc,
@@ -113,6 +110,12 @@ class EdgeApiRuntime:
     ui_auth_cfg: UiAuthConfig = field(default_factory=UiAuthConfig)
     review_store: ReviewStore = field(default_factory=lambda: ReviewStore(ROOT_DIR / DEFAULT_REVIEW_DB_FILENAME))
     service_started_at_utc: str = field(default_factory=lambda: _utcnow_iso())
+
+    _ALLOWED_EVIDENCE_DIRS = {
+        "thumbnail": "thumbs",
+        "scene": "scene",
+    }
+    _ALLOWED_EVIDENCE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
     def health_payload(self) -> Dict[str, Any]:
         return {
@@ -879,10 +882,62 @@ class EdgeApiRuntime:
                 row["reviewed_class_name"],
                 row["review_status"],
             )
-            row["thumb_url"] = _path_to_public_url(self.spool_dir, row.get("thumb_path"))
-            row["scene_url"] = _path_to_public_url(self.spool_dir, row.get("scene_path"))
+            row["thumb_url"] = (
+                self._build_event_evidence_url(event_uid, kind="thumbnail")
+                if _text(row.get("thumb_relpath")) is not None
+                else None
+            )
+            row["scene_url"] = (
+                self._build_event_evidence_url(event_uid, kind="scene")
+                if _text(row.get("scene_relpath")) is not None
+                else None
+            )
             merged.append(row)
         return merged
+
+    def _build_event_evidence_url(self, event_uid: Optional[str], *, kind: str) -> Optional[str]:
+        uid = _text(event_uid)
+        if uid is None:
+            return None
+        if kind not in self._ALLOWED_EVIDENCE_DIRS:
+            return None
+        return f"/events/{uid}/{kind}"
+
+    def resolve_event_evidence_path(self, event_uid: str, *, kind: str) -> Optional[Path]:
+        event = self.get_event(event_uid)
+        if event is None:
+            return None
+
+        allowed_dir = self._ALLOWED_EVIDENCE_DIRS.get(kind)
+        if allowed_dir is None:
+            return None
+
+        relpath_key = "thumb_relpath" if kind == "thumbnail" else "scene_relpath"
+        relpath_text = _text(event.get(relpath_key))
+        run_dir_text = _text(event.get("run_dir"))
+        if relpath_text is None or run_dir_text is None:
+            return None
+
+        relpath_text = relpath_text.replace("\\", "/")
+        relpath = Path(relpath_text)
+        if relpath.is_absolute():
+            return None
+        if relpath.suffix.lower() not in self._ALLOWED_EVIDENCE_SUFFIXES:
+            return None
+        if any(part in {"", ".", ".."} for part in relpath.parts):
+            return None
+        if not relpath.parts or relpath.parts[0] != allowed_dir:
+            return None
+
+        run_dir = Path(run_dir_text)
+        try:
+            resolved = (run_dir / relpath).resolve()
+            resolved.relative_to((run_dir / allowed_dir).resolve())
+        except Exception:
+            return None
+        if not resolved.exists() or not resolved.is_file():
+            return None
+        return resolved
 
     def _build_event_timeline(self, event: Mapping[str, Any]) -> List[Dict[str, str]]:
         timeline = [
@@ -1178,8 +1233,6 @@ def create_app(
 
     if UI_STATIC_DIR.exists():
         app.mount("/ui-static", StaticFiles(directory=str(UI_STATIC_DIR)), name="ui-static")
-    app.mount("/evidence", StaticFiles(directory=str(spool_dir), check_dir=False), name="evidence")
-
     router = APIRouter()
 
     @router.get("/favicon.ico", include_in_schema=False)
@@ -1298,21 +1351,31 @@ def create_app(
         return runtime.health_payload()
 
     @router.get("/status", tags=["health"])
-    def status_view(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
+    def status_view(
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
+    ) -> Dict[str, Any]:
         return runtime.status_payload()
 
     @router.get("/metrics", tags=["health"])
-    def metrics_view(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
+    def metrics_view(
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
+    ) -> Dict[str, Any]:
         return runtime.metrics_payload()
 
     @router.get("/config", tags=["admin"])
-    def config_view(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
+    def config_view(
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
+    ) -> Dict[str, Any]:
         return runtime.config_payload()
 
     @router.get("/runs/recent", tags=["runs"])
     def recent_runs(
         limit: int = Query(default=20, ge=1, le=MAX_RUNS_LIMIT),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
     ) -> Dict[str, Any]:
         items = runtime.list_recent_runs(limit=limit)
         return {
@@ -1329,6 +1392,7 @@ def create_app(
         date_from: Optional[str] = Query(default=None),
         date_to: Optional[str] = Query(default=None),
         runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
     ) -> Dict[str, Any]:
         items = runtime.list_recent_events(
             limit=limit,
@@ -1351,11 +1415,34 @@ def create_app(
     def event_detail_payload(
         event_uid: str,
         runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
     ) -> Dict[str, Any]:
         item = runtime.get_event(event_uid)
         if item is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"event_uid not found: {event_uid}")
         return item
+
+    @router.get("/events/{event_uid}/thumbnail", include_in_schema=False)
+    def event_thumbnail(
+        event_uid: str,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
+    ) -> FileResponse:
+        file_path = runtime.resolve_event_evidence_path(event_uid, kind="thumbnail")
+        if file_path is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="evidence_not_found")
+        return FileResponse(path=file_path)
+
+    @router.get("/events/{event_uid}/scene", include_in_schema=False)
+    def event_scene(
+        event_uid: str,
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
+    ) -> FileResponse:
+        file_path = runtime.resolve_event_evidence_path(event_uid, kind="scene")
+        if file_path is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="evidence_not_found")
+        return FileResponse(path=file_path)
 
     @router.get("/review/queue", tags=["review"])
     def review_queue(
@@ -1583,7 +1670,10 @@ def create_app(
         return templates.TemplateResponse(request, "event_detail.html", context)
 
     @router.get("/retention/preview", tags=["admin"])
-    def retention_preview(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> Dict[str, Any]:
+    def retention_preview(
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_json),
+    ) -> Dict[str, Any]:
         return runtime.retention_preview_payload()
 
     @router.post("/retention/run", tags=["admin"])
