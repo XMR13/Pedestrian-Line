@@ -1511,6 +1511,64 @@ def test_ui_login_gates_pages_and_sets_cookie(tmp_path) -> None:
     assert review_resp.json()["review"]["decision"] == "qualified_no"
 
 
+def test_ui_login_rate_limits_repeated_failed_json_attempts(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            ui_auth_cfg=UiAuthConfig(
+                username="admin",
+                password="secret",
+                login_rate_limit_max_failures=3,
+                login_rate_limit_window_s=300,
+                login_rate_limit_lockout_s=60,
+            ),
+        )
+    )
+
+    for _ in range(2):
+        failed_login = client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
+        assert failed_login.status_code == 401
+        assert failed_login.json()["detail"] == "invalid_credentials"
+
+    blocked_login = client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
+    assert blocked_login.status_code == 429
+    assert blocked_login.json()["detail"] == "too_many_attempts"
+    assert blocked_login.headers["retry-after"] == "60"
+
+    blocked_good_login = client.post("/api/auth/login", json={"username": "admin", "password": "secret"})
+    assert blocked_good_login.status_code == 429
+    assert blocked_good_login.json()["detail"] == "too_many_attempts"
+
+
+def test_ui_login_rate_limit_resets_after_success(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            ui_auth_cfg=UiAuthConfig(
+                username="admin",
+                password="secret",
+                login_rate_limit_max_failures=3,
+                login_rate_limit_window_s=300,
+                login_rate_limit_lockout_s=60,
+            ),
+        )
+    )
+
+    for _ in range(2):
+        failed_login = client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
+        assert failed_login.status_code == 401
+
+    good_login = client.post("/api/auth/login", json={"username": "admin", "password": "secret"})
+    assert good_login.status_code == 200
+
+    for _ in range(2):
+        failed_login = client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
+        assert failed_login.status_code == 401
+
+    still_allowed = client.post("/api/auth/login", json={"username": "admin", "password": "secret"})
+    assert still_allowed.status_code == 200
+
+
 def test_ui_login_form_redirects_with_error_and_success(tmp_path) -> None:
     _write_run(
         tmp_path,
@@ -1554,3 +1612,38 @@ def test_ui_login_form_redirects_with_error_and_success(tmp_path) -> None:
     review_page = client.get("/ui/review?status=pending")
     assert review_page.status_code == 200
     assert "Antrian Review" in review_page.text
+
+
+def test_ui_login_form_redirects_when_rate_limited(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            ui_auth_cfg=UiAuthConfig(
+                username="admin",
+                password="secret",
+                login_rate_limit_max_failures=2,
+                login_rate_limit_window_s=300,
+                login_rate_limit_lockout_s=60,
+            ),
+        )
+    )
+
+    first_failed_login = client.post(
+        "/ui/login",
+        data={"username": "admin", "password": "wrong", "next": "/ui/dashboard"},
+        follow_redirects=False,
+    )
+    assert first_failed_login.status_code == 303
+    assert first_failed_login.headers["location"] == "/ui/login?next=%2Fui%2Fdashboard&error=invalid_credentials&username=admin"
+
+    blocked_login = client.post(
+        "/ui/login",
+        data={"username": "admin", "password": "wrong", "next": "/ui/dashboard"},
+        follow_redirects=False,
+    )
+    assert blocked_login.status_code == 303
+    assert blocked_login.headers["location"] == "/ui/login?next=%2Fui%2Fdashboard&error=too_many_attempts&username=admin"
+
+    blocked_page = client.get(blocked_login.headers["location"])
+    assert blocked_page.status_code == 200
+    assert "Too many login attempts. Wait a bit before trying again." in blocked_page.text

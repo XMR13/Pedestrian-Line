@@ -23,7 +23,7 @@ from .event_uploader import (
 )
 from .review_store import DECISION_NO, DECISION_YES, ReviewStore
 from .spool_retention import apply_retention_policy
-from .ui_auth import UiAuthConfig, issue_session_token, validate_session_token
+from .ui_auth import LoginRateLimiter, UiAuthConfig, issue_session_token, validate_session_token
 
 ## Import all the necessary helpers and common definitions for the API implementation
 from ._api_common import (
@@ -110,6 +110,7 @@ class EdgeApiRuntime:
     ui_auth_cfg: UiAuthConfig = field(default_factory=UiAuthConfig)
     review_store: ReviewStore = field(default_factory=lambda: ReviewStore(ROOT_DIR / DEFAULT_REVIEW_DB_FILENAME))
     service_started_at_utc: str = field(default_factory=lambda: _utcnow_iso())
+    login_rate_limiter: LoginRateLimiter = field(default_factory=LoginRateLimiter)
 
     _ALLOWED_EVIDENCE_DIRS = {
         "thumbnail": "thumbs",
@@ -1220,6 +1221,7 @@ def create_app(
         mutation_auth_cfg=mutation_auth_cfg if mutation_auth_cfg is not None else MutationAuthConfig(),
         ui_auth_cfg=ui_auth_cfg if ui_auth_cfg is not None else UiAuthConfig(),
         review_store=ReviewStore(Path(review_db_path) if review_db_path is not None else Path(spool_dir) / DEFAULT_REVIEW_DB_FILENAME),
+        login_rate_limiter=LoginRateLimiter(cfg=ui_auth_cfg if ui_auth_cfg is not None else UiAuthConfig()),
     )
     app.state.templates = Jinja2Templates(directory=str(UI_TEMPLATE_DIR))
 
@@ -1252,14 +1254,31 @@ def create_app(
     @router.post("/api/auth/login", tags=["auth"])
     def login(
         payload: LoginRequest,
+        request: Request,
         runtime: EdgeApiRuntime = Depends(_get_runtime),
     ) -> JSONResponse:
         cfg = runtime.ui_auth_cfg
         if not cfg.enabled():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ui_auth_disabled")
+        client_key = _ui_login_client_key(request)
+        allowed, retry_after_s = runtime.login_rate_limiter.check_allowed(client_key)
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="too_many_attempts",
+                headers={"Retry-After": str(retry_after_s)},
+            )
         if payload.username != cfg.username or payload.password != cfg.password:
+            locked, retry_after_s = runtime.login_rate_limiter.register_failure(client_key)
+            if locked:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="too_many_attempts",
+                    headers={"Retry-After": str(retry_after_s)},
+                )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_credentials")
 
+        runtime.login_rate_limiter.register_success(client_key)
         token = issue_session_token(cfg=cfg, username=cfg.username)
         response = JSONResponse({"ok": True})
         response.set_cookie(
@@ -1292,13 +1311,27 @@ def create_app(
         username = _text((form_fields.get("username") or [""])[0]) or ""
         password = _text((form_fields.get("password") or [""])[0]) or ""
         next_path = _safe_next_path(_text((form_fields.get("next") or [""])[0]))
+        client_key = _ui_login_client_key(request)
+        allowed, _retry_after_s = runtime.login_rate_limiter.check_allowed(client_key)
+        if not allowed:
+            return RedirectResponse(
+                url=_ui_login_url(next_path=next_path, error="too_many_attempts", username=username),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
 
         if username != cfg.username or password != cfg.password:
+            locked, _retry_after_s = runtime.login_rate_limiter.register_failure(client_key)
+            if locked:
+                return RedirectResponse(
+                    url=_ui_login_url(next_path=next_path, error="too_many_attempts", username=username),
+                    status_code=status.HTTP_303_SEE_OTHER,
+                )
             return RedirectResponse(
                 url=_ui_login_url(next_path=next_path, error="invalid_credentials", username=username),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
 
+        runtime.login_rate_limiter.register_success(client_key)
         token = issue_session_token(cfg=cfg, username=cfg.username)
         response = RedirectResponse(
             url=_login_success_target(next_path),
@@ -1339,6 +1372,9 @@ def create_app(
         status_kind = ""
         if _text(error) == "invalid_credentials":
             status_message = "Login failed. Check your credentials and try again."
+            status_kind = "error"
+        elif _text(error) == "too_many_attempts":
+            status_message = "Too many login attempts. Wait a bit before trying again."
             status_kind = "error"
         context["next_path"] = _login_success_target(next_path)
         context["login_status_message"] = status_message
@@ -1773,6 +1809,15 @@ def _safe_next_path(value: Optional[str]) -> Optional[str]:
     if text.startswith("//"):
         return None
     return text
+
+
+def _ui_login_client_key(request: Request) -> str:
+    client = getattr(request, "client", None)
+    host = getattr(client, "host", None)
+    key = _text(host)
+    if key:
+        return key
+    return "unknown"
 
 
 def _login_success_target(next_path: Optional[str]) -> str:
