@@ -19,6 +19,8 @@ from ._api_common import (
     UiDateRange,
 )
 from .review_store import DECISION_NO, DECISION_YES
+from .source_safety import sanitize_source_value
+from .time_utils import utc_iso_to_local_text
 
 
 def _load_json_dict(path: Path) -> Optional[Dict[str, Any]]:
@@ -87,7 +89,17 @@ def _build_run_summary(
         ),
         "ended_at_utc": _text(run_meta.get("ended_at_utc")),
         "source_type": _mapping_get_text(run_meta.get("source"), "type"),
-        "source_value": _mapping_get_text(run_meta.get("source"), "value"),
+        "source_value": sanitize_source_value(
+            _coalesce_text(
+                _mapping_get_text(run_meta.get("source"), "value"),
+                run_meta.get("source_value"),
+            ),
+            source_type=_coalesce_text(
+                _mapping_get_text(run_meta.get("source"), "type"),
+                run_meta.get("source_type"),
+            ),
+            camera_id=run_meta.get("camera_id"),
+        ),
         "line_mode": _text(run_meta.get("line_mode")),
         "delivery_state": delivery_state,
         "delivery_state_label": _delivery_state_label(delivery_state),
@@ -129,7 +141,10 @@ def _build_event_summary(
         "site_id": _coalesce_text(event.get("site_id"), run_meta.get("site_id")),
         "camera_id": _coalesce_text(event.get("camera_id"), run_meta.get("camera_id")),
         "occurred_at_utc": _text(event.get("occurred_at_utc")),
-        "occurred_at_local": _text(event.get("occurred_at_local")),
+        "occurred_at_local": _coalesce_text(
+            event.get("occurred_at_local"),
+            utc_iso_to_local_text(event.get("occurred_at_utc")),
+        ),
         "frame_index": _mapping_get_int(event, "frame_index"),
         "video_time_s": _mapping_get_float(event, "video_time_s"),
         "direction": _text(event.get("direction")),
@@ -361,6 +376,7 @@ def _build_ui_context(
         "format_time": _format_time,
         "format_datetime": _format_datetime,
         "display_event_timestamp": _display_event_timestamp,
+        "display_run_timestamp": _display_run_timestamp,
         "short_event_uid": _short_event_uid,
         "compact_path": _compact_path,
         "review_pill_class": _review_pill_class,
@@ -593,6 +609,13 @@ def _display_event_timestamp(row: Any) -> Optional[str]:
     if not isinstance(row, Mapping):
         return _text(row)
     return _coalesce_text(row.get("occurred_at_local"), row.get("occurred_at_utc"))
+
+
+def _display_run_timestamp(row: Any) -> Optional[str]:
+    if not isinstance(row, Mapping):
+        return _text(row)
+    value = _coalesce_text(row.get("updated_at_utc"), row.get("ended_at_utc"), row.get("started_at_utc"))
+    return _coalesce_text(utc_iso_to_local_text(value), value)
 
 
 def _format_date(value: Any) -> str:

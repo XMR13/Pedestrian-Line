@@ -203,6 +203,9 @@ def test_live_single_loop_integrated_upload_smoke(monkeypatch, tmp_path, capsys)
     assert run_meta.get("ended_at_utc")
     assert isinstance(run_meta.get("health_summary"), dict)
     assert run_meta["health_summary"].get("lifecycle_status") == "stopped"
+    assert run_meta["source_type"] == "rtsp"
+    assert run_meta["source_value"] == "camera:cam_01"
+    assert run_meta["source"]["value"] == "camera:cam_01"
 
     status_json = run_jsons[0].parent / "status.json"
     assert status_json.exists()

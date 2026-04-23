@@ -25,8 +25,10 @@ from .line_counter import LineCounter, TwoLineGateCounter
 from .event_uploader import RetryConfig, UploaderConfig, iter_spool_runs, process_pending_runs, resolve_portal_api_key
 from .output_writer import OutputWriterConfig, create_video_writer, is_ffmpeg_available
 from .report_writer import ReportWriter, ReportWriterConfig
+from .source_safety import safe_source_label
 from .spool_retention import apply_retention_policy, format_retention_summary
 from .stream_reader import StreamReader
+from .time_utils import local_timezone
 from .traffic_spool import TrafficSpoolConfig, TrafficSpoolWriter
 from .tracker import Tracker
 from .videoio_utils import open_video_capture
@@ -1515,7 +1517,6 @@ def main() -> None:
     )
     resolved_video_start: Optional[str] = None
     video_start_epoch_utc: Optional[float] = None
-    video_start_local_tz: Optional[tzinfo] = None
     if (not is_live) and spool_dir is not None:
         video_start_val = cfg.io.video_start
         if not video_start_val:
@@ -1531,11 +1532,6 @@ def main() -> None:
         try:
             resolved_video_start = str(video_start_val)
             video_start_epoch_utc = _parse_rfc3339_to_epoch_utc(resolved_video_start)
-            video_start_raw = resolved_video_start.strip()
-            if video_start_raw.endswith("Z"):
-                video_start_raw = video_start_raw[:-1] + "+00:00"
-            video_start_dt = datetime.fromisoformat(video_start_raw)
-            video_start_local_tz = video_start_dt.tzinfo
         except ValueError as exc:
             raise SystemExit(f"Invalid --video-start: {exc}")
 
@@ -1584,7 +1580,12 @@ def main() -> None:
     if args.resize_to and args.select_line:
         raise SystemExit("--select-line is not supported together with --resize-to. Use line_picker.py to save the line JSON.")
 
-    source_label = rtsp_url if is_live else str(input_path)
+    source_label = (
+        safe_source_label(rtsp_url, source_type="rtsp", camera_id=resolved_camera_id)
+        if is_live
+        else str(input_path)
+    )
+    
     interrupted = False
     try:
         cap, frame0, fps, reported_w, reported_h, backend_name = _open_source_with_first_frame(
@@ -2507,7 +2508,7 @@ def main() -> None:
                             frame_bgr=frame,
                             occurred_at_ts=float(occurred_at_ts),
                             occurred_at_utc_source=str(occurred_at_source),
-                            occurred_at_local_tz=video_start_local_tz,
+                            occurred_at_local_tz=local_timezone(),
                             capture_records=event_records,
                         )
                         spool_events_written_total += int(written_events)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone, tzinfo
+from datetime import tzinfo
 import json
 from pathlib import Path
 import time
@@ -12,15 +12,9 @@ import cv2
 import numpy as np
 
 from .event_contract import EVENT_CONTRACT_VERSION
+from .source_safety import sanitize_source_record, sanitize_source_value
 from .structures import CrossingEvent
-
-
-def _iso_utc(ts: float) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _iso_local(ts: float, tz: tzinfo) -> str:
-    return datetime.fromtimestamp(ts, tz=tz).isoformat()
+from .time_utils import day_string_local, iso_local, iso_utc, local_timezone
 
 
 def _safe_mkdir(p: Path) -> None:
@@ -99,12 +93,13 @@ class TrafficSpoolWriter:
     ) -> None:
         self.cfg = cfg
         self.run_uid = run_uid or uuid.uuid4().hex
-        self.started_at_utc = _iso_utc(time.time())
+        self._started_at_ts = time.time()
+        self.started_at_utc = iso_utc(self._started_at_ts)
         self._class_names = class_names or {}
         self._fps = float(fps) if fps else 0.0
         self._lines = lines or []
 
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day = day_string_local(self._started_at_ts, local_timezone())
         self.run_dir = cfg.root_dir / day / self.run_uid
         self.thumbs_dir = self.run_dir / "thumbs"
         self.scene_dir = self.run_dir / "scene"
@@ -114,6 +109,7 @@ class TrafficSpoolWriter:
         self._events_path = self.run_dir / "events.jsonl"
         self._events_f = self._events_path.open("a", encoding="utf-8")
 
+        public_source = sanitize_source_record(source, camera_id=cfg.camera_id)
         run_meta = {
             "contract_version": EVENT_CONTRACT_VERSION,
             "run_uid": self.run_uid,
@@ -121,9 +117,13 @@ class TrafficSpoolWriter:
             "camera_id": cfg.camera_id,
             "started_at_utc": self.started_at_utc,
             "ended_at_utc": None,
-            "source": source,
-            "source_type": source.get("type"),
-            "source_value": source.get("value"),
+            "source": public_source,
+            "source_type": public_source.get("type"),
+            "source_value": sanitize_source_value(
+                source.get("value"),
+                source_type=source.get("type"),
+                camera_id=cfg.camera_id,
+            ),
             "model_version": model_version,
             "cfg_version": cfg_version,
             "line_mode": line_mode,
@@ -208,11 +208,9 @@ class TrafficSpoolWriter:
                 "run_uid": self.run_uid,
                 "site_id": self.cfg.site_id,
                 "camera_id": self.cfg.camera_id,
-                "occurred_at_utc": _iso_utc(float(occurred_at_ts)),
+                "occurred_at_utc": iso_utc(float(occurred_at_ts)),
                 "occurred_at_local": (
-                    _iso_local(float(occurred_at_ts), occurred_at_local_tz)
-                    if occurred_at_local_tz is not None
-                    else None
+                    iso_local(float(occurred_at_ts), occurred_at_local_tz or local_timezone())
                 ),
                 "occurred_at_utc_source": str(occurred_at_utc_source),
                 "frame_index": int(ev.frame_index),
@@ -238,7 +236,7 @@ class TrafficSpoolWriter:
         return written
 
     def _write_run_meta(self) -> None:
-        self._run_meta["updated_at_utc"] = _iso_utc(time.time())
+        self._run_meta["updated_at_utc"] = iso_utc(time.time())
         _write_json_atomic(self._run_meta_path, self._run_meta, indent=2)
 
     def write_headless_status(self, status: Mapping[str, Any]) -> None:
@@ -250,7 +248,7 @@ class TrafficSpoolWriter:
             "site_id": self.cfg.site_id,
             "camera_id": self.cfg.camera_id,
             "started_at_utc": self.started_at_utc,
-            "updated_at_utc": _iso_utc(time.time()),
+            "updated_at_utc": iso_utc(time.time()),
         }
         payload.update(dict(status))
         _write_json_atomic(self._status_path, payload, indent=2)

@@ -34,11 +34,26 @@ def test_build_run_upsert_payload_maps_flat_and_nested_fields() -> None:
 
     assert payload["run_uid"] == "run_001"
     assert payload["source_type"] == "rtsp"
-    assert payload["source_value"] == "rtsp://camera-1"
+    assert payload["source_value"] == "camera:cam_01"
     assert payload["frame_width"] == 1920
     assert payload["frame_height"] == 1080
     assert payload["ended_at_utc"] == "2026-02-20T00:10:00Z"
     assert payload["health_summary_json"]["frames_total"] == 100
+
+
+def test_build_run_upsert_payload_redacts_rtsp_credentials() -> None:
+    run_meta = {
+        "run_uid": "run_001",
+        "site_id": "site_a",
+        "camera_id": "cam_01",
+        "source_type": "rtsp",
+        "source_value": "rtsp://admin:Secret123@192.168.1.50:554/stream1",
+    }
+
+    payload = build_run_upsert_payload(run_meta)
+
+    assert payload["source_type"] == "rtsp"
+    assert payload["source_value"] == "camera:cam_01"
 
 
 def test_build_event_upsert_payload_supports_bbox_aliases() -> None:

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional
 
+from .source_safety import sanitize_source_value
+
 EVENT_CONTRACT_VERSION = "v1"
 
 # BACKWARDS COMPTAIBLE  naming.
@@ -64,7 +66,11 @@ def build_run_payload(run_meta: Mapping[str, Any]) -> Dict[str, Any]:
 
     source = run_meta.get("source") if isinstance(run_meta.get("source"), Mapping) else {}
     source_type = _coalesce_text(run_meta.get("source_type"), source.get("type"))
-    source_value = _coalesce_text(run_meta.get("source_value"), source.get("value"))
+    source_value = sanitize_source_value(
+        _coalesce_text(run_meta.get("source_value"), source.get("value")),
+        source_type=source_type,
+        camera_id=camera_id,
+    )
 
     frame_size = run_meta.get("frame_size") if isinstance(run_meta.get("frame_size"), Mapping) else {}
     frame_width = _coalesce_int(run_meta.get("frame_width"), frame_size.get("width"))

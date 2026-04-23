@@ -267,7 +267,7 @@
             <tr>
               <td>{{ run.run_uid }}</td>
               <td>{{ run.camera_id or "Unknown" }}</td>
-              <td>{{ format_datetime(run.updated_at_utc) }}</td>
+              <td>{{ format_datetime(display_run_timestamp(run)) }}</td>
               <td>{{ run.lifecycle_status or "Unknown" }}</td>
               <td>
                 <div class="delivery-status-cell">

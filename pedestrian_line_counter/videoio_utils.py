@@ -71,10 +71,10 @@ def build_jetson_file_gstreamer_pipeline(
         f"appsink sync=false max-buffers={max_buf} drop={sink_drop}"
     )
 
-def _path_to_fule_uri(video_path: Union[str, Path]) -> str:
-    raw_path = str(video_path).strip() # strip the whitespaces for convinient sake
+def _path_to_file_uri(video_path: Union[str, Path]) -> str:
+    raw_path = str(video_path).strip()
     if raw_path.startswith("/") and not raw_path.startswith("//"):
-        return f"file://{quote(raw_path, safe="/")}"
+        return f"file://{quote(raw_path, safe='/')}"
     return Path(video_path).expanduser().resolve().as_uri()
 
 

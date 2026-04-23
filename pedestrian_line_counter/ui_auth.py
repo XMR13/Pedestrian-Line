@@ -42,26 +42,24 @@ class _LoginAttempt:
 
 class LoginRateLimiter:
     def __init__(self, *, cfg: Optional[UiAuthConfig] = None) -> None:
-        self._cfg = cfg is cfg is not None else UiAuthConfig()
+        self._cfg = cfg if cfg is not None else UiAuthConfig()
         self._attempts: Dict[str, _LoginAttempt] = {}
         self._lock = Lock()
 
     def check_allowed(self, key: str) -> Tuple[bool, int]:
         if not self._cfg.login_rate_limit_enabled():
             return True, 0
-
-        #noe check fi the time is still within bounds 
         now = time.time()
-        with self._lock():
+        with self._lock:
             self._prune_locked(now)
             attempt = self._attempts.get(key)
             if attempt is None:
                 return True, 0
             if attempt.locked_until > now:
-                return False, max(1, int(math.ceil(attempt.locked_until - now )))
+                return False, max(1, int(math.ceil(attempt.locked_until - now)))
             if attempt.first_failed_at and (now - attempt.first_failed_at) > int(self._cfg.login_rate_limit_window_s):
-                self._attempts.pop(key None)
-                return True
+                self._attempts.pop(key, None)
+            return True, 0
     
     def register_failure(self, key: str) -> Tuple[bool, int]:
         if not self._cfg.login_rate_limit_enabled():
@@ -70,24 +68,23 @@ class LoginRateLimiter:
         window_s = int(self._cfg.login_rate_limit_window_s)
         lockout_s = int(self._cfg.login_rate_limit_lockout_s)
         max_failures = int(self._cfg.login_rate_limit_max_failures)
-        with self.lock:
+        with self._lock:
             self._prune_locked(now)
             attempt = self._attempts.get(key)
             if attempt is None or (attempt.first_failed_at and (now - attempt.first_failed_at) > window_s):
-                attempt = _LoginAttempt(failed_attempt=1, first_failed_at = now, last_seen_at =now)
+                attempt = _LoginAttempt(failed_attempts=1, first_failed_at=now, last_seen_at=now)
                 self._attempts[key] = attempt
                 return False, 0
-            attempt.failed_attempts +=1
+            attempt.failed_attempts += 1
             attempt.last_seen_at = now
             if attempt.failed_attempts >= max_failures:
                 attempt.locked_until = now + lockout_s
-                return True, lockout_s
-            
+                return True, lockout_s          
             return False, 0
         
     def register_success(self, key: str) -> None:
         if not self._cfg.login_rate_limit_enabled():
-            return 
+            return
         with self._lock:
             self._attempts.pop(key, None)
 

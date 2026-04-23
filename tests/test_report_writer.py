@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -164,3 +164,33 @@ def test_report_csv_and_spool_events_stay_in_sync(tmp_path) -> None:
     scene_rel = csv_rows[0]["scene_relpath"]
     assert scene_rel.startswith("scene/")
     assert (spool.run_dir / scene_rel).exists()
+
+
+def test_rtsp_spool_metadata_redacts_camera_credentials(tmp_path, monkeypatch) -> None:
+    started_at_ts = datetime(2026, 2, 17, 17, 30, 0, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr("pedestrian_line_counter.traffic_spool.time.time", lambda: started_at_ts)
+
+    spool = TrafficSpoolWriter(
+        TrafficSpoolConfig(
+            root_dir=tmp_path / "runs",
+            site_id="site_a",
+            camera_id="cam_01",
+        ),
+        source={"type": "rtsp", "value": "rtsp://admin:Secret123@192.168.1.50:554/stream1"},
+        model_version="model.onnx",
+        cfg_version="test",
+        line_mode="line",
+        line_id="line_1",
+        fps=30.0,
+        frame_size=(100, 100),
+        run_uid="run_fixed",
+    )
+    spool.close()
+
+    run_meta = json.loads((spool.run_dir / "run.json").read_text(encoding="utf-8"))
+
+    assert run_meta["source_type"] == "rtsp"
+    assert run_meta["source_value"] == "camera:cam_01"
+    assert run_meta["source"]["type"] == "rtsp"
+    assert run_meta["source"]["value"] == "camera:cam_01"
+    assert spool.run_dir.parent.name == "2026-02-18"

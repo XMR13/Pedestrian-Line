@@ -164,6 +164,7 @@ def test_healthz_and_status_expose_spool_state(tmp_path) -> None:
     assert payload["sync_overview"]["status_cards"][2]["label"] == "Gagal"
     assert payload["sync_overview"]["status_cards"][2]["value"] == 1
     assert payload["latest_run"]["run_uid"] == "run_a"
+    assert payload["latest_run"]["updated_at_utc"] == "2026-03-11T10:05:00Z"
 
 
 def test_operational_read_endpoints_require_ui_auth_when_enabled(tmp_path) -> None:
@@ -215,6 +216,36 @@ def test_operational_read_endpoints_require_ui_auth_when_enabled(tmp_path) -> No
     assert client.get("/events/recent").status_code == 200
     assert client.get("/events/run_secure_e1").status_code == 200
     assert client.get("/retention/preview").status_code == 200
+
+
+def test_runs_recent_redacts_rtsp_source_values(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_secure",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+        completed_at_utc="2026-03-11T10:06:00Z",
+    )
+    run_dir = tmp_path / "2026-03-11" / "run_secure"
+    run_meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    run_meta["source"] = {"type": "rtsp", "value": "rtsp://admin:Secret123@192.168.1.50:554/stream1"}
+    run_meta["source_type"] = "rtsp"
+    run_meta["source_value"] = "rtsp://admin:Secret123@192.168.1.50:554/stream1"
+    (run_dir / "run.json").write_text(json.dumps(run_meta), encoding="utf-8")
+
+    client = TestClient(
+        create_app(
+            spool_dir=tmp_path,
+            ui_auth_cfg=UiAuthConfig(username="admin", password="secret"),
+        )
+    )
+    _login_ui(client)
+
+    payload = client.get("/runs/recent").json()
+
+    assert payload["items"][0]["source_type"] == "rtsp"
+    assert payload["items"][0]["source_value"] == "camera:cam_01"
 
 
 def test_event_evidence_routes_require_ui_auth_and_serve_event_images(tmp_path) -> None:
