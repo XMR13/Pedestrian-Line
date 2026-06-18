@@ -1,179 +1,71 @@
-Vehicle Subclass Line Counter
-================================
+# Vehicle Subclass Line Counter
 
-## Deksripsi Project
-
-Project ini memproses video di jalan dan akan menghitung berapa banyak **kendaraan tertentu** (mis. *truck, trailer, pickup*, dll — daftar kelas akan ditentukan kemudian) yang melewati garis virtual.
-
-Selain menghitung banyak kendaraan yang melewati garis virtual tersebut, program ini juga menghitung berdasarkan arah kendaraan **(A->B) atau (B->A)**, serta menghitung berdasarkan **kelas kendaraan** (sesuai model yang digunakan).
-
-Project ini direncanakan untuk memenuhi kriteria sebagai berikut:
-
-- Fokus baru (overhaul):
-  - Bukan untuk tracking person/pedestrian.
-  - Hanya tracking + counting **kelas kendaraan target** (kelas kendaraan lain tidak dihitung).
-  - Model yang tersedia saat ini belum cukup untuk klasifikasi spesifik tersebut, jadi langkah terdekat adalah **annotasi dataset** untuk melatih model baru.
-
--  Mudah digunakan dan modular..
-- Bisa digunaan untuk aplikasi komersial (menggunakan aplikasi dan library dengan *license* permisif).
-
-Pipeline inti dari project ini adalah sebagai berikut::
-
-> video → detect objects → track objects → count line crossings →
-> write annotated output video + print counts → Output into analytics dashbord
->
-
-Ilustrasi cara program ini digunakan adalah sebagai berikut
-![gambar cara kerja](docs/readme_png/cara_kerja.png)
+SIstem edge AI untuk menghitung banyaknya vehicle yang melewati road area virtual
+Program ini akan mendeteksi vehicle, kemudian track, dan menghitung vehcile berdasarkan arah
+kemudian menggunakan FastAPI service untuk review operator dan backend.
 
 
-Architecture (High Level)
--------------------------
+This repo owns the AI-box side:
 
-Untuk arsitekturnya bisa dirujuk dari gambar berikut ini:
-![gambar arsitektur](docs/readme_png/arch_new_modified.png)
+- video/RTSP input
+- detection, tracking, line counting
+- event spool with thumbnails and `report.csv`
+- local FastAPI operator UI/API
+- delivery worker for IT-managed backend endpoints
 
+Large files are intentionally not committed. Put models in `Models/`, videos in
+`media/`, and runtime event data in `spool/` or another local spool directory.
 
-Dependencies & Setup
---------------------
+## How It Works
 
-Requirements:
+![Project workflow](docs/readme_png/cara_kerja.png)
 
-- Python 3.10+.
-- `uv` as the Python package manager.
+## Architecture
 
-Install dependencies:
+![High-level architecture](docs/readme_png/arch_new_modified.png)
+
+## Requirements
+
+Development:
+
+- Python 3.10+
+- `uv`
+
+Jetson deployment:
+- Jetson Orin / Jetpack Runtime
+- Menggunakkan wrapper script dan runbook untuk repo ini. Jetson sekarang 
+  sudah divalidasi di environment python 3.8
+
+Install for local development:
 
 ```bash
 uv sync
 ```
 
-Key runtime dependencies (from `pyproject.toml`):
+## Prepare Files
 
-- `opencv-python`
-- `numpy`
-- `onnxruntime` / `onnxruntime-gpu` (ONNX backend, default)
-- (optional) `torch` Jika ingin menggunakan backend model `pytorch.` (already supported)
+Local file harus memiliki bentuk seperti ini:
 
-
-Model & Data Layout
--------------------
-
-Repo ini tidak menyimpan model atau file biner yang besar, agra bisa menggunakan program ini, kamu harus mendownload model sendiri.
-
-- ONNX model file:
-  - Expected (placeholder): `Models/vehicle_subclasses.onnx`
-  - You can change the path via `--model` or by editing `ModelConfig.model_path` in `pedestrian_line_counter/config.py`.
-  - Penting: untuk backend berbasis model (`onnx`/`tensorrt`/`torch`) kamu **wajib** mengatur filter kelas target (`--class-ids`) supaya tidak menghitung kelas yang tidak relevan.
-- Input videos:
-  - Default: a sample file provided by yourself (see `IOConfig` in `config.py`).
-  - You can override via `--input`.
-- Output videos:
-  - Default: `output.mp4` in the project root (see `IOConfig`).
-  - You can override via `--output`.
-
-Dataset & Annotasi (Priority)
------------------------------
-
-Karena target kelas kendaraan (truck/trailer/pickup/dll) adalah **custom**, langkah pertama adalah menyiapkan dataset dan melakukan annotasi bounding box.
-
-- Panduan detail: lihat `docs/annotation_workflow.md`.
-- Output yang direkomendasikan untuk training: format YOLO (images + labels + `data.yaml` berisi `names:`). Proses training bisa menggunakan model mana saja (tapi pada project ini harus sesuai dengan inference yang telah dibuat)
-- Jika ingin otomatis mengambil kandidat gambar dari video (tanpa line counting), gunakan:
-
-```bash
-uv run python -m yolo_kitv2 label run \
-  --mode candidates \
-  --input media/input.mp4 \
-  --output-dir data/candidates/input_mp4 \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --max-per-track 3 \
-  --warmup-frames 5
+```text
+Models/
+  vehicle_subclasses.onnx      # ONNX model, or adjust --model
+  model_fp16.engine            # TensorRT engine on Jetson, optional
+  metadata_vehicle.yaml        # class_id -> class name map, optional
+media/
+  input.mp4                    # local test video
+config/cameras/
+  camera_subang.json           # camera/line config, if used
 ```
 
-Jika sudah punya model awal dan ingin **auto-label** video lalu koreksi di CVAT (COCO format),
-script ini akan menyimpan frame **hanya saat kendaraan muncul** (mirip extract_candidates) dan
-sekaligus menulis COCO labels.
+PENTING: selalu set `--class-ids` untuk backend model agar app hanya menghitung
+kelas vehicle yang sesuai dengan project ini.
+
+## Fast Start: Local Video
+
+Jalnkan vidoe lokal dan write ouputnya sebagai berikut:
 
 ```bash
-uv run python -m yolo_kitv2 label run \
-  --mode coco \
-  --input media/input.mp4 \
-  --output-dir data/auto_labels/input_mp4 \
-  --model Models/vehicle_subclasses.onnx \
-  --class-names Models/metadata.yaml \
-  --min-seconds-between 1.0 \
-  --max-per-track 3 \
-  --warmup-frames 5
-```
-
-Tip: gunakan `--min-seconds-between` atau `--min-frames-between` untuk skip antar frame yang disimpan.
-
-Untuk **auto-label folder gambar** (input = directory berisi images):
-
-```bash
-uv run python -m yolo_kitv2 label run \
-  --mode coco \
-  --input data/images_raw \
-  --output-dir data/auto_labels/images_raw \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --class-names Models/metadata.yaml \
-  --every-n 2
-```
-
-Untuk **gabung beberapa hasil auto-label** jadi satu folder COCO (siap CVAT):
-
-```bash
-uv run python -m yolo_kitv2 coco merge \
-  --inputs data/auto_labels/set_a data/auto_labels/set_b \
-  --output-dir data/auto_labels/merged
-```
-
-Jika CVAT **gagal menemukan images** saat import COCO (biasanya karena `images[].file_name` masih `images/<nama>.jpg`
-tapi kamu upload gambar dalam folder yang flat), jalankan CVAT fix untuk membasename `file_name` dan memastikan
-`category_id` mulai dari 1:
-
-```bash
-uv run python -m yolo_kitv2 coco cvat-fix \
-  --dataset-dir data/auto_labels/merged \
-  --in-place \
-  --basename-file-names
-```
-
-Jika kamu **hapus gambar** secara manual, perbaiki COCO JSON:
-
-```bash
-uv run python -m yolo_kitv2 coco prune \
-  --dataset-dir data/auto_labels/merged \
-  --in-place
-```
-
-
-Kalau hanya punya `annotations.json` (tanpa struktur dataset lengkap) dan ingin **distribusi label saja**:
-
-```bash
-uv run python -m yolo_kitv2 dataset viz \
-  --annotations data/auto_labels/merged/annotations.json \
-  --distribution-only \
-  --output-dir data/auto_labels/merged_viz_dist
-```
-
-Penggunaan sederhana
------------
-
-From WSL or a shell:
-
-```bash
-cd "/Pedestrian Line"
-```
-
-Jalankan dengan detektor onnx dan model path
-yang ingin digunakan. Jika ingin model default bisa diatur melaui `config.py`
-
-```bash
-uv run python main.py \
+uv run python -m pedestrian_line_counter.main \
   --backend onnx \
   --model Models/vehicle_subclasses.onnx \
   --class-ids 0,1,2 \
@@ -185,30 +77,37 @@ uv run python main.py \
   --show
 ```
 
-Apa yang dilakukan:
+Jika `ffmpeg` tidak tesedia, maka gunakan `--output-encoder auto` sehingga apliaksi bisa 
+menggunakan default OpenCV untuk writing video
 
--  Load model ONNX ke `onnxruntime` (GPU jika tersedia, kalau tidak kembali ke penggunaan CPU). 
--  Menjalankan deteksi → Tracking → Menghitung untuk setiap frame 
--  Menggambar bounding box, garis virtual, dan secara live A→B / B→A.
--  Menyimpan video hasil anotasi ke `media/output_test.mp4`.
--  Memprint hasil ketika sudah selesai menjalankan program (video sudah terselesaikan)
-
-Catatan ukuran output video:
-
-- Jika `ffmpeg` tersedia di machine, gunakan `--output-encoder ffmpeg` agar ukuran video output jauh lebih kecil daripada writer OpenCV lama (`mp4v`).
-- Default rekomendasi:
-  - `--output-encoder ffmpeg`
-  - `--output-crf 28`
-  - `--output-preset slow`
-- Jika `ffmpeg` tidak tersedia, gunakan `--output-encoder auto` agar program fallback ke OpenCV.
-
-Logging per-crossing (filesystem-first)
---------------------------------------
-
-Untuk kebutuhan dashboard/operator UI, kamu bisa menulis **event per crossing** ke disk (JSONL) dan (opsional) thumbnail per event:
+Langsung pick a new counting line:
 
 ```bash
-python3 -m pedestrian_line_counter.main \
+uv run python -m pedestrian_line_counter.line_picker \
+  --input media/input.mp4 \
+  --lines 1 \
+  --save config/cameras/camera_subang.json
+```
+
+Menggunakan konfigurasi untuk kamera/line
+
+
+```bash
+uv run python -m pedestrian_line_counter.main \
+  --backend onnx \
+  --model Models/vehicle_subclasses.onnx \
+  --class-ids 0,1,2 \
+  --input media/input.mp4 \
+  --camera camera_subang \
+  --output media/output_test.mp4
+```
+
+## Event untuk dashborad/review
+Gunakan mode spool jika kamu ingin menggunakan record per config
+
+
+```bash
+uv run python -m pedestrian_line_counter.main \
   --backend onnx \
   --model Models/vehicle_subclasses.onnx \
   --class-ids 0,1,2 \
@@ -220,71 +119,22 @@ python3 -m pedestrian_line_counter.main \
   --report-name report.csv
 ```
 
-Output (contoh):
+Output:
 
-- `data/traffic_runs/YYYY-MM-DD/<run_uid>/run.json`
-- `data/traffic_runs/YYYY-MM-DD/<run_uid>/events.jsonl`
-- `data/traffic_runs/YYYY-MM-DD/<run_uid>/report.csv`
-- `data/traffic_runs/YYYY-MM-DD/<run_uid>/thumbs/<event_uid>.jpg`
-
-`run.json` now also includes `health_summary` at the end of a run (reconnect cycles/attempts,
-stall counts, reader dropped frames, reader read failures, and effective FPS) for daily report aggregation.
-
-`report.csv` berisi 1 baris untuk setiap crossing event (default kolom utama: `event_no`, `timestamp_s`,
-`vehicle_type`, `direction`, `notes`; plus kolom teknis opsional seperti `track_id`, `frame_index`,
-`confidence`, dan `thumb_relpath`).
-
-One-command mode (single process: detect + spool + upload)
------------------------------------------------------------
-
-Single-process upload tetap tersedia di `main.py`, tetapi README ini sengaja
-memfokuskan dokumentasi pada alur edge-service yang netral:
-
-- pipeline menulis event ke `--spool-dir`
-- uploader/service terpisah mengirim batch event ke backend IT
-
-Pendekatan ini lebih cocok dengan arsitektur repo saat ini karena inference,
-spool, API lokal, dan delivery worker sudah dipisahkan dengan jelas.
-
-Untuk deployment production dengan satu proses (auto-restart + tuning performa + template systemd), pakai runbook:
-
-- `docs/jetson_deployment_runbook.md`
-- launcher script: `scripts/run_single_loop_live.sh`
-
-Kalau backend IT belum tersedia, kamu bisa hardening uploader pakai mock backend lokal:
-
-```bash
-python3 scripts/mock_delivery_backend.py --port 18080 --state-dir tmp/mock_delivery_backend
+```text
+data/traffic_runs/YYYY-MM-DD/<run_uid>/run.json
+data/traffic_runs/YYYY-MM-DD/<run_uid>/events.jsonl
+data/traffic_runs/YYYY-MM-DD/<run_uid>/report.csv
+data/traffic_runs/YYYY-MM-DD/<run_uid>/thumbs/<event_uid>.jpg
 ```
 
-Lalu arahkan uploader ke mock backend itu:
+`run.json` terdiri dari health summary. `report.csv` memiliki satu baris per satu crossign vehicle, timestamp, class, direction, notes, dan field lainnya.
+
+## Operator UI / Local API
+Start the FastAPi edge service on loopback:
 
 ```bash
-python3 -m pedestrian_line_counter.event_uploader \
-  --spool-dir data/traffic_runs \
-  --api-base-url http://127.0.0.1:18080 \
-  --api-key local-dev
-```
-
-Request yang diterima mock backend akan disimpan ke `tmp/mock_delivery_backend/` supaya payload run/event/evidence bisa dicek tanpa menunggu backend team.
-
-FastAPI edge service (Jetson-local hardened mode)
--------------------------------------------------
-
-Untuk UI/operator view yang berjalan langsung dari repo Python ini, gunakan:
-
-- `python3 -m pedestrian_line_counter.service`
-
-Safe default sekarang adalah **loopback only**:
-
-- service bind ke `127.0.0.1` / host loopback,
-- FastAPI docs (`/docs`, `/redoc`, `/openapi.json`) tetap boleh aktif untuk local debugging,
-- cocok untuk Jetson yang nanti diletakkan di balik reverse proxy / domain ketika keputusan infra sudah ada.
-
-Contoh local-only:
-
-```bash
-python3 -m pedestrian_line_counter.service \
+uv run python -m pedestrian_line_counter.service \
   --spool-dir data/traffic_runs \
   --host 127.0.0.1 \
   --port 8080 \
@@ -292,10 +142,16 @@ python3 -m pedestrian_line_counter.service \
   --mutation-api-key "replace-me"
 ```
 
-Kalau sementara harus diakses via **IP/LAN** karena domain belum ada, service juga bisa dijalankan dalam mode LAN yang lebih ketat:
+buka link ini
+
+- `http://127.0.0.1:8080/ui/dashboard`
+- `http://127.0.0.1:8080/ui/review`
+- `http://127.0.0.1:8080/healthz`
+
+Untuk akses sementara dengan menggunakan LAN/IP Access
 
 ```bash
-python3 -m pedestrian_line_counter.service \
+uv run python -m pedestrian_line_counter.service \
   --spool-dir data/traffic_runs \
   --host 0.0.0.0 \
   --port 8080 \
@@ -308,56 +164,68 @@ python3 -m pedestrian_line_counter.service \
   --mutation-api-key "replace-me"
 ```
 
-Aturan hardening untuk mode LAN/IP:
+Mode LAN membutuhkan autentikasi UI, API key, docs disabled, dan host yang terpecaya 
 
-- `--service-exposure lan` harus explicit.
-- UI auth (`--ui-password`) wajib aktif.
-- Mutation API key (`--mutation-api-key`) wajib aktif.
-- Docs/OpenAPI wajib dimatikan (`--no-service-docs`).
-- Trusted hosts wajib diisi explicit (`--service-trusted-host ...`).
+## Jetson Production Shape
 
-Jadi untuk kondisi sekarang:
+Deploy to production memiliki 2 servis yang membagi direktori pool yang sama
 
-- belum ada domain: akses bisa lewat IP,
-- auth perusahaan belum final: pakai UI login lokal sementara,
-- nanti kalau domain / reverse proxy / auth final sudah ada, app ini tinggal dipasang di belakang layer tersebut tanpa ganti arsitektur inti.
+1. `scripts/run_single_loop_live.sh`
+   - reads local video or RTSP
+   - runs detector/tracker/counter
+   - writes event spool
+   - can upload events if configured
+2. `scripts/run_edge_service.sh`
+   - serves local UI/API
+   - exposes health/status/review/sync controls
+   - runs retention cleanup
 
-Template deploy untuk systemd sekarang tersedia di:
-
-- `deploy/systemd/pedestrian-edge-service.service.example`
-- `deploy/systemd/pedestrian-edge-service.env.example`
-- launcher script: `scripts/run_edge_service.sh`
-
-Untuk panduan lengkap menjalankan **dua service** di Jetson:
+Full guide untuk menerapkan deployment:
 
 - `docs/jetson_deployment_runbook.md`
+- `docs/tensorrt_engine_bringup.md`
+- `docs/security_review.md`
 
-Runbook ini menjelaskan:
-
-- local video mode untuk validasi sekarang,
-- RTSP mode untuk nanti,
-- systemd setup untuk kedua service,
-- env file mana yang harus diedit,
-- cara verifikasi spool + UI end-to-end.
-
-Live RTSP Mode (Experimental)
------------------------------
-
-Next step dari project ini adalah menjalankan semua ini dengan RTSP live feed, terutama dengan menggunakan `--rtsp-url`. Direkomendasikan untuk menjalankannya seperti ini (tidak ada file output, periodic logging, serta pmebatasan fps)
-
-
-Note: in live mode, writing is disabled by default unless you set `--output`
-or a duration/frame limit, to avoid unbounded file growth.
-
-Jetson Optimized RTSP Path (JetPack 5/6)
-----------------------------------------
-
-For Jetson devices, you can use OpenCV + GStreamer with NVDEC:
+Minimal local-file validation with the wrapper:
 
 ```bash
-uv run python main.py \
+PLC_INPUT_PATH=media/input.mp4 \
+PLC_BACKEND=onnx \
+PLC_MODEL_PATH=Models/vehicle_subclasses.onnx \
+PLC_CLASS_IDS=0,1,2 \
+PLC_SPOOL_DIR=data/traffic_runs \
+PLC_PORTAL_UPLOAD_ENABLED=0 \
+bash scripts/run_single_loop_live.sh
+```
+
+TensorRT local-file validation:
+
+```bash
+PLC_INPUT_PATH=media/input.mp4 \
+PLC_BACKEND=tensorrt \
+PLC_MODEL_PATH=Models/model_fp16.engine \
+PLC_CLASS_NAMES=Models/metadata_vehicle.yaml \
+PLC_CAMERA=camera_subang \
+PLC_FRAME_STRIDE=2 \
+PLC_SPOOL_DIR=data/traffic_runs \
+PLC_PORTAL_UPLOAD_ENABLED=0 \
+bash scripts/run_single_loop_live.sh
+```
+
+Jetson decoding, CLI juga support `--input-capture-backend gstreamer` dan `--input-get-pipeline`. Check full command cli dengan:
+
+```bash
+uv run python -m pedestrian_line_counter.main --help
+```
+
+## RTSP Live Mode
+
+Contoh:
+
+```bash
+uv run python -m pedestrian_line_counter.main \
   --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
-  --camera road_a \
+  --camera camera_subang \
   --backend onnx \
   --model Models/vehicle_subclasses.onnx \
   --class-ids 0,1,2 \
@@ -372,62 +240,60 @@ uv run python main.py \
   --no-write
 ```
 
-Notes:
+Mode live tidak write video output 
 
-- `--queue-policy drop_oldest` keeps latency bounded for sync and UI updates.
-- `--queue-policy block` prioritizes completeness but can increase delay over time.
-- `--rtsp-gst-pipeline` can override the generated pipeline (advanced tuning/debug).
-- If GStreamer open fails, the app automatically falls back to OpenCV RTSP capture.
+Untuk deployment live dengan windows/EZVIS, baca bagian berikut:
 
-Jetson Optimized File Input Path (Preliminary)
-----------------------------------------------
+- `docs/ezviz_windows_bridge_rtsp_runbook.md`
 
-For offline video files on Jetson, you can now also ask OpenCV to try a
-GStreamer file-input pipeline first:
+## Backend Delivery
+
+Ketika IT backend belum selesai, gunakan delivery untuk mock backend
 
 ```bash
-uv run python main.py \
-  --input media/testing_video2.mp4 \
-  --camera road_a \
-  --backend tensorrt \
-  --model Models/model_fp16.engine \
-  --class-names Models/metadata_vehicle.yaml \
-  --input-capture-backend gstreamer \
-  --write-processed-only \
-  --fast-skip \
-  --output media/output_contoh_v2.mp4
+uv run python scripts/mock_delivery_backend.py \
+  --port 18080 \
+  --state-dir tmp/mock_delivery_backend
 ```
 
-Notes:
-
-- This preliminary file-mode path uses a generated `uridecodebin ... ! nvvidconv ... ! appsink` pipeline.
-- `--input-gst-pipeline` can override the generated file-input pipeline for device-specific tuning.
-- If the GStreamer file open fails, the app automatically falls back to the current OpenCV/FFmpeg file reader.
-
-RTSP Reconnect Behavior
------------------------
-
-Reconnect policy is enabled by default in live mode and can be tuned from CLI:
+Mengupload run:
 
 ```bash
-uv run python main.py \
-  --rtsp-url "rtsp://user:pass@camera-host:554/stream" \
-  --camera road_a \
-  --backend onnx \
-  --model Models/vehicle_subclasses.onnx \
-  --class-ids 0,1,2 \
-  --rtsp-reconnect \
-  --rtsp-reconnect-max-attempts 0 \
-  --rtsp-reconnect-initial-delay 1.0 \
-  --rtsp-reconnect-max-delay 30.0 \
-  --rtsp-reconnect-backoff 2.0 \
-  --rtsp-stall-timeout 5.0 \
-  --no-write
+uv run python -m pedestrian_line_counter.event_uploader \
+  --spool-dir data/traffic_runs \
+  --api-base-url http://127.0.0.1:18080 \
+  --api-key local-dev
 ```
 
-Notes:
+Backend payload dapat dilihat pada direktori berikut ini `tmp/mock_delivery_backend?`.
 
-- `--rtsp-reconnect-max-attempts 0` means unlimited retries.
-- Reconnect triggers when the reader stops or when no frame arrives for `--rtsp-stall-timeout`.
-- On successful reconnect, the app clears transient tracker/counter per-track state to avoid stale IDs.
-- Direction totals (`A->B`, `B->A`, and per-class direction totals) are preserved while the process keeps running.
+
+## Useful Docs
+
+- `plan.md` - current project status and execution order
+- `docs/README.md` - documentation map
+- `docs/jetson_deployment_runbook.md` - main Jetson deployment guide
+- `docs/tensorrt_engine_bringup.md` - TensorRT bring-up notes
+- `docs/remote_ai_box_public_hosting_guide.md` - reverse proxy / public access
+- `docs/security_review.md` - deployment security notes
+- `docs/line_direction.md` - direction/counting geometry
+
+## Main Source Layout
+
+```text
+pedestrian_line_counter/
+  main.py              # detection/tracking/counting loop
+  detector.py          # motion/ONNX/TensorRT/Torch detector wrapper
+  tracker.py           # lightweight tracker
+  line_counter.py      # line and two-line gate counting logic
+  traffic_spool.py     # local run/event/evidence persistence
+  event_uploader.py    # backend delivery worker
+  api.py               # FastAPI app factory
+  service.py           # FastAPI service runner
+  ui_templates/        # operator UI templates
+  ui_static/           # operator UI CSS/JS/assets
+yolo_kitv2/            # YOLO postprocess/runtime/dataset helper utilities
+scripts/               # deployment and helper scripts
+deploy/                # systemd, Caddy, Windows bridge examples
+docs/                  # runbooks and reference docs
+```

@@ -148,6 +148,27 @@ uv run python -m yolo_kitv2 coco prune \
   --in-place
 ```
 
+If CVAT cannot find images during COCO import because `images[].file_name`
+contains a nested path such as `images/<name>.jpg` while the uploaded folder is
+flat, normalize the JSON for CVAT:
+
+```bash
+uv run python -m yolo_kitv2 coco cvat-fix \
+  --dataset-dir data/auto_labels/merged \
+  --in-place \
+  --basename-file-names
+```
+
+If you only have an `annotations.json` file and want to inspect label
+distribution:
+
+```bash
+uv run python -m yolo_kitv2 dataset viz \
+  --annotations data/auto_labels/merged/annotations.json \
+  --distribution-only \
+  --output-dir data/auto_labels/merged_viz_dist
+```
+
 Tips:
 
 - Use `--min-seconds-between` or `--min-frames-between` to control spacing.
