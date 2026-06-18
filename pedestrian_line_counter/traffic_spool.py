@@ -16,10 +16,8 @@ from .source_safety import sanitize_source_record, sanitize_source_value
 from .structures import CrossingEvent
 from .time_utils import day_string_local, iso_local, iso_utc, local_timezone
 
-
 def _safe_mkdir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
-
 
 def _write_json_atomic(path: Path, payload: Mapping[str, Any], *, indent: Optional[int] = None) -> None:
     parent = path.parent
@@ -149,9 +147,9 @@ class TrafficSpoolWriter:
         except Exception:
             pass
 
-    def update_run_metadata(self, updates: Mapping[str, Any]) -> None:
+    def update_run_metadata(self, updates:Mapping[str, Any]) -> None:
         if not isinstance(updates, Mapping):
-            raise TypeError("updates must be a mapping")
+            raise TypeError("update harus berupa mapping")
         self._run_meta.update(dict(updates))
         self._write_run_meta()
 
