@@ -5,6 +5,16 @@ This document summarizes, step by step, how we got the TensorRT `.engine` path r
 This document is the canonical TensorRT bring-up note for the repo and
 supersedes older duplicate troubleshooting notes.
 
+Current implementation note:
+
+- `pedestrian_line_counter.tensorrt_runner.TensorRTRunner` is the single
+  TensorRT runtime implementation used by the production counter path.
+- `scripts/preview_video.py --backend tensorrt` now uses the same production
+  `Detector` path, so preview and counting smoke tests do not diverge.
+- The removed Torch-buffer helper backend is no longer part of the TensorRT
+  runtime path; TensorRT requires JetPack TensorRT plus `cuda-python`, not
+  PyTorch.
+
 ## 1. Start from the existing TensorRT backend
 
 The project already had a TensorRT path in place:

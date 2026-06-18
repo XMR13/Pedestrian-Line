@@ -48,6 +48,9 @@ class ModelConfig:
     # Typical values: 300..2000. None disables.
     pre_nms_topk: Optional[int] = 1000
 
+    # Cap final detections after NMS/post-processing.
+    max_detections: int = 50
+
     # Minimum box area dibandingkan dengan bagian area yang lain.
     # Lowered so distant vehicles are not filtered out too aggressively.
     min_box_area_ratio: float = 0.0002

@@ -7,8 +7,10 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import cv2
 
+from pedestrian_line_counter.config import ModelConfig
+from pedestrian_line_counter.detector import Detector
 from pedestrian_line_counter.videoio_utils import open_video_capture
-from yolo_kitv2 import LetterboxConfig, YoloPostConfig, draw_detections, load_pipeline
+from yolo_kitv2 import draw_detections
 from yolo_kitv2.metadata import load_class_names
 
 try:  # pragma: no cover - optional dependency
@@ -81,34 +83,11 @@ def _normalize_backend(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     v = value.strip().lower()
-    if v == "onnx":
-        return "onnxruntime"
-    if v == "torch":
-        return "torchscript"
+    if v == "onnxruntime":
+        return "onnx"
+    if v == "torchscript":
+        return "torch"
     return v
-
-
-def _pick_onnx_providers() -> List[str]:
-    try:
-        import onnxruntime as ort  # type: ignore
-    except Exception:
-        return ["CPUExecutionProvider"]
-
-    candidate_providers = [
-        "CUDAExecutionProvider",
-        "DmlExecutionProvider",
-        "CPUExecutionProvider",
-    ]
-
-    if hasattr(ort, "get_available_providers"):
-        try:
-            available = set(ort.get_available_providers())
-            providers = [p for p in candidate_providers if p in available]
-            return providers or ["CPUExecutionProvider"]
-        except Exception:
-            return candidate_providers
-
-    return candidate_providers
 
 
 def _iter_input_files(input_path: Path, recursive: bool) -> Iterable[Path]:
@@ -123,25 +102,6 @@ def _iter_input_files(input_path: Path, recursive: bool) -> Iterable[Path]:
         if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
     ]
     return files
-
-
-def _filter_by_min_area(
-    dets: List[object],
-    *,
-    frame_w: int,
-    frame_h: int,
-    min_ratio: float,
-) -> List[object]:
-    if min_ratio <= 0:
-        return dets
-    min_area = float(frame_w * frame_h) * float(min_ratio)
-    kept: List[object] = []
-    for d in dets:
-        x1, y1, x2, y2 = d.as_xyxy()
-        if (x2 - x1) * (y2 - y1) < min_area:
-            continue
-        kept.append(d)
-    return kept
 
 
 def _parse_args() -> argparse.Namespace:
@@ -266,21 +226,30 @@ def main() -> None:
         except ValueError as exc:
             raise SystemExit(str(exc))
 
-    post_cfg = YoloPostConfig(
-        conf_threshold=float(args.conf),
-        iou_threshold=float(args.iou),
-        max_detections=int(args.max_detections),
-        class_ids=class_ids if (class_ids and not args.allow_all_classes) else None,
-    )
+    backend = _normalize_backend(args.backend)
+    if backend is None:
+        suffix = Path(args.model).suffix.lower()
+        if suffix == ".onnx":
+            backend = "onnx"
+        elif suffix in {".engine", ".plan"}:
+            backend = "tensorrt"
+        elif suffix in {".pt", ".pth", ".torchscript", ".ts"}:
+            backend = "torch"
+        else:
+            raise SystemExit(f"Could not infer backend from model extension: {suffix}")
 
-    providers = _pick_onnx_providers()
-    pipe = load_pipeline(
-        Path(args.model),
-        backend=_normalize_backend(args.backend),
-        letterbox_cfg=LetterboxConfig(new_shape=input_size),
-        post_cfg=post_cfg,
-        onnx_providers=providers,
+    model_cfg = ModelConfig(
+        backend=backend,
+        model_path=Path(args.model),
+        input_size=input_size,
+        confidence_threshold=float(args.conf),
+        nms_iou_threshold=float(args.iou),
+        max_detections=int(args.max_detections),
+        min_box_area_ratio=float(args.min_box_area_ratio),
+        track_class_ids=[] if args.allow_all_classes else class_ids,
+        allow_all_classes=bool(args.allow_all_classes),
     )
+    detector = Detector(model_cfg)
 
     total_frames = 0
     for clip in input_files:
@@ -363,8 +332,7 @@ def main() -> None:
                     continue
 
                 h, w = frame.shape[:2]
-                dets = pipe(frame)
-                dets = _filter_by_min_area(dets, frame_w=w, frame_h=h, min_ratio=args.min_box_area_ratio)
+                dets = detector.detect(frame)
 
                 vis = draw_detections(frame, dets, class_names=class_names)
 

@@ -143,6 +143,37 @@ class YoloPipeline:
         return self.post.process(preds, orig_size=prep.orig_size, pad=prep.pad, ratio=prep.ratio)
 
 
+def _build_trt_infer_fn(trt_runner: object) -> Callable[[np.ndarray], np.ndarray]:
+    def infer(blob: np.ndarray) -> np.ndarray:
+        if (
+            getattr(trt_runner, "primary_output_name", None) is not None
+            and hasattr(trt_runner, "infer_primary")
+        ):
+            return np.asarray(trt_runner.infer_primary(blob))
+
+        outputs = trt_runner.infer(blob)
+        if not outputs:
+            raise RuntimeError("TensorRT backend returned no outputs.")
+
+        yolo_like = [
+            out
+            for out in outputs
+            if getattr(out, "ndim", 0) == 3 and len(getattr(out, "shape", ())) >= 1 and out.shape[0] == 1
+        ]
+        if len(yolo_like) == 1:
+            return np.asarray(yolo_like[0])
+        if len(outputs) == 1:
+            return np.asarray(outputs[0])
+
+        shapes = [tuple(int(dim) for dim in getattr(out, "shape", ())) for out in outputs]
+        raise RuntimeError(
+            "TensorRT backend could not identify a unique YOLO-style output tensor. "
+            f"Engine outputs: {shapes}. Use a single-output raw YOLO engine for this backend."
+        )
+
+    return infer
+
+
 def load_pipeline(
     model_path: PathLike,
     *,
@@ -224,22 +255,23 @@ def load_pipeline(
         )
 
     if chosen == "tensorrt":
-        from .backends.tensorrt_backend import TensorRTBackend, TensorRTBackendConfig
+        from pedestrian_line_counter.tensorrt_runner import TensorRTRunner
 
-        trt_backend = TensorRTBackend(
+        trt_runner = TensorRTRunner(
             resolved,
-            TensorRTBackendConfig(
-                device=trt_device,
-                input_name=trt_input_name,
-                output_name=trt_output_name,
-                output_index=trt_output_index,
-            ),
+            input_size=letterbox_cfg.new_shape,
         )
+        if trt_device != "cuda":
+            raise ValueError("TensorRT backend requires trt_device='cuda'.")
+        if trt_input_name is not None or trt_output_name is not None or trt_output_index != 0:
+            raise ValueError(
+                "Custom TensorRT input/output selection is not supported by the canonical TensorRTRunner."
+            )
         return YoloPipeline(
-            trt_backend.infer,
-            backend=trt_backend,
+            _build_trt_infer_fn(trt_runner),
+            backend=trt_runner,
             backend_name="tensorrt",
-            letterbox_cfg=letterbox_cfg,
+            letterbox_cfg=LetterboxConfig(new_shape=trt_runner.input_hw),
             post_cfg=post_cfg,
         )
 

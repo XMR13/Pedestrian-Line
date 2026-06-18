@@ -10,6 +10,7 @@ import pytest
 from pedestrian_line_counter.config import ModelConfig
 from pedestrian_line_counter.detector import Detector
 from pedestrian_line_counter.tensorrt_runner import TensorRTRunner, _Binding, _select_default_primary_output_name, _try_import_cudart
+from yolo_kitv2.runtime import LetterboxConfig, _build_trt_infer_fn, load_pipeline
 
 
 def test_tensorrt_backend_reports_missing_deps(monkeypatch, tmp_path: Path) -> None:
@@ -56,7 +57,7 @@ def test_tensorrt_infer_fn_rejects_ambiguous_multi_output() -> None:
                 np.zeros((1, 32, 160), dtype=np.float32),
             ]
 
-    infer_fn = Detector._build_trt_infer_fn(_FakeRunner())
+    infer_fn = _build_trt_infer_fn(_FakeRunner())
 
     with pytest.raises(RuntimeError, match="could not identify a unique YOLO-style output tensor"):
         infer_fn(np.zeros((1, 3, 640, 640), dtype=np.float32))
@@ -72,10 +73,50 @@ def test_tensorrt_infer_fn_prefers_primary_output_fast_path() -> None:
         def infer(self, _blob):
             raise AssertionError("infer() should not be called when infer_primary() is available")
 
-    infer_fn = Detector._build_trt_infer_fn(_FakeRunner())
+    infer_fn = _build_trt_infer_fn(_FakeRunner())
     output = infer_fn(np.zeros((1, 3, 640, 640), dtype=np.float32))
 
     assert output.shape == (1, 84, 8400)
+
+
+def test_yolo_runtime_tensorrt_uses_canonical_runner_without_torch(monkeypatch, tmp_path: Path) -> None:
+    engine_path = tmp_path / "model.engine"
+    engine_path.write_bytes(b"not-real")
+    created = {}
+
+    class _FakeRunner:
+        input_hw = (320, 320)
+        primary_output_name = "output0"
+
+        def __init__(self, path, *, input_size=None):
+            created["path"] = Path(path)
+            created["input_size"] = input_size
+
+        def infer_primary(self, _blob):
+            return np.zeros((1, 84, 1), dtype=np.float32)
+
+    import pedestrian_line_counter.tensorrt_runner as trt_runner_module
+
+    monkeypatch.setattr(trt_runner_module, "TensorRTRunner", _FakeRunner)
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "torch":
+            raise AssertionError("TensorRT runtime path must not import torch")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    pipe = load_pipeline(
+        engine_path,
+        backend="tensorrt",
+        letterbox_cfg=LetterboxConfig(new_shape=(320, 320)),
+    )
+
+    assert pipe.backend_name == "tensorrt"
+    assert isinstance(pipe.backend, _FakeRunner)
+    assert created == {"path": engine_path, "input_size": (320, 320)}
 
 
 def test_select_default_primary_output_name_prefers_single_output() -> None:

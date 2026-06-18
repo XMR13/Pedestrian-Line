@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 import cv2
 import numpy as np
 
 from .config import ModelConfig, ROOT_DIR
 from .structures import Detection
+from yolo_kitv2.runtime import _build_trt_infer_fn
 
 
 @dataclass
@@ -94,7 +95,7 @@ class Detector:
 
             from yolo_kitv2 import LetterboxConfig, YoloPipeline  # type: ignore
 
-            infer_fn = self._build_trt_infer_fn(self._trt_runner)
+            infer_fn = _build_trt_infer_fn(self._trt_runner)
             self._yolo_pipe = YoloPipeline(
                 infer_fn,
                 backend=self._trt_runner,
@@ -228,6 +229,7 @@ class Detector:
             conf_threshold=float(self.config.confidence_threshold),
             iou_threshold=float(self.config.nms_iou_threshold),
             pre_nms_topk=self.config.pre_nms_topk,
+            max_detections=int(self.config.max_detections),
             class_ids=class_ids,
         )
 
@@ -259,34 +261,3 @@ class Detector:
                 return candidate_providers
 
         return candidate_providers
-
-    @staticmethod
-    def _build_trt_infer_fn(trt_runner: object) -> Callable[[np.ndarray], np.ndarray]:
-        def infer(blob: np.ndarray) -> np.ndarray:
-            if (
-                getattr(trt_runner, "primary_output_name", None) is not None
-                and hasattr(trt_runner, "infer_primary")
-            ):
-                return np.asarray(trt_runner.infer_primary(blob))
-
-            outputs = trt_runner.infer(blob)
-            if not outputs:
-                raise RuntimeError("TensorRT backend returned no outputs.")
-
-            yolo_like = [
-                out
-                for out in outputs
-                if getattr(out, "ndim", 0) == 3 and len(getattr(out, "shape", ())) >= 1 and out.shape[0] == 1
-            ]
-            if len(yolo_like) == 1:
-                return np.asarray(yolo_like[0])
-            if len(outputs) == 1:
-                return np.asarray(outputs[0])
-
-            shapes = [tuple(int(dim) for dim in getattr(out, "shape", ())) for out in outputs]
-            raise RuntimeError(
-                "TensorRT backend could not identify a unique YOLO-style output tensor. "
-                f"Engine outputs: {shapes}. Use a single-output raw YOLO engine for this backend."
-            )
-
-        return infer
