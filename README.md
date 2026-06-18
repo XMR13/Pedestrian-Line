@@ -42,6 +42,19 @@ Install for local development:
 uv sync
 ```
 
+Install for Jetson TensorRT runtime:
+
+```bash
+bash scripts/bootstrap_jetson.sh
+```
+
+This creates `.venv` with `--system-site-packages`, installs
+`requirements-jetson.txt`, and installs this repo with `pip install -e .
+--no-deps`. Use this path on Jetson so Python can see JetPack-provided
+`tensorrt` / `cv2` packages without pulling the desktop ONNXRuntime dependency
+set. TensorRT runtime depends on JetPack TensorRT plus `cuda-python`; it does
+not require PyTorch.
+
 ## Prepare Files
 
 Local file harus memiliki bentuk seperti ini:
@@ -59,6 +72,26 @@ config/cameras/
 
 PENTING: selalu set `--class-ids` untuk backend model agar app hanya menghitung
 kelas vehicle yang sesuai dengan project ini.
+
+Quick TensorRT sanity check:
+
+```bash
+source .venv/bin/activate
+python -m pedestrian_line_counter.main --help
+python scripts/preview_video.py \
+  --input media/test.mp4 \
+  --model Models/model_fp16.engine \
+  --backend tensorrt \
+  --allow-all-classes \
+  --max-frames 30 \
+  --save-frames \
+  --frames-dir preview_outputs/trt_test \
+  --no-progress
+```
+
+`scripts/preview_video.py --backend tensorrt` uses the same production
+`Detector` / `TensorRTRunner` path as the counter app, so a preview run is a
+valid detector smoke test before switching to the full counting loop.
 
 ## Fast Start: Local Video
 

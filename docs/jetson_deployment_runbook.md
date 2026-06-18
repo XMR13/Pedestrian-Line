@@ -69,6 +69,19 @@ Important:
 - repo path known and stable
 - scripts are executable
 
+Fast dependency bootstrap from the repo root:
+
+```bash
+bash scripts/bootstrap_jetson.sh
+```
+
+This script creates `.venv` with `--system-site-packages`, installs
+`requirements-jetson.txt`, then installs the repo editable with `--no-deps`.
+That keeps the TensorRT deployment path from trying to install the desktop
+ONNXRuntime dependency set while still making `pedestrian_line_counter`
+importable from anywhere inside the venv. The TensorRT runtime path uses
+JetPack TensorRT plus `cuda-python`; it does not require PyTorch.
+
 Make the launcher scripts executable:
 
 ```bash
