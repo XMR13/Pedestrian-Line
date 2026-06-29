@@ -31,6 +31,8 @@ PLC_BACKEND="${PLC_BACKEND:-onnx}"
 PLC_MODEL_PATH="${PLC_MODEL_PATH:-Models/vehicle_subclasses.onnx}"
 PLC_CLASS_IDS="${PLC_CLASS_IDS:-}"
 PLC_CLASS_NAMES="${PLC_CLASS_NAMES:-}"
+PLC_DEFAULT_CLASS_IDS="${PLC_DEFAULT_CLASS_IDS:-0,1,2}"
+PLC_ALLOW_ALL_CLASSES="${PLC_ALLOW_ALL_CLASSES:-0}"
 PLC_CAMERA="${PLC_CAMERA:-camera_subang}"
 PLC_LINE_JSON="${PLC_LINE_JSON:-}"
 PLC_SITE_ID="${PLC_SITE_ID:-subang}"
@@ -121,9 +123,26 @@ if [[ -n "$PLC_SPOOL_SCENE_THUMB_QUALITY" ]]; then
   args+=(--spool-scene-thumb-quality "$PLC_SPOOL_SCENE_THUMB_QUALITY")
 fi
 
-if [[ -n "$PLC_CLASS_IDS" ]]; then
-  args+=(--class-ids "$PLC_CLASS_IDS")
-fi
+case "${PLC_ALLOW_ALL_CLASSES}" in
+  1|true|TRUE|yes|YES|on|ON)
+    args+=(--allow-all-classes)
+    ;;
+  0|false|FALSE|no|NO|off|OFF)
+    if [[ -n "$PLC_CLASS_IDS" ]]; then
+      args+=(--class-ids "$PLC_CLASS_IDS")
+    elif [[ -z "$PLC_CLASS_NAMES" ]]; then
+      case "$PLC_BACKEND" in
+        onnx|tensorrt|torchscript)
+          args+=(--class-ids "$PLC_DEFAULT_CLASS_IDS")
+          ;;
+      esac
+    fi
+    ;;
+  *)
+    echo "Unsupported PLC_ALLOW_ALL_CLASSES value: $PLC_ALLOW_ALL_CLASSES" >&2
+    exit 1
+    ;;
+esac
 
 if [[ -n "$PLC_CLASS_NAMES" ]]; then
   args+=(--class-names "$PLC_CLASS_NAMES")
