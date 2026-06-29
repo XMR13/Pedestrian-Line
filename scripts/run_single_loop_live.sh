@@ -19,6 +19,7 @@ fi
 
 PLC_INPUT_PATH="${PLC_INPUT_PATH:-}"
 PLC_VIDEO_START="${PLC_VIDEO_START:-}"
+PLC_PROMPT_VIDEO_START="${PLC_PROMPT_VIDEO_START:-auto}"
 PLC_RTSP_URL="${PLC_RTSP_URL:-}"
 
 if [[ -z "$PLC_INPUT_PATH" && -z "$PLC_RTSP_URL" ]]; then
@@ -132,6 +133,8 @@ if [[ -n "$PLC_INPUT_PATH" ]]; then
   args+=(--input "$PLC_INPUT_PATH")
   if [[ -n "$PLC_VIDEO_START" ]]; then
     args+=(--video-start "$PLC_VIDEO_START")
+  elif [[ "$PLC_PROMPT_VIDEO_START" == "1" || "$PLC_PROMPT_VIDEO_START" == "true" || "$PLC_PROMPT_VIDEO_START" == "TRUE" || "$PLC_PROMPT_VIDEO_START" == "yes" || "$PLC_PROMPT_VIDEO_START" == "YES" || "$PLC_PROMPT_VIDEO_START" == "on" || "$PLC_PROMPT_VIDEO_START" == "ON" || ( "$PLC_PROMPT_VIDEO_START" == "auto" && -t 0 ) ]]; then
+    args+=(--prompt-video-start)
   fi
 else
   args+=(
