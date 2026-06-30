@@ -13,15 +13,12 @@ Progress/
 Models/
 media/
 data/
-deploy/
 deploy/*
 spool/
 
-!deploy/windows_bridge/
-!deploy/windows_bridge/README.md
-!deploy/windows_bridge/mediamtx.yml.example
-!deploy/windows_bridge/start_mediamtx.ps1
-!deploy/windows_bridge/open_rtsp_firewall.ps1
+!deploy/systemd/
+!deploy/systemd/README.md
+!deploy/systemd/*.example
 
 # Local config overrides (experiments; not committed)
 config/local/

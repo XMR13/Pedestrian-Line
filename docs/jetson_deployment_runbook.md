@@ -120,7 +120,8 @@ PLC_RTSP_URL=
 
 PLC_BACKEND=onnx
 PLC_MODEL_PATH=Models/vehicle_subclasses.onnx
-PLC_CLASS_IDS=0,1,2
+PLC_CLASS_NAMES=Models/metadata_vehicle.yaml
+PLC_CONFIDENCE=0.65
 
 PLC_SITE_ID=subang
 PLC_CAMERA_ID=cam_01
@@ -154,7 +155,8 @@ PLC_RTSP_URL=rtsp://user:pass@camera-host:554/stream
 
 PLC_BACKEND=onnx
 PLC_MODEL_PATH=Models/vehicle_subclasses.onnx
-PLC_CLASS_IDS=0,1,2
+PLC_CLASS_NAMES=Models/metadata_vehicle.yaml
+PLC_CONFIDENCE=0.65
 
 PLC_SITE_ID=subang
 PLC_CAMERA_ID=cam_01
@@ -197,8 +199,8 @@ PLC_SERVICE_PORT=8080
 PLC_SERVICE_EXPOSURE=loopback
 
 EDGE_UI_USERNAME=admin
-EDGE_UI_PASSWORD=replace-me
-EDGE_SERVICE_API_KEY=replace-me
+EDGE_UI_PASSWORD=
+EDGE_SERVICE_API_KEY=
 
 PLC_SERVICE_RETENTION_ENABLED=1
 PLC_SERVICE_RETENTION_MAX_AGE_DAYS=90
@@ -207,6 +209,8 @@ PLC_SERVICE_RETENTION_AUTO_INTERVAL_S=3600
 
 Recommended current rule:
 
+- set real, non-placeholder values for `EDGE_UI_PASSWORD` and `EDGE_SERVICE_API_KEY`
+  before enabling LAN/IP access
 - leave `PLC_PORTAL_API_BASE_URL` unset here
 
 Why:
@@ -267,6 +271,17 @@ Ctrl+C
 ## 7. Service unit files
 
 Create the service files under `/etc/systemd/system/`.
+
+Tracked examples live under `deploy/systemd/`:
+
+- `deploy/systemd/pedestrian-single-loop.env.example`
+- `deploy/systemd/pedestrian-single-loop.service.example`
+- `deploy/systemd/pedestrian-edge-service.env.example`
+- `deploy/systemd/pedestrian-edge-service.service.example`
+
+Keep real camera URLs, local IPs, passwords, and API keys in the Jetson-local
+files under `/etc/vehicle_count/`; do not hard-code them into tracked launcher
+scripts.
 
 ### 7.1 `single_loop.service`
 

@@ -31,10 +31,26 @@ PLC_PORTAL_API_BASE_URL="${PLC_PORTAL_API_BASE_URL:-}"
 
 mkdir -p "$PLC_SPOOL_DIR"
 
+reject_placeholder_secret() {
+  local name="$1"
+  local value="$2"
+  local lowered
+
+  lowered="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+  case "$lowered" in
+    replace-me|replace_me|changeme|change-me|password|admin|secret|test|demo)
+      echo "Refusing placeholder value for $name. Set a real secret in /etc/vehicle_count/edge_service.env." >&2
+      exit 1
+      ;;
+  esac
+}
+
 if [[ "$PLC_SERVICE_EXPOSURE" == "lan" ]]; then
   : "${EDGE_UI_PASSWORD:?Set EDGE_UI_PASSWORD for LAN/IP service exposure}"
   : "${EDGE_SERVICE_API_KEY:?Set EDGE_SERVICE_API_KEY for LAN/IP service exposure}"
   : "${PLC_SERVICE_TRUSTED_HOSTS:?Set PLC_SERVICE_TRUSTED_HOSTS for LAN/IP service exposure}"
+  reject_placeholder_secret "EDGE_UI_PASSWORD" "$EDGE_UI_PASSWORD"
+  reject_placeholder_secret "EDGE_SERVICE_API_KEY" "$EDGE_SERVICE_API_KEY"
 fi
 
 args=(
