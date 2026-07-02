@@ -944,7 +944,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
 .detail-overview {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin: 14px 0 20px;
 }
@@ -1074,6 +1074,42 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.technical-details {
+  padding: 0;
+  overflow: hidden;
+}
+
+.technical-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 64px;
+  padding: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.technical-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.technical-details-title {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--brand-ink-deep);
+}
+
+.technical-details .pill {
+  flex: 0 0 auto;
+}
+
+.technical-meta {
+  padding: 0 16px 16px;
 }
 
 .detail-rail {
@@ -1211,10 +1247,6 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   .detail-overview {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-
-  .detail-overview-card-wide {
-    grid-column: span 3;
-  }
 }
 
 @media (max-width: 1100px) {
@@ -1236,10 +1268,6 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .detail-overview-card-wide {
-    grid-column: span 2;
-  }
-
   .detail-nav-strip {
     grid-template-columns: 1fr;
   }
@@ -1248,10 +1276,6 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 @media (max-width: 640px) {
   .detail-overview {
     grid-template-columns: 1fr;
-  }
-
-  .detail-overview-card-wide {
-    grid-column: span 1;
   }
 
   .detail-decision-grid {

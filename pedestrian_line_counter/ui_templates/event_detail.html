@@ -2,20 +2,16 @@
 
 {% block topbar_filters %}
 <div class="filters detail-header-tools">
-  <div class="field">
-    <label>Event UID</label>
-    <div class="detail-readonly-value" title="{{ event.event_uid }}">{{ short_event_uid(event.event_uid, 14, 8) }}</div>
-  </div>
   {% if detail_queue.previous_item %}
-  <a class="btn" href="{{ detail_queue.previous_item.detail_url }}">Previous (K)</a>
+  <a class="btn" href="{{ detail_queue.previous_item.detail_url }}">Sebelumnya (K)</a>
   {% else %}
-  <span class="btn is-disabled" aria-disabled="true">Previous (K)</span>
+  <span class="btn is-disabled" aria-disabled="true">Sebelumnya (K)</span>
   {% endif %}
-  <a class="btn" href="{{ queue_page_url }}">Back to Queue</a>
+  <a class="btn" href="{{ queue_page_url }}">Kembali ke Queue</a>
   {% if detail_queue.next_item %}
-  <a class="btn primary" href="{{ detail_queue.next_item.detail_url }}">Next (J)</a>
+  <a class="btn primary" href="{{ detail_queue.next_item.detail_url }}">Berikutnya (J)</a>
   {% else %}
-  <span class="btn primary is-disabled" aria-disabled="true">Next (J)</span>
+  <span class="btn primary is-disabled" aria-disabled="true">Berikutnya (J)</span>
   {% endif %}
 </div>
 {% endblock %}
@@ -26,34 +22,27 @@
 
 <div class="detail-crumb">
   <a href="{{ back_to_queue_url }}">Antrian Review</a>
-  <span>/</span>
-  <span>{{ event.event_uid }}</span>
 </div>
 
 <section class="mode-banner detail">
   <div class="mode-copy">
-    <div class="mode-eyebrow">CONTINUOUS REVIEW</div>
-    <div class="mode-title">Review individual data yang melewati crossing</div>
+    <div class="mode-eyebrow">REVIEW BERKELANJUTAN</div>
+    <div class="mode-title">Review data yang melewati crossing</div>
     <div class="mode-desc"><kbd class="kbd">J</kbd> pindah ke event berikutnya di queue, <kbd class="kbd">K</kbd> kembali ke event sebelumnya, dan <kbd class="kbd">Y</kbd> / <kbd class="kbd">N</kbd> menyimpan keputusan lalu lanjut.</div>
   </div>
   <div class="mode-tags">
     {% if detail_queue.in_queue %}
     <span class="pill ink">item {{ detail_queue.position }} / {{ detail_queue.total }}</span>
     {% else %}
-    <span class="pill ink">outside current filter</span>
+    <span class="pill ink">di luar filter aktif</span>
     {% endif %}
-    <span class="pill">auto advance on save</span>
+    <span class="pill">lanjut otomatis</span>
     <span class="pill">{{ detail_queue.date_filter.label }}</span>
-    <a class="pill" href="{{ pending_queue_url }}">Antrian pending.</a>
+    <a class="pill" href="{{ pending_queue_url }}">Antrian pending</a>
   </div>
 </section>
 
 <section class="detail-overview" aria-label="Event overview">
-  <article class="detail-overview-card detail-overview-card-wide detail-overview-card-uid">
-    <span class="detail-overview-label">Event UID</span>
-    <strong class="detail-overview-value detail-overview-id" title="{{ event.event_uid }}">{{ short_event_uid(event.event_uid, 16, 10) }}</strong>
-    <span class="detail-overview-meta">ID Data yang sedang di review.</span>
-  </article>
   <article class="detail-overview-card">
     <span class="detail-overview-label">Tanggal</span>
     <strong class="detail-overview-value">{{ format_date(display_time) }}</strong>
@@ -95,15 +84,15 @@
           <h3>Bukti Event</h3>
           <p class="caption">Bukti gambar utama untuk kendaraan yang melewati lintasan.</p>
         </div>
-        <span class="pill brand">{% if event.scene_url or event.thumb_url %}evidence ready{% else %}no image{% endif %}</span>
+        <span class="pill brand">{% if event.scene_url or event.thumb_url %}bukti tersedia{% else %}tidak ada gambar{% endif %}</span>
       </div>
       <div class="big-thumb detail-thumb detail-player" aria-label="Event evidence">
         {% if event.scene_url %}
-        <img src="{{ event.scene_url }}" alt="Scene evidence for {{ event.event_uid }}" class="evidence-image" decoding="async" fetchpriority="high" />
+        <img src="{{ event.scene_url }}" alt="Bukti scene kendaraan {{ event.direction or 'Unknown' }} pada {{ format_datetime(display_time) }}" class="evidence-image" width="1280" height="720" decoding="async" fetchpriority="high" />
         {% elif event.thumb_url %}
-        <img src="{{ event.thumb_url }}" alt="Thumbnail for {{ event.event_uid }}" class="evidence-image" decoding="async" fetchpriority="high" />
+        <img src="{{ event.thumb_url }}" alt="Thumbnail kendaraan {{ event.direction or 'Unknown' }} pada {{ format_datetime(display_time) }}" class="evidence-image" width="1280" height="720" decoding="async" fetchpriority="high" />
         {% else %}
-        <div class="image-fallback">No evidence image found for this event yet.</div>
+        <div class="image-fallback">Belum ada gambar bukti untuk event ini.</div>
         {% endif %}
         <div class="frame-overlay">
           <span class="pill ink">{{ event.direction or "Unknown" }}</span>
@@ -117,7 +106,7 @@
       <div class="detail-evidence-strip">
         <span class="pill">run {{ event.run_uid or "Unknown" }}</span>
         <span class="pill">camera {{ event.camera_id or "Unknown" }}</span>
-        <span class="pill">Akurasi {{ format_float(event.confidence * 100, 2) }}</span>
+        <span class="pill">Akurasi {{ format_float(event.confidence * 100, 2) }} %</span>
       </div>
     </article>
 
@@ -126,39 +115,40 @@
         <div class="section-head">
           <div>
             <h3>Konteks data</h3>
-            <p class="caption">Metadata event.</p>
+            <p class="caption">Informasi operasional yang membantu review.</p>
           </div>
         </div>
         <div class="meta">
-          <div class="row"><div class="key">Site</div><div class="val">{{ event.site_id or "Unknown" }}</div></div>
-          <div class="row"><div class="key">Camera</div><div class="val">{{ event.camera_id or "Unknown" }}</div></div>
+          <div class="row"><div class="key">Lokasi</div><div class="val">{{ event.site_id or "Unknown" }}</div></div>
+          <div class="row"><div class="key">Kamera</div><div class="val">{{ event.camera_id or "Unknown" }}</div></div>
           <div class="row"><div class="key">Run</div><div class="val">{{ event.run.run_uid if event.run else event.run_uid or "Unknown" }}</div></div>
-          <div class="row"><div class="key">Line mode</div><div class="val">{{ event.run.line_mode if event.run else "Unknown" }}</div></div>
-          <div class="row"><div class="key">Delivery</div><div class="val">{{ event.run.delivery_state_label if event.run else "Unknown" }}</div></div>
+          <div class="row"><div class="key">Mode line</div><div class="val">{{ event.run.line_mode if event.run else "Unknown" }}</div></div>
+          <div class="row"><div class="key">Status kirim</div><div class="val">{{ event.run.delivery_state_label if event.run else "Unknown" }}</div></div>
         </div>
       </div>
 
-      <div class="panel">
-        <div class="section-head">
-          <div>
-            <h3>Event metadata</h3>
-            <p class="caption">Output metadata dari hasil pendeteksian kendaraan.</p>
-          </div>
-        </div>
-        <div class="meta">
+      <details class="panel technical-details">
+        <summary>
+          <span>
+            <span class="technical-details-title">Detail teknis</span>
+            <span class="caption">ID, waktu sumber, dan metadata tracking.</span>
+          </span>
+          <span class="pill">buka</span>
+        </summary>
+        <div class="meta technical-meta">
           <div class="row"><div class="key">Event UID</div><div class="val path-value" title="{{ event.event_uid }}">{{ event.event_uid }}</div></div>
           <div class="row"><div class="key">Waktu lewat (WIB)</div><div class="val">{{ format_datetime(display_time) }}</div></div>
           <div class="row"><div class="key">Waktu sumber</div><div class="val">{{ format_datetime(event.occurred_at_utc) }}</div></div>
-          <div class="row"><div class="key">Video time</div><div class="val">{{ format_float(event.video_time_s, 3) }}s</div></div>
-          <div class="row"><div class="key">Track</div><div class="val">{{ event.track_id or "-" }}</div></div>
-          <div class="row"><div class="key">Tipe kendaraan</div><div class="val">{% if event.review_status == decision_yes %}{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}{% else %}{{ event.model_class_name or event.class_name or "Unknown" }}{% endif %}</div></div>
+          <div class="row"><div class="key">Detik video</div><div class="val">{{ format_float(event.video_time_s, 3) }}s</div></div>
+          <div class="row"><div class="key">Track ID</div><div class="val">{{ event.track_id or "-" }}</div></div>
+          <div class="row"><div class="key">Tipe terdeteksi</div><div class="val">{{ event.model_class_name or event.class_name or "Unknown" }}</div></div>
           {% if event.reviewed_class_name %}
-          <div class="row"><div class="key">Stored correction</div><div class="val">{{ event.reviewed_class_name }}</div></div>
+          <div class="row"><div class="key">Koreksi tersimpan</div><div class="val">{{ event.reviewed_class_name }}</div></div>
           {% endif %}
-          <div class="row"><div class="key">Akurasi (Confidence %)</div><div class="val">{{ format_float(event.confidence * 100, 2)}} %</div></div>
-          <div class="row"><div class="key">Frame index</div><div class="val">{{ event.frame_index or "-" }}</div></div>
+          <div class="row"><div class="key">Akurasi model</div><div class="val">{{ format_float(event.confidence * 100, 2)}} %</div></div>
+          <div class="row"><div class="key">Frame</div><div class="val">{{ event.frame_index or "-" }}</div></div>
         </div>
-      </div>
+      </details>
     </div>
   </section>
 
@@ -195,64 +185,64 @@
       </div>
       <div class="detail-nav-strip" aria-label="Queue navigation">
         <div class="detail-nav-card">
-          <span class="detail-nav-label">Previous (K)</span>
+          <span class="detail-nav-label">Sebelumnya (K)</span>
           {% if detail_queue.previous_item %}
           <a class="detail-nav-link" href="{{ detail_queue.previous_item.detail_url }}">{{ short_event_uid(detail_queue.previous_item.event_uid, 12, 6) }}</a>
           {% else %}
-          <span class="detail-nav-empty">No previous event</span>
+          <span class="detail-nav-empty">Tidak ada event sebelumnya</span>
           {% endif %}
         </div>
         <div class="detail-nav-card detail-nav-card-current">
-          <span class="detail-nav-label">Queue position</span>
+          <span class="detail-nav-label">Posisi queue</span>
           {% if detail_queue.in_queue %}
           <strong class="detail-nav-position">{{ detail_queue.position }} / {{ detail_queue.total }}</strong>
           {% else %}
-          <strong class="detail-nav-position">Outside filter</strong>
+          <strong class="detail-nav-position">Di luar filter</strong>
           {% endif %}
         </div>
         <div class="detail-nav-card">
-          <span class="detail-nav-label">Next (J)</span>
+          <span class="detail-nav-label">Berikutnya (J)</span>
           {% if detail_queue.next_item %}
           <a class="detail-nav-link" href="{{ detail_queue.next_item.detail_url }}">{{ short_event_uid(detail_queue.next_item.event_uid, 12, 6) }}</a>
           {% else %}
-          <span class="detail-nav-empty">Queue ends here</span>
+          <span class="detail-nav-empty">Queue selesai di sini</span>
           {% endif %}
         </div>
       </div>
       <div class="detail-status-row">
         <span class="pill ink">{{ event.direction or "Unknown" }}</span>
         <span class="pill {{ review_pill_class(event.review_status) }}">{{ review_label(event.review_status) }}</span>
-        <span class="pill">{% if event.scene_url or event.thumb_url %}image ready{% else %}no image{% endif %}</span>
+        <span class="pill">{% if event.scene_url or event.thumb_url %}bukti tersedia{% else %}tidak ada gambar{% endif %}</span>
       </div>
       <div class="detail-class-review">
         <div class="section-head">
           <div>
-            <h3>Perubahan tipe kendaraan (optional)</h3>
-            <p class="caption">Jika terdapat tipe kendaraan yang tidak sesuai maka bisa dipilih kembali dengan memilih tipe dibawah ini</p>
+            <h3>Perubahan tipe kendaraan (opsional)</h3>
+            <p class="caption">Jika tipe kendaraan tidak sesuai, pilih tipe yang benar sebelum menyimpan keputusan.</p>
           </div>
           <span class="pill brand">Antrian menggunakan tipe terbaru</span>
         </div>
         <div class="field">
-          <label for="event-detail-reviewed-class" class="detail-field-label">Perbaikan tipe kendaraan (optional)</label>
+          <label for="event-detail-reviewed-class" class="detail-field-label">Perbaikan tipe kendaraan (opsional)</label>
           <select
             id="event-detail-reviewed-class"
             name="reviewed_class"
             data-review-class-input
           >
-            <option value="">Keep detected class</option>
+            <option value="">Tetap gunakan tipe terdeteksi</option>
             {% for option in review_class_options %}
             <option value="{{ option }}" {% if option == event.reviewed_class_name %}selected{% endif %}>{{ option }}</option>
             {% endfor %}
           </select>
-          <p class="caption detail-class-input-note">Kosong berarti tetap gunakan class model saat keputusan YES. Jika keputusan NO, correction tetap boleh diisi sebagai data audit.</p>
+          <p class="caption detail-class-input-note">Kosong berarti tetap gunakan tipe dari model saat keputusan YES. Jika keputusan NO, koreksi tetap disimpan sebagai catatan audit.</p>
         </div>
         <div class="detail-class-preview" data-review-class-preview>
           {% if event.review_status == decision_yes %}
-          Saat ini queue/API memakai class operasional <strong>{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}</strong>. Ubah field correction jika output operasional perlu diganti sebelum menekan YES lagi.
+          Saat ini queue/API memakai tipe operasional <strong>{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}</strong>. Ubah koreksi jika output operasional perlu diganti sebelum menekan YES lagi.
           {% elif event.review_status == decision_no %}
-          Review terakhir adalah NO. Jika disimpan YES, queue/API akan memakai detected class atau correction yang dipilih. Jika disimpan NO, correction hanya disimpan sebagai audit.
+          Review terakhir adalah NO. Jika disimpan YES, queue/API akan memakai tipe terdeteksi atau koreksi yang dipilih. Jika disimpan NO, koreksi hanya disimpan sebagai audit.
           {% else %}
-          Belum ada keputusan. Jika disimpan YES, queue/API akan memakai detected class atau correction yang dipilih di field ini.
+          Belum ada keputusan. Jika disimpan YES, queue/API akan memakai tipe terdeteksi atau koreksi yang dipilih di field ini.
           {% endif %}
         </div>
       </div>
@@ -262,8 +252,8 @@
       </div>
       <p class="caption detail-review-hint">Saat tombol ditekan, sistem menyimpan review lalu membuka event berikutnya pada filter yang sama. Jika tidak ada event berikutnya, halaman kembali ke queue.</p>
       <div class="field">
-        <label for="event-detail-notes" style="font-size: 11px; color: var(--muted); letter-spacing: 0.2px;">Notes</label>
-        <textarea id="event-detail-notes" name="notes" data-review-notes placeholder="Alasan Diterima/Ditolak.">{{ event.review.notes if event.review else "" }}</textarea>
+        <label for="event-detail-notes" class="detail-field-label">Catatan</label>
+        <textarea id="event-detail-notes" name="notes" data-review-notes placeholder="Alasan diterima atau ditolak.">{{ event.review.notes if event.review else "" }}</textarea>
       </div>
       <div class="timeline">
         {% for item in event.timeline %}

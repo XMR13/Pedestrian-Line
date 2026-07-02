@@ -943,8 +943,8 @@ class EdgeApiRuntime:
     def _build_event_timeline(self, event: Mapping[str, Any]) -> List[Dict[str, str]]:
         timeline = [
             {
-                "time": _coalesce_text(event.get("occurred_at_local"), event.get("occurred_at_utc")) or "Unknown",
-                "description": "Crossing event captured and saved to the local spool.",
+                "time": _format_datetime(_display_event_timestamp(event)),
+                "description": "Event crossing tersimpan di spool lokal.",
             }
         ]
         review = event.get("review")
@@ -952,11 +952,11 @@ class EdgeApiRuntime:
             reviewed_class = _text(review.get("reviewed_class"))
             timeline.append(
                 {
-                    "time": _text(review.get("updated_at_utc")) or "Unknown",
+                    "time": _format_datetime(review.get("updated_at_utc")),
                     "description": (
-                        f"Reviewed as {_review_label(_text(review.get('decision')))}"
-                        + (f"; corrected class: {reviewed_class}" if reviewed_class else "")
-                        + (f" with notes: {_text(review.get('notes'))}" if _text(review.get("notes")) else ".")
+                        f"Direview sebagai {_review_label(_text(review.get('decision')))}"
+                        + (f"; koreksi tipe: {reviewed_class}" if reviewed_class else "")
+                        + (f"; catatan: {_text(review.get('notes'))}" if _text(review.get("notes")) else ".")
                     ),
                 }
             )
@@ -964,7 +964,7 @@ class EdgeApiRuntime:
             timeline.append(
                 {
                     "time": "Pending",
-                    "description": "Awaiting reviewer confirmation in the MVP queue.",
+                    "description": "Menunggu konfirmasi reviewer di queue.",
                 }
             )
         return timeline
@@ -1237,9 +1237,9 @@ def create_app(
         app.mount("/ui-static", StaticFiles(directory=str(UI_STATIC_DIR)), name="ui-static")
     router = APIRouter()
 
-    @router.get("/favicon.ico", include_in_schema=False)
+    @router.get("/ui-static/images.png", include_in_schema=False)
     def favicon() -> RedirectResponse:
-        return RedirectResponse(url="/ui-static/favicon.svg", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        return RedirectResponse(url="/ui-static/images.png", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
     @router.get("/", include_in_schema=False)
     def ui_root(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> RedirectResponse:

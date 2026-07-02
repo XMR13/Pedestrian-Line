@@ -942,7 +942,7 @@ def test_review_api_and_event_detail_include_sqlite_backed_review_state(tmp_path
     assert event_payload["reviewed_class_name"] == "pickup"
     assert event_payload["effective_class_name"] == "pickup"
     assert event_payload["review"]["notes"] == "matches target vehicle"
-    assert event_payload["timeline"][-1]["description"].startswith("Reviewed as Diterima")
+    assert event_payload["timeline"][-1]["description"].startswith("Direview sebagai Diterima")
 
 
 def test_review_api_keeps_model_class_as_effective_when_override_matches_prediction(tmp_path) -> None:
@@ -1092,7 +1092,7 @@ def test_event_detail_page_exposes_reviewed_class_input_and_suggestions(tmp_path
     assert detail.status_code == 200
     assert '<select' in detail.text
     assert 'name="reviewed_class"' in detail.text
-    assert 'Keep detected class' in detail.text
+    assert "Tetap gunakan tipe terdeteksi" in detail.text
     assert '<option value="pickup"' in detail.text
 
 
@@ -1489,7 +1489,7 @@ def test_event_detail_includes_cross_page_review_navigation(tmp_path) -> None:
     detail = client.get(f"/ui/events/{boundary_event_uid}?status=pending&page=1&page_size=15")
     assert detail.status_code == 200
     assert "item 15 / 30" in detail.text
-    assert "auto advance on save" in detail.text
+    assert "lanjut otomatis" in detail.text
     assert "&amp;page=2&amp;page_size=15" in detail.text
     assert "data-next-detail-url=" in detail.text
 

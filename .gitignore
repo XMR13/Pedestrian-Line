@@ -45,3 +45,6 @@ portal/evidence/
 portal/tests/**/bin/
 portal/tests/**/obj/
 portal/appsettings.Local*.json
+
+#conf files
+pedestrian_line_counter/ui_static/conf_assets/*
