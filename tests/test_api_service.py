@@ -453,17 +453,18 @@ def test_dashboard_payload_builds_real_hourly_trend(tmp_path) -> None:
     assert trend["empty"] is False
     assert trend["bucket_mode"] == "hour"
     assert trend["bucket_hours"] == 24
-    assert trend["time_basis_label"] == "Time (UTC)"
+    assert trend["time_basis_label"] == "Waktu (WIB)"
     assert trend["window_totals"] == {"a_to_b": 2, "b_to_a": 1, "pending": 2}
-    assert trend["window_label"] == "UTC day 2026-03-11"
+    assert trend["window_label"] == "Tanggal 2026-03-11 (WIB)"
     assert trend["buckets"][0]["label"] == "00:00"
-    assert trend["buckets"][1]["label"] == "01:00"
-    assert trend["buckets"][0]["a_to_b"] == 1
-    assert trend["buckets"][0]["b_to_a"] == 0
-    assert trend["buckets"][0]["pending"] == 1
-    assert trend["buckets"][1]["a_to_b"] == 1
-    assert trend["buckets"][1]["b_to_a"] == 1
-    assert trend["buckets"][1]["pending"] == 1
+    assert trend["buckets"][7]["label"] == "07:00"
+    assert trend["buckets"][8]["label"] == "08:00"
+    assert trend["buckets"][7]["a_to_b"] == 1
+    assert trend["buckets"][7]["b_to_a"] == 0
+    assert trend["buckets"][7]["pending"] == 1
+    assert trend["buckets"][8]["a_to_b"] == 1
+    assert trend["buckets"][8]["b_to_a"] == 1
+    assert trend["buckets"][8]["pending"] == 1
     assert trend["series"][0]["path"].startswith("M")
 
 
@@ -1403,14 +1404,14 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     assert review.status_code == 200
     assert "Antrian Review" in review.text
     assert "run_ui_e1" in review.text
-    assert "17:05:00+07:00" in review.text
+    assert "17:05 WIB" in review.text
     assert "/ui/events/run_ui_e1?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in review.text
 
     detail = client.get("/ui/events/run_ui_e1?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11")
     assert detail.status_code == 200
     assert "Event Detail" in detail.text
     assert "run_ui_e1" in detail.text
-    assert "2026-03-11T17:05:00+07:00" in detail.text
+    assert "2026-03-11 17:05 WIB" in detail.text
     assert "Pending" in detail.text
     assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_ui_e1&amp;page=1&amp;page_size=25&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in detail.text
 

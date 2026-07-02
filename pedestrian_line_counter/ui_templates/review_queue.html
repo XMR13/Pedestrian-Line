@@ -6,7 +6,7 @@
   <div class="timeline compact">
     <div class="tl-item">
       <span class="t">Tabel</span>
-      <span class="d">Reviewer bisa mengscan tabel terlebih dahulu, kemudian bisa memilih data untuk di APPROVE/REJECT.</span>
+      <span class="d">Reviewer bisa scan tabel terlebih dahulu, kemudian memilih data untuk di-APPROVE/REJECT.</span>
     </div>
     <div class="tl-item">
       <span class="t">Keputusan review</span>
@@ -76,7 +76,7 @@
     <span class="pill" data-queue-position-pill>item {{ current_absolute_index }} / {{ queue_total }}</span>
     <span class="pill ink">hotkeys J/K + Enter</span>
     <span class="pill">pending {{ format_count(counts.pending) }}</span>
-    <span class="pill">{% if date_filter.active %}{{ date_filter.label }}{% else %}all UTC dates{% endif %}</span>
+    <span class="pill">{{ date_filter.label }}</span>
   </div>
 </section>
 
@@ -109,7 +109,6 @@
     <div class="table-scroll queue-table-scroll">
       <table class="table queue-table" aria-label="Traffic review queue">
         <colgroup>
-          <col class="queue-col-event" />
           <col class="queue-col-occurred" />
           <col class="queue-col-camera" />
           <col class="queue-col-direction" />
@@ -121,8 +120,7 @@
         </colgroup>
         <thead>
           <tr>
-            <th scope="col">Event</th>
-            <th scope="col">Date / Time</th>
+            <th scope="col">Waktu (WIB)</th>
             <th scope="col">Camera</th>
             <th scope="col">Arah</th>
             <th scope="col">Tipe<br>Kendaraan</th>
@@ -148,9 +146,6 @@
             tabindex="0"
             aria-current="{% if item.event_uid == selected_event_uid %}true{% else %}false{% endif %}"
           >
-            <td>
-              <a class="queue-session-link {% if item.event_uid == selected_event_uid %}active{% endif %}" href="{{ item.queue_select_url }}">{{ item.event_uid }}</a>
-            </td>
             <td>
               {% set display_time = display_event_timestamp(item) %}
               <div class="queue-datetime-cell">

@@ -33,16 +33,16 @@
       <div class="mode-eyebrow">OPS PULSE</div>
       <div class="mode-title">
         {% if latest_run.run_uid %}
-        Data taerbaru {{ latest_run.run_uid }} is {{ latest_run.lifecycle_status or "active" }}
+        Data terbaru {{ latest_run.run_uid }} sedang {{ latest_run.lifecycle_status or "active" }}
         {% else %}
-        UI is online and waiting for spool activity
+        UI aktif dan menunggu aktivitas spool
         {% endif %}
       </div>
       <div class="mode-desc">
         {% if latest_run.run_uid %}
-        Processed FPS {{ format_float(latest_run.processed_fps, 1) }} with {{ format_count(metrics.events_total) }} captured events in local storage.
+        FPS proses {{ format_float(latest_run.processed_fps, 1) }} dengan {{ format_count(metrics.events_total) }} event tersimpan di local storage.
         {% else %}
-        Drop new spool data into the configured directory to populate dashboard cards and evidence panels.
+        Masukkan data spool baru ke direktori yang sudah dikonfigurasi untuk mengisi dashboard dan panel bukti.
         {% endif %}
       </div>
     </div>
@@ -50,7 +50,7 @@
       <span class="pill">runs {{ format_count(metrics.runs_total) }}</span>
       <span class="pill ink">pending {{ format_count(pending_reviews) }}</span>
       <span class="pill brand">reviewed {{ format_count(review_counts.reviewed_total) }}</span>
-      <span class="pill">{% if date_filter.active %}{{ date_filter.label }}{% else %}all UTC dates{% endif %}</span>
+      <span class="pill">{{ date_filter.label }}</span>
     </div>
   </section>
 
@@ -201,7 +201,7 @@
           <thead>
             <tr>
               <th scope="col">Gambar</th>
-              <th scope="col">Datetime</th>
+              <th scope="col">Waktu (WIB)</th>
               <th scope="col">Arah</th>
               <th scope="col">Tipe Kendaraan</th>
               <th scope="col">Review</th>
@@ -257,7 +257,7 @@
             <tr>
               <th scope="col">Run</th>
               <th scope="col">Camera</th>
-              <th scope="col">Updated</th>
+              <th scope="col">Update (WIB)</th>
               <th scope="col">Lifecycle</th>
               <th scope="col">Pengiriman data</th>
             </tr>

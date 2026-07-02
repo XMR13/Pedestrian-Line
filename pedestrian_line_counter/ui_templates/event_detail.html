@@ -43,7 +43,7 @@
     <span class="pill ink">outside current filter</span>
     {% endif %}
     <span class="pill">auto advance on save</span>
-    <span class="pill">{% if detail_queue.date_filter.active %}{{ detail_queue.date_filter.label }}{% else %}all UTC dates{% endif %}</span>
+    <span class="pill">{{ detail_queue.date_filter.label }}</span>
     <a class="pill" href="{{ pending_queue_url }}">Antrian pending.</a>
   </div>
 </section>
@@ -55,14 +55,14 @@
     <span class="detail-overview-meta">ID Data yang sedang di review.</span>
   </article>
   <article class="detail-overview-card">
-    <span class="detail-overview-label">Date</span>
+    <span class="detail-overview-label">Tanggal</span>
     <strong class="detail-overview-value">{{ format_date(display_time) }}</strong>
     <span class="detail-overview-meta">Waktu lewat dari data lokal jika tersedia.</span>
   </article>
   <article class="detail-overview-card">
-    <span class="detail-overview-label">Time</span>
+    <span class="detail-overview-label">Waktu (WIB)</span>
     <strong class="detail-overview-value detail-overview-time">{{ format_time(display_time) }}</strong>
-    <span class="detail-overview-meta">Mengikuti `waktu lewat (WIB)` saat tersedia.</span>
+    <span class="detail-overview-meta">Mengikuti waktu lewat lokal saat tersedia.</span>
   </article>
   <article class="detail-overview-card">
     <span class="detail-overview-label">Arah</span>
@@ -93,7 +93,7 @@
       <div class="section-head">
         <div>
           <h3>Bukti Event</h3>
-          <p class="caption">Bukti gambar utama untuk kendaraan yagn melewati lintasan.</p>
+          <p class="caption">Bukti gambar utama untuk kendaraan yang melewati lintasan.</p>
         </div>
         <span class="pill brand">{% if event.scene_url or event.thumb_url %}evidence ready{% else %}no image{% endif %}</span>
       </div>
@@ -142,13 +142,13 @@
         <div class="section-head">
           <div>
             <h3>Event metadata</h3>
-            <p class="caption">Output metada dari hasil pendeteksian kendaraan.</p>
+            <p class="caption">Output metadata dari hasil pendeteksian kendaraan.</p>
           </div>
         </div>
         <div class="meta">
           <div class="row"><div class="key">Event UID</div><div class="val path-value" title="{{ event.event_uid }}">{{ event.event_uid }}</div></div>
-          <div class="row"><div class="key">Waktu Lewat</div><div class="val">{{ format_datetime(display_time) }}</div></div>
-          <div class="row"><div class="key">Occurred (UTC)</div><div class="val">{{ format_datetime(event.occurred_at_utc) }}</div></div>
+          <div class="row"><div class="key">Waktu lewat (WIB)</div><div class="val">{{ format_datetime(display_time) }}</div></div>
+          <div class="row"><div class="key">Waktu sumber</div><div class="val">{{ format_datetime(event.occurred_at_utc) }}</div></div>
           <div class="row"><div class="key">Video time</div><div class="val">{{ format_float(event.video_time_s, 3) }}s</div></div>
           <div class="row"><div class="key">Track</div><div class="val">{{ event.track_id or "-" }}</div></div>
           <div class="row"><div class="key">Tipe kendaraan</div><div class="val">{% if event.review_status == decision_yes %}{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}{% else %}{{ event.model_class_name or event.class_name or "Unknown" }}{% endif %}</div></div>

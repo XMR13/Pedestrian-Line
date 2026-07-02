@@ -20,7 +20,7 @@ from ._api_common import (
 )
 from .review_store import DECISION_NO, DECISION_YES
 from .source_safety import sanitize_source_value
-from .time_utils import utc_iso_to_local_text
+from .time_utils import local_timezone, local_timezone_name, utc_iso_to_local_text
 
 
 def _load_json_dict(path: Path) -> Optional[Dict[str, Any]]:
@@ -418,9 +418,14 @@ def _normalize_ui_date_range(*, date_from: Optional[str], date_to: Optional[str]
     end_date = _parse_iso_date(date_to)
     if start_date is not None and end_date is not None and start_date > end_date:
         start_date, end_date = end_date, start_date
-    start_utc = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc) if start_date is not None else None
+    local_tz = local_timezone()
+    start_utc = (
+        datetime.combine(start_date, datetime.min.time(), tzinfo=local_tz).astimezone(timezone.utc)
+        if start_date is not None
+        else None
+    )
     end_utc_exclusive = (
-        datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=local_tz).astimezone(timezone.utc)
         if end_date is not None
         else None
     )
@@ -433,27 +438,28 @@ def _normalize_ui_date_range(*, date_from: Optional[str], date_to: Optional[str]
 
 
 def _ui_date_range_context(date_range: UiDateRange) -> Dict[str, Any]:
+    tz_name = local_timezone_name()
     if not date_range.active:
         return {
             "active": False,
             "date_from": "",
             "date_to": "",
-            "label": "All dates",
-            "summary": "All UTC dates",
+            "label": f"Semua tanggal {tz_name}",
+            "summary": f"Semua tanggal {tz_name}",
         }
     if date_range.date_from and date_range.date_to:
         if date_range.date_from == date_range.date_to:
-            label = date_range.date_from
-            summary = f"UTC day {date_range.date_from}"
+            label = f"{date_range.date_from} {tz_name}"
+            summary = f"Tanggal {date_range.date_from} ({tz_name})"
         else:
-            label = f"{date_range.date_from} to {date_range.date_to}"
-            summary = f"UTC range {date_range.date_from} to {date_range.date_to}"
+            label = f"{date_range.date_from} sampai {date_range.date_to} {tz_name}"
+            summary = f"Rentang {date_range.date_from} sampai {date_range.date_to} ({tz_name})"
     elif date_range.date_from:
-        label = f"From {date_range.date_from}"
-        summary = f"UTC from {date_range.date_from}"
+        label = f"Mulai {date_range.date_from} {tz_name}"
+        summary = f"Mulai {date_range.date_from} ({tz_name})"
     else:
-        label = f"Until {date_range.date_to}"
-        summary = f"UTC until {date_range.date_to}"
+        label = f"Sampai {date_range.date_to} {tz_name}"
+        summary = f"Sampai {date_range.date_to} ({tz_name})"
     return {
         "active": True,
         "date_from": date_range.date_from or "",
@@ -600,8 +606,16 @@ def _format_datetime(value: Any) -> str:
     text = _text(value)
     if text is None:
         return "Unavailable"
+    parsed = _parse_iso_datetime(text)
+    if parsed is not None:
+        return parsed.astimezone(local_timezone()).strftime(f"%Y-%m-%d %H:%M {local_timezone_name()}")
     if "T" in text:
-        return text.replace("T", " ").replace("Z", " UTC")
+        text = text.replace("T", " ")
+    if "+" in text:
+        text = text.split("+", 1)[0].strip()
+    text = text.replace("Z", "").strip()
+    if len(text) >= 16:
+        return f"{text[:16]} {local_timezone_name()}"
     return text
 
 
@@ -622,6 +636,9 @@ def _format_date(value: Any) -> str:
     text = _text(value)
     if text is None:
         return "Unavailable"
+    parsed = _parse_iso_datetime(text)
+    if parsed is not None:
+        return parsed.astimezone(local_timezone()).strftime("%Y-%m-%d")
     if "T" in text:
         return text.split("T", 1)[0]
     if " " in text:
@@ -633,13 +650,21 @@ def _format_time(value: Any) -> str:
     text = _text(value)
     if text is None:
         return "Unavailable"
+    parsed = _parse_iso_datetime(text)
+    if parsed is not None:
+        return parsed.astimezone(local_timezone()).strftime(f"%H:%M {local_timezone_name()}")
     if "T" in text:
         time_text = text.split("T", 1)[1]
     elif " " in text:
         time_text = text.split(" ", 1)[1]
     else:
         return "Unavailable"
-    return time_text.replace("Z", " UTC")
+    time_text = time_text.replace("Z", "").strip()
+    if "+" in time_text:
+        time_text = time_text.split("+", 1)[0].strip()
+    if len(time_text) >= 5:
+        return f"{time_text[:5]} {local_timezone_name()}"
+    return time_text
 
 
 def _parse_iso_datetime(value: Any) -> Optional[datetime]:
@@ -692,7 +717,7 @@ def _empty_dashboard_trend(date_range: UiDateRange) -> Dict[str, Any]:
         "empty": True,
         "bucket_hours": bucket_count if bucket_mode == "hour" else None,
         "bucket_mode": bucket_mode,
-        "time_basis_label": "Time (UTC)",
+        "time_basis_label": f"Waktu ({local_timezone_name()})",
         "window_label": _trend_window_label(date_range=date_range, range_start=range_start, range_end_exclusive=range_end_exclusive),
         "buckets": buckets,
         "series": [
@@ -757,12 +782,15 @@ def _select_trend_bucket_mode(*, range_start: datetime, range_end_exclusive: dat
 
 
 def _align_datetime_to_bucket(value: datetime, *, bucket_mode: str) -> datetime:
-    normalized = value.astimezone(timezone.utc)
+    normalized = value.astimezone(local_timezone())
     if bucket_mode == "hour":
-        return normalized.replace(minute=0, second=0, microsecond=0)
+        aligned = normalized.replace(minute=0, second=0, microsecond=0)
+        return aligned.astimezone(timezone.utc)
     if bucket_mode == "day":
-        return normalized.replace(hour=0, minute=0, second=0, microsecond=0)
-    return normalized.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        aligned = normalized.replace(hour=0, minute=0, second=0, microsecond=0)
+        return aligned.astimezone(timezone.utc)
+    aligned = normalized.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return aligned.astimezone(timezone.utc)
 
 
 def _bucket_step(bucket_mode: str) -> timedelta:
@@ -783,13 +811,13 @@ def _build_trend_buckets(
     while current < range_end_exclusive and len(buckets) < TREND_MAX_BUCKETS:
         if bucket_mode == "month":
             next_bucket = _month_start(current, 1)
-            label = current.strftime("%Y-%m")
+            label = current.astimezone(local_timezone()).strftime("%Y-%m")
         elif bucket_mode == "day":
             next_bucket = current + timedelta(days=1)
-            label = current.strftime("%m-%d")
+            label = current.astimezone(local_timezone()).strftime("%m-%d")
         else:
             next_bucket = current + timedelta(hours=1)
-            label = current.strftime("%H:%M")
+            label = current.astimezone(local_timezone()).strftime("%H:%M")
         buckets.append(
             {
                 "start": current,
@@ -806,7 +834,9 @@ def _build_trend_buckets(
             {
                 "start": aligned_start,
                 "end": aligned_start + _bucket_step(bucket_mode),
-                "label": aligned_start.strftime("%H:%M" if bucket_mode == "hour" else "%m-%d"),
+                "label": aligned_start.astimezone(local_timezone()).strftime(
+                    "%H:%M" if bucket_mode == "hour" else "%m-%d"
+                ),
                 "a_to_b": 0,
                 "b_to_a": 0,
                 "pending": 0,
@@ -816,11 +846,11 @@ def _build_trend_buckets(
 
 
 def _month_start(value: datetime, offset: int = 0) -> datetime:
-    base = value.astimezone(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    base = value.astimezone(local_timezone()).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_index = (base.year * 12 + (base.month - 1)) + offset
     year = month_index // 12
     month = (month_index % 12) + 1
-    return datetime(year, month, 1, tzinfo=timezone.utc)
+    return datetime(year, month, 1, tzinfo=local_timezone()).astimezone(timezone.utc)
 
 
 def _trend_window_label(
@@ -829,14 +859,15 @@ def _trend_window_label(
     range_start: datetime,
     range_end_exclusive: datetime,
 ) -> str:
+    tz_name = local_timezone_name()
     if date_range.date_from and date_range.date_to:
         if date_range.date_from == date_range.date_to:
-            return f"UTC day {date_range.date_from}"
-        return f"UTC range {date_range.date_from} to {date_range.date_to}"
+            return f"Tanggal {date_range.date_from} ({tz_name})"
+        return f"Rentang {date_range.date_from} sampai {date_range.date_to} ({tz_name})"
     if date_range.date_from:
-        return f"UTC from {date_range.date_from}"
+        return f"Mulai {date_range.date_from} ({tz_name})"
     if date_range.date_to:
-        return f"UTC until {date_range.date_to}"
+        return f"Sampai {date_range.date_to} ({tz_name})"
     day_span = max(1.0, (range_end_exclusive - range_start).total_seconds() / 86400.0)
     if day_span <= 1.5:
         return f"Last {TREND_BUCKET_HOURS} hours"

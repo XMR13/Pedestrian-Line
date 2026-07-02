@@ -807,7 +807,7 @@ class EdgeApiRuntime:
             "empty": False,
             "bucket_hours": bucket_count if bucket_mode == "hour" else None,
             "bucket_mode": bucket_mode,
-            "time_basis_label": "Time (UTC)",
+            "time_basis_label": "Waktu (WIB)",
             "window_label": _trend_window_label(date_range=date_range, range_start=range_start, range_end_exclusive=range_end_exclusive),
             "buckets": buckets,
             "series": series,
