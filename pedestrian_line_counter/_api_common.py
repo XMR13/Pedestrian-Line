@@ -17,6 +17,14 @@ UI_TEMPLATE_DIR = Path(__file__).resolve().parent / "ui_templates"
 UI_STATIC_DIR = Path(__file__).resolve().parent / "ui_static"
 REVIEW_STATUS_PENDING = "pending"
 REVIEW_STATUS_ALL = "all"
+REVIEW_REJECT_REASON_OPTIONS = (
+    ("not_relevant", "Tidak relevan untuk validasi"),
+    ("false_positive", "False positive / bukan kendaraan target"),
+    ("wrong_crossing", "Salah crossing line"),
+    ("duplicate", "Duplikat"),
+    ("unclear_evidence", "Gambar tidak jelas"),
+    ("other", "Lainnya"),
+)
 DEFAULT_REVIEW_PAGE_SIZE = 25
 REVIEW_PAGE_SIZE_OPTIONS = (15, 20, 25)
 UI_STATIC_VERSION = max(
@@ -51,6 +59,7 @@ class RetentionRequest(BaseModel):
 class ReviewUpdateRequest(BaseModel):
     decision: str
     reviewed_class: Optional[str] = None
+    reject_reason: Optional[str] = None
     notes: str = ""
     camera_id: Optional[str] = None
     status_filter: Optional[str] = None

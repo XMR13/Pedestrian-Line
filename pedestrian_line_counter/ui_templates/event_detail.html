@@ -67,7 +67,13 @@
       {{ event.model_class_name or event.class_name or "Unknown" }}
       {% endif %}
     </strong>
-    <span class="detail-overview-meta">Satu class utama untuk operator. Jika review YES, tampilan mengikuti class operasional.</span>
+    <span class="detail-overview-meta">
+      {% if event.review_status == decision_no %}
+      Tipe ini tetap menjadi bukti model, tetapi data tidak dipakai sebagai hasil operasional.
+      {% else %}
+      Jika diterima, tipe ini atau koreksi operator menjadi hasil operasional.
+      {% endif %}
+    </span>
   </article>
   <article class="detail-overview-card detail-overview-status status-{{ 'yes' if event.review_status == decision_yes else 'no' if event.review_status == decision_no else 'unknown' }}">
     <span class="detail-overview-label">Review</span>
@@ -180,7 +186,7 @@
       <div class="section-head">
         <div>
           <h3>Review</h3>
-          <p class="caption">Proses review manual setelah melakukan pengecekan bukti. Keputusan akan langsung membuka event berikutnya bila tersedia.</p>
+          <p class="caption">Putuskan apakah data ini dipakai untuk validasi operasional. Keputusan akan langsung membuka event berikutnya bila tersedia.</p>
         </div>
       </div>
       <div class="detail-nav-strip" aria-label="Queue navigation">
@@ -217,13 +223,13 @@
       <div class="detail-class-review">
         <div class="section-head">
           <div>
-            <h3>Perubahan tipe kendaraan (opsional)</h3>
-            <p class="caption">Jika tipe kendaraan tidak sesuai, pilih tipe yang benar sebelum menyimpan keputusan.</p>
+            <h3>Data vehicle valid</h3>
+            <p class="caption">Pilih tipe hanya bila data ini diterima dan tipe dari model perlu dikoreksi.</p>
           </div>
-          <span class="pill brand">Antrian menggunakan tipe terbaru</span>
+          <span class="pill yes">Untuk data valid</span>
         </div>
         <div class="field">
-          <label for="event-detail-reviewed-class" class="detail-field-label">Perbaikan tipe kendaraan (opsional)</label>
+          <label for="event-detail-reviewed-class" class="detail-field-label">Tipe operasional saat diterima</label>
           <select
             id="event-detail-reviewed-class"
             name="reviewed_class"
@@ -234,26 +240,52 @@
             <option value="{{ option }}" {% if option == event.reviewed_class_name %}selected{% endif %}>{{ option }}</option>
             {% endfor %}
           </select>
-          <p class="caption detail-class-input-note">Kosong berarti tetap gunakan tipe dari model saat keputusan YES. Jika keputusan NO, koreksi tetap disimpan sebagai catatan audit.</p>
+          <p class="caption detail-class-input-note">Kosong berarti tetap gunakan tipe dari model saat ditekan Terima. Jika ditekan Tolak, tipe ini tidak menjadi hasil operasional.</p>
         </div>
         <div class="detail-class-preview" data-review-class-preview>
           {% if event.review_status == decision_yes %}
-          Saat ini queue/API memakai tipe operasional <strong>{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}</strong>. Ubah koreksi jika output operasional perlu diganti sebelum menekan YES lagi.
+          Data ini sedang diterima sebagai <strong>{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}</strong>. Ubah tipe bila hasil operasional perlu dikoreksi.
           {% elif event.review_status == decision_no %}
-          Review terakhir adalah NO. Jika disimpan YES, queue/API akan memakai tipe terdeteksi atau koreksi yang dipilih. Jika disimpan NO, koreksi hanya disimpan sebagai audit.
+          Data ini sedang ditolak. Jika nanti diterima, sistem akan memakai tipe terdeteksi atau koreksi yang dipilih.
           {% else %}
-          Belum ada keputusan. Jika disimpan YES, queue/API akan memakai tipe terdeteksi atau koreksi yang dipilih di field ini.
+          Belum ada keputusan. Jika diterima, sistem memakai tipe terdeteksi atau koreksi yang dipilih di field ini.
+          {% endif %}
+        </div>
+      </div>
+      <div class="detail-reject-review">
+        <div class="section-head">
+          <div>
+            <h3>Jika ditolak, alasannya apa?</h3>
+            <p class="caption">Opsional. Pakai ini untuk membedakan data tidak relevan, false positive, duplikat, atau masalah crossing.</p>
+          </div>
+          <span class="pill no">Untuk data tidak valid</span>
+        </div>
+        <div class="field">
+          <label for="event-detail-reject-reason" class="detail-field-label">Alasan tolak</label>
+          <select id="event-detail-reject-reason" name="reject_reason" data-review-reject-reason>
+            <option value="">Tidak pilih alasan</option>
+            {% for option in reject_reason_options %}
+            <option value="{{ option.value }}" {% if option.selected %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+          <p class="caption detail-class-input-note">False positive tetap disimpan sebagai data tolak, bukan sebagai class kendaraan baru.</p>
+        </div>
+        <div class="detail-reject-preview" data-review-reject-preview>
+          {% if event.review_status == decision_no and reject_reason_label %}
+          Alasan tolak tersimpan: <strong>{{ reject_reason_label }}</strong>.
+          {% else %}
+          Tolak berarti data tidak dipakai sebagai hasil operasional, tetapi bukti model tetap tersimpan untuk audit dan active learning berikutnya.
           {% endif %}
         </div>
       </div>
       <div class="detail-decision-grid">
-        <button class="btn yes detail-decision-btn" type="submit" name="decision" value="{{ decision_yes }}" data-review-submit data-decision="{{ decision_yes }}">YES</button>
-        <button class="btn no detail-decision-btn" type="submit" name="decision" value="{{ decision_no }}" data-review-submit data-decision="{{ decision_no }}">NO</button>
+        <button class="btn yes detail-decision-btn" type="submit" name="decision" value="{{ decision_yes }}" data-review-submit data-decision="{{ decision_yes }}">Terima</button>
+        <button class="btn no detail-decision-btn" type="submit" name="decision" value="{{ decision_no }}" data-review-submit data-decision="{{ decision_no }}">Tolak</button>
       </div>
-      <p class="caption detail-review-hint">Saat tombol ditekan, sistem menyimpan review lalu membuka event berikutnya pada filter yang sama. Jika tidak ada event berikutnya, halaman kembali ke queue.</p>
+      <p class="caption detail-review-hint">Terima memakai tipe operasional di atas. Tolak mencatat alasan bila dipilih dan tidak membuat class baru.</p>
       <div class="field">
-        <label for="event-detail-notes" class="detail-field-label">Catatan</label>
-        <textarea id="event-detail-notes" name="notes" data-review-notes placeholder="Alasan diterima atau ditolak.">{{ event.review.notes if event.review else "" }}</textarea>
+        <label for="event-detail-notes" class="detail-field-label">Catatan tambahan</label>
+        <textarea id="event-detail-notes" name="notes" data-review-notes placeholder="Detail tambahan untuk keputusan ini.">{{ operator_notes }}</textarea>
       </div>
       <div class="timeline">
         {% for item in event.timeline %}

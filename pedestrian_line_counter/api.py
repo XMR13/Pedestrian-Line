@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 import secrets
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
@@ -36,6 +36,7 @@ from ._api_common import (
     MAX_RUNS_LIMIT,
     MutationAuthConfig,
     REVIEW_PAGE_SIZE_OPTIONS,
+    REVIEW_REJECT_REASON_OPTIONS,
     REVIEW_STATUS_ALL,
     REVIEW_STATUS_PENDING,
     RetentionRequest,
@@ -587,6 +588,7 @@ class EdgeApiRuntime:
         *,
         decision: str,
         reviewed_class: Optional[str] = None,
+        reject_reason: Optional[str] = None,
         notes: str = "",
         camera_id: Optional[str] = None,
         status_filter: Optional[str] = None,
@@ -600,10 +602,15 @@ class EdgeApiRuntime:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"event_uid not found: {event_uid}")
 
         queue_camera_id = _text(camera_id)
+        normalized_decision = str(decision or "").strip().lower()
         normalized_status = _normalize_review_filter(status_filter)
         normalized_reviewed_class = _normalize_reviewed_class_name(
             reviewed_class,
             model_class_name=_text(event.get("class_name")),
+        )
+        normalized_notes = _compose_review_notes(
+            notes,
+            reject_reason=reject_reason if normalized_decision == DECISION_NO else None,
         )
         normalized_page = max(1, int(page or 1))
         normalized_page_size = _normalize_review_page_size(page_size) if page_size is not None else DEFAULT_REVIEW_PAGE_SIZE
@@ -630,7 +637,7 @@ class EdgeApiRuntime:
             camera_id=_text(event.get("camera_id")),
             decision=decision,
             reviewed_class=normalized_reviewed_class,
-            notes=notes,
+            notes=normalized_notes,
             now_utc=_utcnow_iso(),
         )
         updated_event = self.get_event(event_uid)
@@ -1237,9 +1244,9 @@ def create_app(
         app.mount("/ui-static", StaticFiles(directory=str(UI_STATIC_DIR)), name="ui-static")
     router = APIRouter()
 
-    @router.get("/ui-static/images.png", include_in_schema=False)
+    @router.get("/favicon.ico", include_in_schema=False)
     def favicon() -> RedirectResponse:
-        return RedirectResponse(url="/ui-static/images.png", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        return RedirectResponse(url="/ui-static/favicon.svg", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
     @router.get("/", include_in_schema=False)
     def ui_root(runtime: EdgeApiRuntime = Depends(_get_runtime)) -> RedirectResponse:
@@ -1515,6 +1522,7 @@ def create_app(
             event_uid,
             decision=payload.decision,
             reviewed_class=payload.reviewed_class,
+            reject_reason=payload.reject_reason,
             notes=payload.notes,
             camera_id=payload.camera_id,
             status_filter=payload.status_filter,
@@ -1537,6 +1545,7 @@ def create_app(
         if decision == "":
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="decision is required")
         reviewed_class = _text((form_fields.get("reviewed_class") or [""])[0]) or None
+        reject_reason = _text((form_fields.get("reject_reason") or [""])[0]) or None
         notes = _text((form_fields.get("notes") or [""])[0])
         camera_id = _text((form_fields.get("camera_id") or [""])[0]) or None
         status_filter = _text((form_fields.get("status_filter") or [REVIEW_STATUS_PENDING])[0]) or REVIEW_STATUS_PENDING
@@ -1548,6 +1557,7 @@ def create_app(
             event_uid,
             decision=decision,
             reviewed_class=reviewed_class,
+            reject_reason=reject_reason,
             notes=notes,
             camera_id=camera_id,
             status_filter=status_filter,
@@ -1702,6 +1712,19 @@ def create_app(
                 review_class_options.append(current_reviewed_class)
                 review_class_options.sort()
         context["review_class_options"] = review_class_options
+        reject_reason_value, reject_reason_label, operator_notes = _split_reject_reason_from_notes(
+            _text(item.get("review", {}).get("notes")) if isinstance(item.get("review"), Mapping) else None
+        )
+        context["reject_reason_options"] = [
+            {
+                "value": value,
+                "label": label,
+                "selected": value == reject_reason_value,
+            }
+            for value, label in REVIEW_REJECT_REASON_OPTIONS
+        ]
+        context["reject_reason_label"] = reject_reason_label
+        context["operator_notes"] = operator_notes
         context["queue_page_number"] = int(queue_context["pagination"]["current_page"])
         return templates.TemplateResponse(request, "event_detail.html", context)
 
@@ -1767,6 +1790,44 @@ def _normalize_reviewed_class_name(
     if normalized == _text(model_class_name):
         return None
     return normalized
+
+_REJECT_REASON_NOTE_PREFIX = "Alasan tolak: "
+
+
+def _reject_reason_labels() -> Dict[str, str]:
+    return {value: label for value, label in REVIEW_REJECT_REASON_OPTIONS}
+
+
+def _compose_review_notes(notes: Optional[str], *, reject_reason: Optional[str]) -> str:
+    _, _, clean_notes = _split_reject_reason_from_notes(notes)
+    reason_value = _text(reject_reason)
+    if reason_value is None:
+        return clean_notes
+    reason_label = _reject_reason_labels().get(reason_value)
+    if reason_label is None:
+        return clean_notes
+    if clean_notes:
+        return f"{_REJECT_REASON_NOTE_PREFIX}{reason_label}\n{clean_notes}"
+    return f"{_REJECT_REASON_NOTE_PREFIX}{reason_label}"
+
+
+def _split_reject_reason_from_notes(notes: Optional[str]) -> Tuple[Optional[str], Optional[str], str]:
+    raw_notes = str(notes or "").strip()
+    if not raw_notes:
+        return None, None, ""
+
+    lines = raw_notes.splitlines()
+    first_line = lines[0].strip()
+    if not first_line.startswith(_REJECT_REASON_NOTE_PREFIX):
+        return None, None, raw_notes
+
+    label = first_line[len(_REJECT_REASON_NOTE_PREFIX):].strip()
+    value_by_label = {label_text: value for value, label_text in REVIEW_REJECT_REASON_OPTIONS}
+    reason_value = value_by_label.get(label)
+    clean_notes = "\n".join(lines[1:]).strip()
+    if reason_value is None:
+        return None, None, raw_notes
+    return reason_value, label, clean_notes
 
 def _effective_class_name(
     model_class_name: Optional[str],

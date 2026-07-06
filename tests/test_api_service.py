@@ -1092,8 +1092,48 @@ def test_event_detail_page_exposes_reviewed_class_input_and_suggestions(tmp_path
     assert detail.status_code == 200
     assert '<select' in detail.text
     assert 'name="reviewed_class"' in detail.text
+    assert 'name="reject_reason"' in detail.text
     assert "Tetap gunakan tipe terdeteksi" in detail.text
+    assert "False positive / bukan kendaraan target" in detail.text
     assert '<option value="pickup"' in detail.text
+
+
+def test_event_detail_reject_reason_is_saved_in_existing_notes(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_reject_reason",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    response = client.post(
+        "/ui/events/run_reject_reason_e1/review",
+        data={
+            "decision": "qualified_no",
+            "reject_reason": "false_positive",
+            "notes": "shadow on the lane marker",
+            "status_filter": "pending",
+            "page": "1",
+            "page_size": "25",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    payload = client.get("/events/run_reject_reason_e1").json()
+    assert payload["review"]["decision"] == "qualified_no"
+    assert payload["review"]["notes"] == (
+        "Alasan tolak: False positive / bukan kendaraan target\n"
+        "shadow on the lane marker"
+    )
+
+    detail = client.get("/ui/events/run_reject_reason_e1?status=all&page=1&page_size=25")
+    assert detail.status_code == 200
+    assert '<option value="false_positive" selected' in detail.text
+    assert "shadow on the lane marker" in detail.text
 
 
 def test_review_api_returns_next_pending_event_for_detail_flow(tmp_path) -> None:

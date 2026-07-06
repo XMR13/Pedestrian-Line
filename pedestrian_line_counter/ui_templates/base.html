@@ -10,7 +10,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Sora:wght@400;500;600;700;800&display=swap"
     />
-    <link rel="icon" type="image/png" href="/ui-static/images.png?v={{ ui_static_version }}" />
+    <link rel="icon" type="image/png" href="/ui-static/conf_assets/images.png?v={{ ui_static_version }}" />
     <link rel="stylesheet" href="/ui-static/app.css?v={{ ui_static_version }}" />
   </head>
   <body class="page-{{ page_name|replace('_', '-') }}">
@@ -73,11 +73,10 @@
 
         <section class="panel sidebar-note">
           <h3>Runtime</h3>
-          <p class="caption">Status dari service dan local pool.</p>
+          <p class="caption">Status dari service data.</p>
           <div class="meta">
             <div class="row"><div class="key">Spool</div><div class="val path-value" title="{{ runtime.spool_dir }}">{{ compact_path(runtime.spool_dir, 2) }}</div></div>
             <div class="row"><div class="key">Retention</div><div class="val">{{ "On" if runtime.retention_cfg.enabled else "Off" }}</div></div>
-            <div class="row"><div class="key">Mutation auth</div><div class="val">{{ "On" if runtime.mutation_auth_cfg.enabled() else "Off" }}</div></div>
           </div>
         </section>
 

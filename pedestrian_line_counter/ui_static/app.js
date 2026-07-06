@@ -219,6 +219,8 @@
     const noButton = buttons.find((button) => String(button.dataset.decision || "") === "qualified_no") || null;
     const reviewClassInput = actionRoot.querySelector("[data-review-class-input]");
     const reviewClassPreview = actionRoot.querySelector("[data-review-class-preview]");
+    const rejectReasonInput = actionRoot.querySelector("[data-review-reject-reason]");
+    const rejectReasonPreview = actionRoot.querySelector("[data-review-reject-preview]");
     const modelClass = String(actionRoot.dataset.modelClass || "").trim();
 
     const updateReviewClassPreview = () => {
@@ -233,11 +235,27 @@
       }
       const reviewedClass = String(reviewClassInput.value || "").trim();
       if (reviewedClass) {
-        reviewClassPreview.textContent = `Jika disimpan YES, queue/API akan memakai class operasional ${reviewedClass}. Jika disimpan NO, correction ini tetap disimpan sebagai audit.`;
+        reviewClassPreview.textContent = `Jika diterima, data ini dihitung sebagai ${reviewedClass}. Jika ditolak, tipe ini tidak menjadi hasil operasional.`;
         return;
       }
       const detectedClass = modelClass || "detected class";
-      reviewClassPreview.textContent = `Jika field correction dikosongkan lalu disimpan YES, queue/API tetap memakai detected class ${detectedClass}. Jika disimpan NO, tidak ada override class operasional yang dipakai.`;
+      reviewClassPreview.textContent = `Jika diterima tanpa koreksi, data ini dihitung sebagai ${detectedClass}. Jika ditolak, tidak ada class operasional baru yang dibuat.`;
+    };
+
+    const updateRejectReasonPreview = () => {
+      if (
+        !(rejectReasonInput instanceof HTMLSelectElement)
+        || !(rejectReasonPreview instanceof HTMLElement)
+      ) {
+        return;
+      }
+      const selected = rejectReasonInput.options[rejectReasonInput.selectedIndex];
+      const label = selected ? String(selected.textContent || "").trim() : "";
+      if (String(rejectReasonInput.value || "").trim() && label) {
+        rejectReasonPreview.textContent = `Jika ditolak, alasan "${label}" akan disimpan di catatan review.`;
+        return;
+      }
+      rejectReasonPreview.textContent = "Tolak berarti data tidak dipakai sebagai hasil operasional, tetapi bukti model tetap tersimpan untuk audit dan active learning berikutnya.";
     };
 
     actionRoot.addEventListener("submit", (event) => {
@@ -258,6 +276,11 @@
       reviewClassInput.addEventListener("input", updateReviewClassPreview);
       reviewClassInput.addEventListener("change", updateReviewClassPreview);
       updateReviewClassPreview();
+    }
+
+    if (rejectReasonInput instanceof HTMLSelectElement) {
+      rejectReasonInput.addEventListener("change", updateRejectReasonPreview);
+      updateRejectReasonPreview();
     }
 
     if (isDetailPage && detailNavigationTargets.size > 0) {

@@ -123,6 +123,7 @@ img, svg { display: block; max-width: 100%; }
   padding: 5px 9px; border-radius: 999px; border: 1px solid rgba(21,27,39,.12); background: rgba(21,27,39,.06); color: rgba(21,27,39,.76);
 }
 .pill.brand { background: rgba(232,24,32,.11); border-color: rgba(232,24,32,.18); color: #881015; }
+.pill.yes {background: rgba(7, 210, 20, 0.11); border-color: rgba(232,24,32,.18); color: #881015;}
 .pill.ink { background: rgba(64,64,64,.11); border-color: rgba(64,64,64,.2); color: #252525; }
 .pill.ok { background: rgba(22,101,52,.11); border-color: rgba(22,101,52,.2); color: var(--ok); }
 .pill.yes { background: rgba(21,128,61,.14); border-color: rgba(21,128,61,.26); color: var(--ok-bright); }
@@ -1225,6 +1226,17 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     radial-gradient(220px 120px at 100% 0%, rgba(232, 24, 32, 0.08), transparent 72%);
 }
 
+.detail-reject-review {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(185, 28, 28, 0.18);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 247, 247, 0.78)),
+    radial-gradient(220px 120px at 100% 0%, rgba(185, 28, 28, 0.1), transparent 72%);
+}
+
 .detail-class-input-note {
   margin-top: 6px;
 }
@@ -1239,8 +1251,22 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   color: rgba(45, 55, 72, 0.84);
 }
 
+.detail-reject-preview {
+  border: 1px dashed rgba(185, 28, 28, 0.24);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 247, 247, 0.86);
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(45, 55, 72, 0.84);
+}
+
 .detail-class-preview strong {
   color: var(--brand-ink-deep);
+}
+
+.detail-reject-preview strong {
+  color: var(--no);
 }
 
 @media (max-width: 1260px) {
