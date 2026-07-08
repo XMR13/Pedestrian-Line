@@ -1093,6 +1093,10 @@ def test_event_detail_page_exposes_reviewed_class_input_and_suggestions(tmp_path
     assert '<select' in detail.text
     assert 'name="reviewed_class"' in detail.text
     assert 'name="reject_reason"' in detail.text
+    assert "Terima" in detail.text
+    assert "Tolak" in detail.text
+    assert detail.text.index("Terima") < detail.text.index('name="reviewed_class"')
+    assert detail.text.index("Tolak") < detail.text.index('name="reject_reason"')
     assert "Tetap gunakan tipe terdeteksi" in detail.text
     assert "False positive / bukan kendaraan target" in detail.text
     assert '<option value="pickup"' in detail.text
@@ -1443,6 +1447,8 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     review = client.get("/ui/review?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11")
     assert review.status_code == 200
     assert "Antrian Review" in review.text
+    assert "Periksa data kendaraan" in review.text
+    assert "SQLite" not in review.text
     assert "run_ui_e1" in review.text
     assert "17:05 WIB" in review.text
     assert "/ui/events/run_ui_e1?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in review.text

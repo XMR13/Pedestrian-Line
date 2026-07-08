@@ -6,7 +6,7 @@
   <div class="timeline compact">
     <div class="tl-item">
       <span class="t">Tabel</span>
-      <span class="d">Reviewer bisa scan tabel terlebih dahulu, kemudian memilih data untuk di-APPROVE/REJECT.</span>
+      <span class="d">Reviewer bisa scan tabel terlebih dahulu, kemudian memilih data untuk DITERIMA/DITOLAK.</span>
     </div>
     <div class="tl-item">
       <span class="t">Keputusan review</span>
@@ -22,7 +22,7 @@
 
 {% block topbar_filters %}
 <form class="filters" method="get" action="{{ ui_base_path }}/review">
-  <span class="hint">Banyak data antrian: {{ format_count(queue_total) }}</span>
+  <span class="hint">Banyak data  : {{ format_count(queue_total) }}</span>
   <div class="field">
     <label>Camera</label>
     <select name="camera_id">
@@ -97,7 +97,7 @@
       <div class="queue-head-actions">
         {% if current %}
         <span class="hint" data-queue-selected-label>Selected: {{ short_event_uid(current.event_uid, 12, 6) }}</span>
-        <a class="btn primary" href="{{ current.detail_url }}" data-queue-selected-detail>Open selected detail</a>
+        <a class="btn primary" href="{{ current.detail_url }}" data-queue-selected-detail>Buka halaman detail</a>
         {% else %}
         <span class="pill" data-queue-selected-label>No selection</span>
         <a class="btn primary" href="#" data-queue-selected-detail aria-disabled="true">Open selected detail</a>
@@ -179,7 +179,6 @@
                   </span>
                   {% else %}
                   <span class="pill ink">detected</span>
-                  <span class="queue-class-note">awaiting review</span>
                   {% endif %}
                 </div>
               </div>

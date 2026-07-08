@@ -30,19 +30,19 @@
 <div class="grid">
   <section class="mode-banner" aria-label="System pulse">
     <div class="mode-copy">
-      <div class="mode-eyebrow">OPS PULSE</div>
+      <div class="mode-eyebrow">Data terbaru</div>
       <div class="mode-title">
         {% if latest_run.run_uid %}
-        Data terbaru {{ latest_run.run_uid }} sedang {{ latest_run.lifecycle_status or "active" }}
+        Pemantauan data kendaraan yang sedang berjalan
         {% else %}
-        UI aktif dan menunggu aktivitas spool
+        Menunggu data kendaraan masuk
         {% endif %}
       </div>
       <div class="mode-desc">
         {% if latest_run.run_uid %}
-        FPS proses {{ format_float(latest_run.processed_fps, 1) }} dengan {{ format_count(metrics.events_total) }} event tersimpan di local storage.
+        Dashboard menampilkan {{ format_count(metrics.events_total) }} data kendaraan pada periode ini.
         {% else %}
-        Masukkan data spool baru ke direktori yang sudah dikonfigurasi untuk mengisi dashboard dan panel bukti.
+        Masukkan data ke direktori yang sudah dikonfigurasi untuk mengisi dashboard dan panel bukti.
         {% endif %}
       </div>
     </div>
@@ -58,8 +58,8 @@
     <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">A_TO_B</div><div class="kpi-accent ink">A→B</div></div><div class="kpi-value">{{ format_count(metrics.count_a_to_b_total) }}</div><div class="kpi-hint">Total kendaraan dari A -> B</div></div></div>
     <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">B_TO_A</div><div class="kpi-accent brand">B→A</div></div><div class="kpi-value">{{ format_count(metrics.count_b_to_a_total) }}</div><div class="kpi-hint">Total kendaraan dari B -> A</div></div></div>
     <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Review Pending</div><div class="kpi-accent">P</div></div><div class="kpi-value">{{ format_count(pending_reviews) }}</div><div class="kpi-hint">Menunggu konfirmasi review</div></div></div>
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Qualified YES</div><div class="kpi-accent yes">Y</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_yes) }}</div><div class="kpi-hint">Diterima</div></div></div>
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Qualified NO</div><div class="kpi-accent no">N</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_no) }}</div><div class="kpi-hint">Ditolak</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Diterima</div><div class="kpi-accent yes">Y</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_yes) }}</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Ditolak</div><div class="kpi-accent no">N</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_no) }}</div></div></div>
   </section>
 
   <section class="row2">
@@ -141,8 +141,8 @@
     <div class="pad">
       <div class="section-head">
         <div>
-          <h3>Sync pulse</h3>
-          <p class="caption">Ringkasan pengiriman data dari local spool ke backend.</p>
+          <h3> Pengiriman Data </h3>
+          <p class="caption">Ringkasan pengiriman data dari local  ke backend.</p>
         </div>
         <span class="pill {% if sync_overview.uploader_enabled %}ok{% else %}ink{% endif %}">
           {{ "uploader on" if sync_overview.uploader_enabled else "uploader off" }}
@@ -163,7 +163,7 @@
           <div class="sync-meta-value">{{ format_datetime(sync_overview.latest_sync.at_utc) }}</div>
           <div class="sync-meta-copy">
             <span class="pill {{ sync_overview.latest_sync.delivery_state_pill_class }}">{{ sync_overview.latest_sync.delivery_state_label }}</span>
-            <span>run {{ sync_overview.latest_sync.run_uid or "Unknown" }}{% if sync_overview.latest_sync.camera_id %} • camera {{ sync_overview.latest_sync.camera_id }}{% endif %}</span>
+            <span>run {% if sync_overview.latest_sync.camera_id %} • camera {{ sync_overview.latest_sync.camera_id }}{% endif %}</span>
           </div>
           {% else %}
           <div class="sync-meta-value">Belum ada sync</div>
@@ -180,7 +180,7 @@
           </div>
           {% else %}
           <div class="sync-meta-value">Belum ada error</div>
-          <div class="sync-meta-copy">Belum ada kegagalan sync yang tercatat di local spool.</div>
+          <div class="sync-meta-copy">Belum ada kegagalan pengiriman data yang tercatat.</div>
           {% endif %}
         </article>
       </div>
@@ -194,7 +194,6 @@
           <h3>Event terbaru</h3>
           <p class="caption">Data terbaru semenjak kejadian yang ada.</p>
         </div>
-        <div class="pill">events.jsonl</div>
       </div>
       <div class="table-scroll" style="margin-top: 10px;">
         <table class="table">
@@ -255,10 +254,10 @@
         <table class="table">
           <thead>
             <tr>
-              <th scope="col">Run</th>
+              <th scope="col">Data id</th>
               <th scope="col">Camera</th>
               <th scope="col">Update (WIB)</th>
-              <th scope="col">Lifecycle</th>
+              <th scope="col">Status</th>
               <th scope="col">Pengiriman data</th>
             </tr>
           </thead>
@@ -266,9 +265,9 @@
             {% for run in recent_runs %}
             <tr>
               <td>{{ run.run_uid }}</td>
-              <td>{{ run.camera_id or "Unknown" }}</td>
+              <td>{{ run.camera_id or "Tidak diketahui" }}</td>
               <td>{{ format_datetime(display_run_timestamp(run)) }}</td>
-              <td>{{ run.lifecycle_status or "Unknown" }}</td>
+              <td>{{ run.lifecycle_status or "Tidak diketahui" }}</td>
               <td>
                 <div class="delivery-status-cell">
                   <span class="pill {{ run.delivery_state_pill_class }}">{{ run.delivery_state_label }}</span>

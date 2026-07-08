@@ -189,11 +189,16 @@
           <p class="caption">Putuskan apakah data ini dipakai untuk validasi operasional. Keputusan akan langsung membuka event berikutnya bila tersedia.</p>
         </div>
       </div>
+      <div class="detail-decision-grid">
+        <button class="btn yes detail-decision-btn" type="submit" name="decision" value="{{ decision_yes }}" data-review-submit data-decision="{{ decision_yes }}">Terima</button>
+        <button class="btn no detail-decision-btn" type="submit" name="decision" value="{{ decision_no }}" data-review-submit data-decision="{{ decision_no }}">Tolak</button>
+      </div>
+      <p class="caption detail-review-hint">Terima memakai tipe operasional di bawah. Tolak mencatat alasan bila dipilih.</p>
       <div class="detail-nav-strip" aria-label="Queue navigation">
         <div class="detail-nav-card">
           <span class="detail-nav-label">Sebelumnya (K)</span>
           {% if detail_queue.previous_item %}
-          <a class="detail-nav-link" href="{{ detail_queue.previous_item.detail_url }}">{{ short_event_uid(detail_queue.previous_item.event_uid, 12, 6) }}</a>
+          <a class="detail-nav-link" href="{{ detail_queue.previous_item.detail_url }}"> Data sebelumnya </a>
           {% else %}
           <span class="detail-nav-empty">Tidak ada event sebelumnya</span>
           {% endif %}
@@ -209,7 +214,7 @@
         <div class="detail-nav-card">
           <span class="detail-nav-label">Berikutnya (J)</span>
           {% if detail_queue.next_item %}
-          <a class="detail-nav-link" href="{{ detail_queue.next_item.detail_url }}">{{ short_event_uid(detail_queue.next_item.event_uid, 12, 6) }}</a>
+          <a class="detail-nav-link" href="{{ detail_queue.next_item.detail_url }}">Data setelahnya</a>
           {% else %}
           <span class="detail-nav-empty">Queue selesai di sini</span>
           {% endif %}
@@ -278,11 +283,6 @@
           {% endif %}
         </div>
       </div>
-      <div class="detail-decision-grid">
-        <button class="btn yes detail-decision-btn" type="submit" name="decision" value="{{ decision_yes }}" data-review-submit data-decision="{{ decision_yes }}">Terima</button>
-        <button class="btn no detail-decision-btn" type="submit" name="decision" value="{{ decision_no }}" data-review-submit data-decision="{{ decision_no }}">Tolak</button>
-      </div>
-      <p class="caption detail-review-hint">Terima memakai tipe operasional di atas. Tolak mencatat alasan bila dipilih dan tidak membuat class baru.</p>
       <div class="field">
         <label for="event-detail-notes" class="detail-field-label">Catatan tambahan</label>
         <textarea id="event-detail-notes" name="notes" data-review-notes placeholder="Detail tambahan untuk keputusan ini.">{{ operator_notes }}</textarea>

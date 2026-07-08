@@ -24,6 +24,7 @@ from .event_uploader import (
 from .review_store import DECISION_NO, DECISION_YES, ReviewStore
 from .spool_retention import apply_retention_policy
 from .ui_auth import LoginRateLimiter, UiAuthConfig, issue_session_token, validate_session_token
+from .ui_copy import DASHBOARD_PAGE, EVENT_DETAIL_PAGE, LOGIN_PAGE, REVIEW_PAGE
 
 ## Import all the necessary helpers and common definitions for the API implementation
 from ._api_common import (
@@ -1372,8 +1373,8 @@ def create_app(
             runtime=runtime,
             request=request,
             page_name="login",
-            page_title="Operator Login",
-            page_subtitle="Sign in to open the dashboard, review queue, and event detail pages.",
+            page_title=LOGIN_PAGE.title,
+            page_subtitle=LOGIN_PAGE.subtitle,
         )
         status_message = "Sign in diperulkan untuk mengakses dashboard, dan  melakukan review data."
         status_kind = ""
@@ -1591,8 +1592,8 @@ def create_app(
             runtime=runtime,
             request=request,
             page_name="dashboard",
-            page_title="Traffic Monitoring Dashboard",
-            page_subtitle="Total data dari live ditambah dengan data yang akan direview.",
+            page_title=DASHBOARD_PAGE.title,
+            page_subtitle=DASHBOARD_PAGE.subtitle,
         )
         context.update(runtime.dashboard_payload(date_from=date_from, date_to=date_to))
         return templates.TemplateResponse(request, "dashboard.html", context)
@@ -1615,8 +1616,8 @@ def create_app(
             runtime=runtime,
             request=request,
             page_name="review",
-            page_title="Antrian Review",
-            page_subtitle="Verifikasi APPROVED/REJECT yang menggunakan database lokal (SQLite).",
+            page_title=REVIEW_PAGE.title,
+            page_subtitle=REVIEW_PAGE.subtitle,
         )
         context.update(
             runtime.review_queue_payload(
@@ -1663,8 +1664,8 @@ def create_app(
             runtime=runtime,
             request=request,
             page_name="event_detail",
-            page_title="Event Detail",
-            page_subtitle="Bukti, metadata, dan hasil review untuk satu data.",
+            page_title=EVENT_DETAIL_PAGE.title,
+            page_subtitle=EVENT_DETAIL_PAGE.subtitle,
         )
         context["event"] = item
         context["review_counts"] = runtime.review_store.summary()
