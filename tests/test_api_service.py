@@ -1441,6 +1441,10 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     assert "Sync terakhir" in dashboard.text
     assert "Traffic trend chart from local spool data" in dashboard.text
     assert "placeholder chart" not in dashboard.text
+    assert "Waste Paper" in dashboard.text
+    assert "Finished Goods" in dashboard.text
+    assert "A_TO_B" not in dashboard.text
+    assert "B_TO_A" not in dashboard.text
     assert "value=\"2026-03-11\"" in dashboard.text
     assert "/ui/review?status=pending&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in dashboard.text
 
@@ -1451,6 +1455,11 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     assert "SQLite" not in review.text
     assert "run_ui_e1" in review.text
     assert "17:05 WIB" in review.text
+    assert "Waste Paper" in review.text
+    assert "A_TO_B" not in review.text
+    assert ">Aksi<" in review.text
+    assert ">Buka<" in review.text
+    assert "queue-action-cell" in review.text
     assert "/ui/events/run_ui_e1?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in review.text
 
     detail = client.get("/ui/events/run_ui_e1?camera_id=cam_01&status=pending&page=1&page_size=25&date_from=2026-03-11&date_to=2026-03-11")
@@ -1459,6 +1468,8 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     assert "run_ui_e1" in detail.text
     assert "2026-03-11 17:05 WIB" in detail.text
     assert "Pending" in detail.text
+    assert "Waste Paper" in detail.text
+    assert "A_TO_B" not in detail.text
     assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_ui_e1&amp;page=1&amp;page_size=25&amp;date_from=2026-03-11&amp;date_to=2026-03-11" in detail.text
 
     css = client.get("/ui-static/app.css")
@@ -1468,6 +1479,9 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     js = client.get("/ui-static/app.js")
     assert js.status_code == 200
     assert "initReviewActions" in js.text
+
+    recent_events = client.get("/events/recent").json()
+    assert recent_events["items"][0]["direction"] == "A_TO_B"
 
 
 def test_review_queue_paginates_and_preserves_page_state(tmp_path) -> None:

@@ -375,6 +375,7 @@ def _build_ui_context(
         "format_date": _format_date,
         "format_time": _format_time,
         "format_datetime": _format_datetime,
+        "format_direction": _format_direction,
         "display_event_timestamp": _display_event_timestamp,
         "display_run_timestamp": _display_run_timestamp,
         "short_event_uid": _short_event_uid,
@@ -594,12 +595,28 @@ def _format_count(value: Any) -> str:
     except Exception:
         return "0"
 
-
 def _format_float(value: Any, digits: int = 1) -> str:
     try:
+        #return the float value with .int significat digits
         return f"{float(value):.{int(digits)}f}"
     except Exception:
         return "0.0"
+
+
+def _format_direction(value: Any) -> str:
+
+    direction = _text(value)
+    labels = {
+        "A_TO_B" : "Waste Paper",
+        "B_TO_A" : "Finished Goods",
+    }
+
+    #if the string is emptry then return the unknow
+    if direction is None:
+        return "Unknown"
+    
+    #if the text exist as a key return the values, else just return the key (key doesn't exist)
+    return labels.get(direction, direction)
 
 
 def _format_datetime(value: Any) -> str:
@@ -731,8 +748,8 @@ def _empty_dashboard_trend(date_range: UiDateRange) -> Dict[str, Any]:
                 "latest_value": 0,
             }
             for key, label, css_class in (
-                ("a_to_b", "A_TO_B", "dir-a"),
-                ("b_to_a", "B_TO_A", "dir-b"),
+                ("a_to_b", _format_direction("A_TO_B"), "dir-a"),
+                ("b_to_a", _format_direction("B_TO_A"), "dir-b"),
                 ("pending", "Pending", "no"),
             )
         ],

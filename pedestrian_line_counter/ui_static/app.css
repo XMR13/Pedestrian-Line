@@ -328,7 +328,7 @@ select, input[type="text"], input[type="password"] {
 .queue-table col.queue-col-confidence { width: 9%; }
 .queue-table col.queue-col-review { width: 10%; }
 .queue-table col.queue-col-evidence { width: 6%; }
-.queue-table col.queue-col-action { width: 6%; }
+.queue-table col.queue-col-action { width: 8%; }
 
 .queue-table th,
 .queue-table td {
@@ -521,6 +521,20 @@ select, input[type="text"], input[type="password"] {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.queue-action-cell {
+  display: flex;
+  justify-content: center;
+  min-width: 72px;
+}
+
+.queue-action-cell .btn {
+  width: 100%;
+  min-width: 72px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  text-align: center;
 }
 
 .btn-compact {

@@ -66,6 +66,7 @@ from ._api_helpers import (
     _format_count,
     _format_date,
     _format_datetime,
+    _format_direction,
     _format_float,
     _format_time,
     _load_json_dict,
@@ -782,8 +783,8 @@ class EdgeApiRuntime:
         bucket_count = len(buckets)
         x_positions = _trend_x_positions(bucket_count)
         series_specs = [
-            ("a_to_b", "A_TO_B", "dir-a"),
-            ("b_to_a", "B_TO_A", "dir-b"),
+            ("a_to_b", _format_direction("A_TO_B"), "dir-a"),
+            ("b_to_a", _format_direction("B_TO_A"), "dir-b"),
             ("pending", "Pending", "no"),
         ]
         series = []

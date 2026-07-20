@@ -55,7 +55,7 @@
   </article>
   <article class="detail-overview-card">
     <span class="detail-overview-label">Arah</span>
-    <strong class="detail-overview-value">{{ event.direction or "Unknown" }}</strong>
+    <strong class="detail-overview-value">{{ format_direction(event.direction) }}</strong>
     <span class="detail-overview-meta">Arah perjalanan kendaraan yang terdeteksi.</span>
   </article>
   <article class="detail-overview-card">
@@ -94,14 +94,14 @@
       </div>
       <div class="big-thumb detail-thumb detail-player" aria-label="Event evidence">
         {% if event.scene_url %}
-        <img src="{{ event.scene_url }}" alt="Bukti scene kendaraan {{ event.direction or 'Unknown' }} pada {{ format_datetime(display_time) }}" class="evidence-image" width="1280" height="720" decoding="async" fetchpriority="high" />
+        <img src="{{ event.scene_url }}" alt="Bukti scene kendaraan {{ format_direction(event.direction) }} pada {{ format_datetime(display_time) }}" class="evidence-image" width="1280" height="720" decoding="async" fetchpriority="high" />
         {% elif event.thumb_url %}
-        <img src="{{ event.thumb_url }}" alt="Thumbnail kendaraan {{ event.direction or 'Unknown' }} pada {{ format_datetime(display_time) }}" class="evidence-image" width="1280" height="720" decoding="async" fetchpriority="high" />
+        <img src="{{ event.thumb_url }}" alt="Thumbnail kendaraan {{ format_direction(event.direction) }} pada {{ format_datetime(display_time) }}" class="evidence-image" width="1280" height="720" decoding="async" fetchpriority="high" />
         {% else %}
         <div class="image-fallback">Belum ada gambar bukti untuk event ini.</div>
         {% endif %}
         <div class="frame-overlay">
-          <span class="pill ink">{{ event.direction or "Unknown" }}</span>
+          <span class="pill ink">{{ format_direction(event.direction) }}</span>
           <span class="pill">{{ event.effective_class_name or event.model_class_name or event.class_name or "Unknown" }}</span>
           {% if event.reviewed_class_name %}
           <span class="pill brand">review {{ event.reviewed_class_name }}</span>
@@ -221,7 +221,7 @@
         </div>
       </div>
       <div class="detail-status-row">
-        <span class="pill ink">{{ event.direction or "Unknown" }}</span>
+        <span class="pill ink">{{ format_direction(event.direction) }}</span>
         <span class="pill {{ review_pill_class(event.review_status) }}">{{ review_label(event.review_status) }}</span>
         <span class="pill">{% if event.scene_url or event.thumb_url %}bukti tersedia{% else %}tidak ada gambar{% endif %}</span>
       </div>

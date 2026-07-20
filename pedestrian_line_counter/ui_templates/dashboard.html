@@ -55,8 +55,8 @@
   </section>
 
   <section class="kpis">
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">A_TO_B</div><div class="kpi-accent ink">A→B</div></div><div class="kpi-value">{{ format_count(metrics.count_a_to_b_total) }}</div><div class="kpi-hint">Total kendaraan dari A -> B</div></div></div>
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">B_TO_A</div><div class="kpi-accent brand">B→A</div></div><div class="kpi-value">{{ format_count(metrics.count_b_to_a_total) }}</div><div class="kpi-hint">Total kendaraan dari B -> A</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Waste Paper</div><div class="kpi-accent ink">WP</div></div><div class="kpi-value">{{ format_count(metrics.count_a_to_b_total) }}</div><div class="kpi-hint">Total kendaraan waste paper</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Finished Goods</div><div class="kpi-accent brand">FG</div></div><div class="kpi-value">{{ format_count(metrics.count_b_to_a_total) }}</div><div class="kpi-hint">Total kendaraan finished goods</div></div></div>
     <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Review Pending</div><div class="kpi-accent">P</div></div><div class="kpi-value">{{ format_count(pending_reviews) }}</div><div class="kpi-hint">Menunggu konfirmasi review</div></div></div>
     <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Diterima</div><div class="kpi-accent yes">Y</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_yes) }}</div></div></div>
     <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Ditolak</div><div class="kpi-accent no">N</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_no) }}</div></div></div>
@@ -95,8 +95,8 @@
           <span class="trend-x-title">{{ trend.time_basis_label }}</span>
         </div>
         <div class="trend-value-strip">
-          <span class="pill" id="trend-strip-a-to-b">A_TO_B {{ format_count(trend.window_totals.a_to_b) }}</span>
-          <span class="pill" id="trend-strip-b-to-a">B_TO_A {{ format_count(trend.window_totals.b_to_a) }}</span>
+          <span class="pill" id="trend-strip-a-to-b">Waste Paper {{ format_count(trend.window_totals.a_to_b) }}</span>
+          <span class="pill" id="trend-strip-b-to-a">Finished Goods {{ format_count(trend.window_totals.b_to_a) }}</span>
           <span class="pill no" id="trend-strip-pending">pending {{ format_count(trend.window_totals.pending) }}</span>
         </div>
       </div>
@@ -227,7 +227,7 @@
                 {% endif %}
               </td>
               <td>{{ format_datetime(item.occurred_at_local) }}</td>
-              <td>{{ item.direction or "Unknown" }}</td>
+              <td>{{ format_direction(item.direction) }}</td>
               <td>{{ item.class_name or "Unknown" }}</td>
               <td><span class="pill {{ review_pill_class(item.review_status) }}">{{ review_label(item.review_status) }}</span></td>
               <td><a class="btn secondary" href="{{ item.detail_url }}" style="text-decoration:none;">Inspect</a></td>

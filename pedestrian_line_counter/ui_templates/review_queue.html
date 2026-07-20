@@ -127,7 +127,7 @@
             <th scope="col">Akurasi <br>(Confidence %)</th>
             <th scope="col">Review</th>
             <th scope="col">Bukti</th>
-            <th scope="col">Action</th>
+            <th scope="col">Aksi</th>
           </tr>
         </thead>
         <tbody>
@@ -154,7 +154,7 @@
               </div>
             </td>
             <td>{{ item.camera_id or "Unknown" }}</td>
-            <td><span class="pill ink">{{ item.direction or "Unknown" }}</span></td>
+            <td><span class="pill ink">{{ format_direction(item.direction) }}</span></td>
             <td>
               <div class="queue-class-cell">
                 <strong class="queue-class-main">{{ item.effective_class_name or item.model_class_name or item.class_name or "Unknown" }}</strong>
@@ -204,7 +204,11 @@
                 </div>
               </div>
             </td>
-            <td><a class="btn secondary btn-compact" href="{{ item.detail_url }}">Inspect</a></td>
+            <td>
+              <div class="queue-action-cell">
+                <a class="btn secondary btn-compact" href="{{ item.detail_url }}" aria-label="Buka detail data {{ short_event_uid(item.event_uid, 12, 6) }}">Buka</a>
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
