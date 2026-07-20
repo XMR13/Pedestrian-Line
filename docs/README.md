@@ -7,6 +7,13 @@ older filenames.
 
 ## Read First
 
+- `ONBOARDING.md`
+  - Start here when learning or maintaining the codebase.
+  - Explains the complete inference, spool, FastAPI, review, delivery,
+    retention, and deployment flow.
+- `review_data_flow.md`
+  - Defines Pending, Diterima, and Ditolak behavior.
+  - Separates raw detection data from local review and delivery state.
 - `jetson_deployment_runbook.md`
   - Main deployment guide for the active edge runtime:
     `single_loop.service` + `edge_service.service`.
@@ -30,8 +37,14 @@ older filenames.
 
 ## Integration And Architecture
 
+- `ONBOARDING.md`
+  - Canonical newcomer architecture and maintenance guide.
+- `review_data_flow.md`
+  - Canonical local operator-review lifecycle and known gaps.
 - `security_review.md`
-  - Canonical security document for the active FastAPI edge-service deployment.
+  - Security review snapshot for the FastAPI edge-service deployment.
+  - Verify findings against the current implementation because some earlier
+    issues have since been fixed.
 
 ## Dataset And Training Reference
 
@@ -43,5 +56,7 @@ older filenames.
 ## Notes
 
 - The FastAPI edge service is the active operator-facing surface in this repo.
+- Raw event state, operator review state, and delivery state are separate. Do
+  not change one while assuming the others update automatically.
 - If two docs start covering the same operational task, prefer merging them
   here instead of keeping parallel runbooks.

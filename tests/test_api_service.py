@@ -1434,7 +1434,7 @@ def test_ui_pages_render_dashboard_queue_and_detail(tmp_path) -> None:
     assert dashboard.status_code == 200
     assert "Traffic Monitoring Dashboard" in dashboard.text
     assert "Event terbaru" in dashboard.text
-    assert "Sync pulse" in dashboard.text
+    assert "Pengiriman Data" in dashboard.text
     assert "Sedang dikirim" in dashboard.text
     assert "Gagal" in dashboard.text
     assert "Koneksi backend gagal." in dashboard.text

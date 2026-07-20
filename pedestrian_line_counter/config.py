@@ -150,7 +150,6 @@ def infer_track_class_ids_from_class_names(class_names: Dict[int, str]) -> List[
 class TrackerConfig:
     """
     Multi object tracker yang sederhana
-    
     The tracker ini ringan, dan diimplementasikan dengan menggunakan SORT.
 
     """

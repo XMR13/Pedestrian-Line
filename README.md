@@ -24,6 +24,13 @@ Large files are intentionally not committed. Put models in `Models/`, videos in
 
 ![High-level architecture](docs/readme_png/arch_new_modified.png)
 
+New maintainers should start with:
+
+- [`docs/ONBOARDING.md`](docs/ONBOARDING.md) for the full runtime, storage,
+  FastAPI, delivery, and maintenance model.
+- [`docs/review_data_flow.md`](docs/review_data_flow.md) for the exact Pending,
+  Diterima, and Ditolak lifecycle.
+
 ## Requirements
 
 Development:

@@ -618,6 +618,347 @@ Recommended long-term improvement:
 - keep a dedicated OBS profile for this bridge,
 - keep the EZVIZ layout fixed and document it.
 
+### 7.1 Windows reboot / power-loss mitigation
+
+The Windows bridge PC is now an operational dependency. Unlike the Jetson
+services, this bridge uses GUI applications (`EZVIZ` and `OBS`), so full reboot
+recovery depends on restoring a logged-in desktop session and then starting the
+bridge applications in the correct order.
+
+The first production mitigation should be:
+
+1. Use a dedicated Windows account for the bridge PC.
+   - keep EZVIZ logged in under this account,
+   - keep the OBS profile and scene collection under this account,
+   - do not use the machine for unrelated desktop work.
+2. Configure the bridge PC to recover after power loss.
+   - BIOS/UEFI: enable power-on after AC restore,
+   - Windows: disable sleep/hibernation,
+   - Windows Update: set active hours and maintenance windows,
+   - network: reserve a fixed DHCP lease or assign a static IP.
+3. Start MediaMTX automatically.
+   - Preferred: run MediaMTX as a Windows service or service-wrapper task.
+   - MVP fallback: create a Task Scheduler task that runs at system startup and
+     launches `C:\pedline-bridge\start_mediamtx.ps1`.
+4. Start EZVIZ automatically after user login.
+   - Use Task Scheduler with an `At log on` trigger for the bridge account.
+   - Add a short delay so the desktop and network are ready.
+   - Confirm EZVIZ opens the target camera view without manual navigation.
+5. Start OBS automatically after EZVIZ.
+   - Use a second `At log on` task with a longer delay.
+   - Launch the dedicated OBS profile / scene collection.
+   - OBS supports startup parameters such as `--profile`, `--collection`,
+     `--scene`, `--startstreaming`, and `--minimize-to-tray`.
+   - Example shape:
+
+```powershell
+"C:\Program Files\obs-studio\bin\64bit\obs64.exe" `
+  --profile "EZVIZ Bridge" `
+  --collection "EZVIZ Bridge" `
+  --scene "EZVIZ Bridge" `
+  --startstreaming `
+  --minimize-to-tray
+```
+
+Validate the exact OBS profile, collection, and scene names on the bridge PC
+before relying on this command.
+
+Recommended startup order:
+
+```text
+Windows boots
+  -> network comes up
+  -> MediaMTX starts
+  -> bridge account logs in
+  -> EZVIZ opens target camera
+  -> OBS opens the fixed scene and starts streaming
+  -> Jetson reconnects to the RTSP URL
+```
+
+Minimum watchdog checks:
+
+- MediaMTX process is running,
+- OBS process is running,
+- OBS shows `LIVE`,
+- the expected RTSP URL decodes frames from another machine or the AI box,
+- the Jetson `single_loop.service` resumes processing after the bridge returns.
+
+For the MVP, a human can still confirm the EZVIZ/OBS picture after a reboot. For
+the hardened version, add a Windows-side watchdog or remote-management process
+that alerts when the RTSP URL is unreachable or the decoded frame is black /
+stale.
+
+### 7.2 Windows bridge recovery tutorial
+
+This is the recommended first hardening pass. It does not remove the Windows
+bridge risk completely, but it turns a restart/power outage from "rebuild the
+bridge manually" into "verify the bridge recovered correctly".
+
+#### 7.2.1 Prepare the bridge account and machine
+
+Use one dedicated Windows account, for example:
+
+```text
+pedline-bridge
+```
+
+Do this from the actual bridge PC, not from a remote shell only:
+
+1. Sign in as the bridge account.
+2. Open EZVIZ and make sure the account can see the correct camera.
+3. Open OBS and create/use one profile, scene collection, and scene named:
+
+```text
+EZVIZ Bridge
+```
+
+4. In OBS, confirm the stream target is still:
+
+```text
+rtmp://127.0.0.1/live/ezviz_cam01
+```
+
+5. Keep the EZVIZ window position and size stable.
+6. Disable Windows notifications / Focus Assist popups for the bridge account.
+7. Disable sleep and hibernation.
+8. Reserve the Windows PC IP address in the router/DHCP server, or assign a
+   static IP.
+9. In BIOS/UEFI, enable the setting usually named `Restore on AC Power Loss`,
+   `AC Power Recovery`, or `Power On after Power Failure`.
+
+Auto-login is useful because EZVIZ and OBS need an interactive desktop session.
+The preferred tool is Microsoft Sysinternals `Autologon`; it configures
+Windows' built-in auto-logon behavior and stores the password as an LSA secret.
+Treat this as a security tradeoff: anyone with admin access to the bridge PC can
+still recover/decrypt that secret, so this machine should be physically and
+administratively restricted.
+
+#### 7.2.2 MediaMTX startup task
+
+MediaMTX does not need the desktop. Start it before EZVIZ/OBS.
+
+Run this from **Administrator PowerShell** after copying the helper scripts to
+`C:\pedline-bridge\` and MediaMTX to `C:\mediamtx\`:
+
+```powershell
+$taskName = "PedLine MediaMTX"
+$script = "C:\pedline-bridge\start_mediamtx.ps1"
+
+schtasks /Create `
+  /TN $taskName `
+  /SC ONSTART `
+  /DELAY 0001:00 `
+  /RU SYSTEM `
+  /RL HIGHEST `
+  /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`"" `
+  /F
+```
+
+If the MediaMTX folder is not `C:\mediamtx`, edit
+`C:\pedline-bridge\start_mediamtx.ps1` or create a small wrapper script with the
+real `-MediaMTXRoot` value. Avoid putting a long one-off command directly into
+Task Scheduler; wrapper scripts are easier to inspect later.
+
+Validate:
+
+```powershell
+schtasks /Query /TN "PedLine MediaMTX" /V /FO LIST
+schtasks /Run /TN "PedLine MediaMTX"
+Get-Process mediamtx -ErrorAction SilentlyContinue
+Test-NetConnection 127.0.0.1 -Port 1935
+Test-NetConnection 127.0.0.1 -Port 8554
+```
+
+What matters:
+
+- `mediamtx.exe` is running,
+- port `1935` is open locally for OBS to publish RTMP,
+- port `8554` is open for the AI box to read RTSP,
+- the task still works after a reboot.
+
+#### 7.2.3 EZVIZ startup task
+
+EZVIZ is the fragile piece because it is a GUI app and must restore the correct
+camera view. Do not run it as `SYSTEM`; run it inside the bridge user's desktop
+session.
+
+Create this task using Task Scheduler while logged in as the bridge account:
+
+1. Open `Task Scheduler`.
+2. Create a task named:
+
+```text
+PedLine EZVIZ
+```
+
+3. On `General`:
+   - choose `Run only when user is logged on`,
+   - do not choose `Run whether user is logged on or not`,
+   - keep it under the bridge account.
+4. On `Triggers`:
+   - trigger: `At log on`,
+   - user: the bridge account,
+   - delay: `30 seconds`.
+5. On `Actions`:
+   - action: `Start a program`,
+   - program: the real EZVIZ executable path.
+
+The EZVIZ path depends on the installed application. Find it once from the
+shortcut properties or with PowerShell:
+
+```powershell
+Get-StartApps | Where-Object { $_.Name -match "EZVIZ" }
+```
+
+After creating the task, reboot once and verify that EZVIZ opens without manual
+login and lands on the correct camera. If EZVIZ opens but not to the camera,
+treat that as not recovered yet; OBS can only stream what EZVIZ displays.
+
+#### 7.2.4 OBS startup task
+
+OBS should start after EZVIZ, use the fixed bridge profile/scene, and begin
+streaming automatically.
+
+OBS supports launch parameters for profile, scene collection, scene, automatic
+streaming, and minimizing to tray. Use those so a reboot does not depend on the
+last random OBS state.
+
+Create a small script:
+
+```text
+C:\pedline-bridge\start_obs_bridge.ps1
+```
+
+Suggested contents:
+
+```powershell
+$obs = "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
+
+if (-not (Test-Path $obs)) {
+    throw "OBS executable not found: $obs"
+}
+
+Start-Process -FilePath $obs -ArgumentList @(
+    "--profile", "EZVIZ Bridge",
+    "--collection", "EZVIZ Bridge",
+    "--scene", "EZVIZ Bridge",
+    "--startstreaming",
+    "--minimize-to-tray"
+)
+```
+
+Create this task using Task Scheduler while logged in as the bridge account:
+
+1. Create a task named:
+
+```text
+PedLine OBS Bridge
+```
+
+2. On `General`:
+   - choose `Run only when user is logged on`,
+   - keep it under the bridge account.
+3. On `Triggers`:
+   - trigger: `At log on`,
+   - user: the bridge account,
+   - delay: `60 seconds` or `90 seconds`.
+4. On `Actions`:
+   - program:
+
+```text
+powershell.exe
+```
+
+   - arguments:
+
+```text
+-NoProfile -ExecutionPolicy Bypass -File "C:\pedline-bridge\start_obs_bridge.ps1"
+```
+
+5. On `Settings`:
+   - allow the task to be run on demand,
+   - do not stop the task after a short fixed duration,
+   - if the task is already running, do not start a new instance.
+
+Validate manually before trusting reboot recovery:
+
+```powershell
+schtasks /Run /TN "PedLine OBS Bridge"
+Get-Process obs64 -ErrorAction SilentlyContinue
+```
+
+Then look at OBS itself and confirm it shows `LIVE`. A running `obs64.exe`
+process is not enough; it must actually be streaming into MediaMTX.
+
+#### 7.2.5 End-to-end reboot test
+
+Use this exact validation sequence after configuring the tasks:
+
+1. Reboot the Windows bridge PC.
+2. Do not manually open MediaMTX, EZVIZ, or OBS.
+3. Wait `2` minutes.
+4. On the Windows PC, check:
+
+```powershell
+Get-Process mediamtx -ErrorAction SilentlyContinue
+Get-Process obs64 -ErrorAction SilentlyContinue
+Test-NetConnection 127.0.0.1 -Port 8554
+```
+
+5. Confirm EZVIZ is showing the target camera.
+6. Confirm OBS shows `LIVE`.
+7. From the AI box, verify decoding:
+
+```bash
+PYTHONPATH=. python3 scripts/check_rtsp.py \
+  --url rtsp://<WINDOWS_PC_IP>:8554/live/ezviz_cam01 \
+  --backend opencv
+```
+
+8. Restart `single_loop.service` only after the RTSP probe succeeds:
+
+```bash
+sudo systemctl restart single_loop.service
+journalctl -u single_loop.service -f
+```
+
+9. Confirm the FastAPI dashboard/review pages show new spool data.
+
+Pass criteria:
+
+- Windows rebooted without manual bridge setup,
+- MediaMTX started,
+- EZVIZ restored the camera view,
+- OBS started streaming,
+- the AI box decoded RTSP frames,
+- `single_loop.service` processed the stream and wrote spool output.
+
+#### 7.2.6 Common recovery failures
+
+Use this when the reboot test fails:
+
+- MediaMTX task ran but RTSP is closed:
+  - check `C:\mediamtx\mediamtx.yml` exists,
+  - check `mediamtx.exe` is in the configured folder,
+  - rerun `C:\pedline-bridge\start_mediamtx.ps1` from PowerShell and read the
+    error.
+- EZVIZ opened but wrong camera is visible:
+  - fix the saved EZVIZ layout manually,
+  - remove popups or side panels from the capture area,
+  - repeat reboot test.
+- OBS opened but is not live:
+  - confirm OBS output target is `rtmp://127.0.0.1/live/ezviz_cam01`,
+  - confirm `--startstreaming` is in the launch script,
+  - check whether OBS shows an encoder or connection error.
+- RTSP opens but the image is black/stale:
+  - confirm EZVIZ is playing live video, not a frozen or logged-out view,
+  - confirm OBS preview is moving,
+  - confirm MediaMTX logs show OBS publishing to `/live/ezviz_cam01`.
+- Everything works locally but the AI box cannot open RTSP:
+  - check the Windows IP did not change,
+  - check Windows Firewall still allows inbound `8554`,
+  - check both machines are on the same LAN/VLAN.
+
 Recommended MVP operator shortcut:
 
 - keep `C:\mediamtx\` for MediaMTX binaries and config,

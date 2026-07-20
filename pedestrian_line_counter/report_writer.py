@@ -55,6 +55,7 @@ class ReportWriter:
         self.cfg.path.parent.mkdir(parents=True, exist_ok=True)
         write_header = (not self.cfg.path.exists()) or self.cfg.path.stat().st_size == 0
 
+        ## it in config include extra columns than extend it
         self._fieldnames = list(self.BASE_COLUMNS)
         if self.cfg.include_extra_cols:
             self._fieldnames.extend(self.EXTRA_COLUMNS)
@@ -65,7 +66,6 @@ class ReportWriter:
             self._writer.writeheader()
             self._f.flush()
 
-
     def close(self) -> None:
         try:
             self._f.flush()
@@ -73,7 +73,6 @@ class ReportWriter:
         except Exception:
             pass
     
-
     def record_events(
         self,
         events: Iterable[CrossingEvent],
@@ -85,7 +84,7 @@ class ReportWriter:
             self._event_no += 1
             thumb_relpath = self._str_from_records(event_records, idx, "thumb_relpath")
             scene_relpath = self._str_from_records(event_records, idx, "scene_relpath")
-            waktu_wib = self._str_from_records(event_records, idx, "occurred_at_local")
+            waktu_wib = self._str_from_records(event_records, idx, "waktu lewat (WIB)")
             row = self._build_row(
                 ev,
                 thumb_relpath=thumb_relpath,
