@@ -58,6 +58,7 @@ class TrafficSpoolConfig:
     camera_id: str
     write_thumbnails: bool = True
     write_scene_thumbnails: bool = True
+    write_training_frames: bool = False
     thumb_pad: int = 20
     thumb_max_side: int = 320
     scene_thumb_max_side: int = 640
@@ -101,8 +102,13 @@ class TrafficSpoolWriter:
         self.run_dir = cfg.root_dir / day / self.run_uid
         self.thumbs_dir = self.run_dir / "thumbs"
         self.scene_dir = self.run_dir / "scene"
+        self.training_frames_dir = self.run_dir / "training_frames"
         _safe_mkdir(self.thumbs_dir)
         _safe_mkdir(self.scene_dir)
+        
+        #if we deecided to add training frames into this then 
+        if self.cfg.write_training_frames:
+            _safe_mkdir(self.training_frames_dir)
 
         self._events_path = self.run_dir / "events.jsonl"
         self._events_f = self._events_path.open("a", encoding="utf-8")
@@ -169,6 +175,7 @@ class TrafficSpoolWriter:
 
         written = 0
         h, w = frame_bgr.shape[:2]
+        training_frame_paths: Dict[int, Optional[str]] = {}
 
         for ev in events:
             event_uid = uuid.uuid4().hex
@@ -189,6 +196,22 @@ class TrafficSpoolWriter:
                     thumb_path = self.thumbs_dir / f"{event_uid}.jpg"
                     cv2.imwrite(str(thumb_path), crop, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
                     thumb_rel = f"thumbs/{thumb_path.name}"
+
+            training_frame_rel = None
+            #IF WE SET THE TRAINIG CONFIG TO SAVE == TRUE
+            if self.cfg.write_training_frames:
+                frame_index = int(ev.frame_index)
+                if frame_index not in training_frame_paths:
+                    training_frame_path = self.training_frames_dir / f"frame_{frame_index:012d}.jpg"
+                    saved = cv2.imwrite(
+                        str(training_frame_path),
+                        frame_bgr,
+                        [int(cv2.IMWRITE_JPEG_QUALITY), 95],
+                    )
+                    training_frame_paths[frame_index] = (
+                        f"training_frames/{training_frame_path.name}" if saved else None
+                    )
+                training_frame_rel = training_frame_paths[frame_index]
 
             scene_rel = None
             if self.cfg.write_scene_thumbnails:
@@ -223,6 +246,9 @@ class TrafficSpoolWriter:
                 "bbox_xyxy": list(ev.bbox_xyxy) if ev.bbox_xyxy is not None else None,
                 "thumb_relpath": thumb_rel,
                 "scene_relpath": scene_rel,
+                "training_frame_relpath": training_frame_rel,
+                "frame_width": int(w),
+                "frame_height": int(h),
             }
             self._events_f.write(json.dumps(rec, ensure_ascii=True) + "\n")
             if capture_records is not None:

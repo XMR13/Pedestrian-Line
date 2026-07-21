@@ -278,6 +278,7 @@ class SpoolConfig:
     camera_id: Optional[str] = None
     write_thumbnails: bool = True
     write_scene_thumbnails: bool = True
+    write_training_frames: bool = False
     thumb_pad: int = 20
     thumb_max_side: int = 320
     scene_thumb_max_side: int = 640

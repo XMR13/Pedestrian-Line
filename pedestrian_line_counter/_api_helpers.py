@@ -575,21 +575,6 @@ def _review_pill_class(value: Optional[str]) -> str:
     return ""
 
 
-def _path_to_public_url(spool_dir: Path, value: Any) -> Optional[str]:
-    text = _text(value)
-    if text is None:
-        return None
-    return _relpath_to_public_url(spool_dir, Path(text))
-
-
-def _relpath_to_public_url(spool_dir: Path, path: Path) -> Optional[str]:
-    try:
-        relpath = path.resolve().relative_to(spool_dir.resolve())
-    except Exception:
-        return None
-    return "/evidence/" + relpath.as_posix()
-
-
 def _format_count(value: Any) -> str:
     try:
         return f"{int(value):,}"

@@ -514,6 +514,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--spool-scene-thumb-quality", type=int, default=None, help="JPEG quality (10..100) for scene thumbnails.")
     _add_bool_arg(
         parser,
+        "--spool-training-frames",
+        dest="spool_training_frames",
+        default=None,
+        help="Enable/disable clean full-resolution event frames for reviewed training export (default: disabled).",
+    )
+    _add_bool_arg(
+        parser,
         "--spool-retention-enabled",
         dest="spool_retention_enabled",
         default=None,
@@ -1823,6 +1830,11 @@ def main() -> None:
             if args.spool_scene_thumbnails is None
             else bool(args.spool_scene_thumbnails)
         )
+        write_training_frames = (
+            cfg.spool.write_training_frames
+            if args.spool_training_frames is None
+            else bool(args.spool_training_frames)
+        )
         thumb_pad = int(cfg.spool.thumb_pad) if args.spool_thumb_pad is None else int(args.spool_thumb_pad)
         thumb_max_side = int(cfg.spool.thumb_max_side) if args.spool_thumb_max_side is None else int(args.spool_thumb_max_side)
         scene_max_side = int(cfg.spool.scene_thumb_max_side) if args.spool_scene_thumb_max_side is None else int(args.spool_scene_thumb_max_side)
@@ -1861,6 +1873,7 @@ def main() -> None:
             camera_id=str(resolved_camera_id),
             write_thumbnails=bool(write_thumbs),
             write_scene_thumbnails=bool(write_scene_thumbs),
+            write_training_frames=bool(write_training_frames),
             thumb_pad=int(thumb_pad),
             thumb_max_side=int(thumb_max_side),
             scene_thumb_max_side=int(scene_max_side),

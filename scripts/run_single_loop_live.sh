@@ -40,6 +40,7 @@ PLC_CAMERA_ID="${PLC_CAMERA_ID:-cam_01}"
 PLC_SPOOL_DIR="${PLC_SPOOL_DIR:-/var/lib/pedline/traffic_runs}"
 PLC_SPOOL_THUMBNAILS="${PLC_SPOOL_THUMBNAILS:-1}"
 PLC_SPOOL_SCENE_THUMBNAILS="${PLC_SPOOL_SCENE_THUMBNAILS:-1}"
+PLC_SPOOL_TRAINING_FRAMES="${PLC_SPOOL_TRAINING_FRAMES:-0}"
 PLC_SPOOL_THUMB_MAX_SIDE="${PLC_SPOOL_THUMB_MAX_SIDE:-256}"
 PLC_SPOOL_SCENE_THUMB_MAX_SIDE="${PLC_SPOOL_SCENE_THUMB_MAX_SIDE:-}"
 PLC_SPOOL_SCENE_THUMB_QUALITY="${PLC_SPOOL_SCENE_THUMB_QUALITY:-}"
@@ -112,6 +113,19 @@ case "${PLC_SPOOL_SCENE_THUMBNAILS}" in
     ;;
   *)
     echo "Unsupported PLC_SPOOL_SCENE_THUMBNAILS value: $PLC_SPOOL_SCENE_THUMBNAILS" >&2
+    exit 1
+    ;;
+esac
+
+case "${PLC_SPOOL_TRAINING_FRAMES}" in
+  1|true|TRUE|yes|YES|on|ON)
+    args+=(--spool-training-frames)
+    ;;
+  0|false|FALSE|no|NO|off|OFF)
+    args+=(--no-spool-training-frames)
+    ;;
+  *)
+    echo "Unsupported PLC_SPOOL_TRAINING_FRAMES value: $PLC_SPOOL_TRAINING_FRAMES" >&2
     exit 1
     ;;
 esac
