@@ -47,6 +47,9 @@ def test_training_frames_are_disabled_by_default(tmp_path) -> None:
     spool = _make_spool(tmp_path, write_training_frames=False)
     captured: list[dict[str, object]] = []
 
+    run_meta = json.loads((spool.run_dir / "run.json").read_text(encoding="utf-8"))
+    assert run_meta["class_names"] == {"2": "trailer"}
+
     spool.record_events(
         [_event(track_id=1, frame_index=10, bbox=(20, 10, 80, 70))],
         frame_bgr=np.full((90, 160, 3), 120, dtype=np.uint8),

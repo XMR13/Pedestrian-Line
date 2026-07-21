@@ -694,7 +694,30 @@ class EdgeApiRuntime:
         return sorted(item for item in cameras if item)
 
     def list_reviewable_classes(self) -> List[str]:
-        class_names = {_text(item.get("class_name")) for item in self._iter_all_events()}
+        class_names = set(self.review_store.list_reviewed_classes())
+        for run_dir in iter_spool_runs(self.spool_dir):
+            run_meta = _load_json_dict(run_dir / "run.json")
+            if run_meta is None:
+                continue
+
+            taxonomy = run_meta.get("class_names")
+            if isinstance(taxonomy, Mapping):
+                candidates = taxonomy.values()
+            elif isinstance(taxonomy, list):
+                candidates = taxonomy
+            else:
+                candidates = []
+            class_names.update(
+                class_name
+                for candidate in candidates
+                if (class_name := _text(candidate)) is not None
+            )
+
+            class_names.update(
+                class_name
+                for event in _iter_jsonl_records(run_dir / "events.jsonl")
+                if (class_name := _text(event.get("class_name"))) is not None
+            )
         return sorted(item for item in class_names if item)
 
     def dashboard_payload(

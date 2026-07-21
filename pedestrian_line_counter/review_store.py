@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional
 
 
 DECISION_YES = "qualified_yes"
@@ -203,6 +203,18 @@ class ReviewStore:
                 counts[decision] = count
             counts["reviewed_total"] += count
         return counts
+
+    def list_reviewed_classes(self) -> List[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT reviewed_class
+                FROM event_reviews
+                WHERE reviewed_class IS NOT NULL AND TRIM(reviewed_class) != ''
+                ORDER BY reviewed_class
+                """
+            ).fetchall()
+        return [str(row["reviewed_class"]).strip() for row in rows]
 
 
 def _row_to_review(row: Optional[sqlite3.Row]) -> Optional[ReviewRecord]:

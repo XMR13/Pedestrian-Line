@@ -33,6 +33,7 @@ def _write_run(
     in_progress_last_sync_at_utc: str | None = None,
     lifecycle_status: str = "stopped",
     class_name: str = "truck",
+    run_class_names: dict[int, str] | None = None,
     thumb_relpath: str | None = "thumbs/e1.jpg",
     scene_relpath: str | None = "scene/e1.jpg",
 ) -> Path:
@@ -49,6 +50,11 @@ def _write_run(
         "ended_at_utc": started_at_utc,
         "source": {"type": "rtsp", "value": "rtsp://camera"},
         "line_mode": "line",
+        "class_names": (
+            {str(class_id): name for class_id, name in run_class_names.items()}
+            if run_class_names is not None
+            else {}
+        ),
         "report_csv_relpath": "report.csv",
         "health_summary": {
             "lifecycle_status": lifecycle_status,
@@ -1102,6 +1108,41 @@ def test_event_detail_page_exposes_reviewed_class_input_and_suggestions(tmp_path
     assert "Tetap gunakan tipe terdeteksi" in detail.text
     assert "False positive / bukan kendaraan target" in detail.text
     assert '<option value="pickup"' in detail.text
+
+
+def test_event_detail_uses_full_run_taxonomy_before_classes_are_predicted(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_full_taxonomy",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+        class_name="pickup",
+        run_class_names={
+            0: "container 20ft",
+            1: "container 40ft",
+            2: "trailer",
+            3: "tronton",
+            4: "engkel",
+            5: "double engkel",
+            6: "pickup",
+        },
+    )
+
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+    detail = client.get("/ui/events/run_full_taxonomy_e1?status=pending&page=1&page_size=25")
+
+    assert detail.status_code == 200
+    for class_name in (
+        "container 20ft",
+        "container 40ft",
+        "trailer",
+        "tronton",
+        "engkel",
+        "double engkel",
+        "pickup",
+    ):
+        assert f'<option value="{class_name}"' in detail.text
 
 
 def test_event_detail_reject_reason_is_saved_in_existing_notes(tmp_path) -> None:

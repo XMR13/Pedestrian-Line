@@ -129,6 +129,11 @@ class TrafficSpoolWriter:
                 camera_id=cfg.camera_id,
             ),
             "model_version": model_version,
+            "class_names": {
+                str(class_id): str(class_name)
+                for class_id, class_name in sorted(self._class_names.items())
+                if str(class_name).strip()
+            },
             "cfg_version": cfg_version,
             "line_mode": line_mode,
             "line_id": line_id,
