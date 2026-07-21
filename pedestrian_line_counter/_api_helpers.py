@@ -288,12 +288,12 @@ def _coalesce_text(*values: Any) -> Optional[str]:
             return text
     return None
 
-
+#probably the most useless function ever
 def _text(value: Any) -> Optional[str]:
-    if value is None:
+    if value is  None:
         return None
     text = str(value).strip()
-    return text if text != "" else None
+    return text if text !="" else None
 
 
 def _clamp_limit(value: int, max_value: int) -> int:
@@ -418,6 +418,7 @@ def _normalize_ui_date_range(*, date_from: Optional[str], date_to: Optional[str]
     start_date = _parse_iso_date(date_from)
     end_date = _parse_iso_date(date_to)
     if start_date is not None and end_date is not None and start_date > end_date:
+        #if the start date is actualy bigger than end date switch their posiiton
         start_date, end_date = end_date, start_date
     local_tz = local_timezone()
     start_utc = (

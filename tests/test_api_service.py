@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
 import sqlite3
 
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 import pedestrian_line_counter.api as api_module
 import pedestrian_line_counter.service as service_module
@@ -1518,6 +1520,53 @@ def test_review_queue_paginates_and_preserves_page_state(tmp_path) -> None:
     detail = client.get("/ui/events/run_page_00_e1?camera_id=cam_01&status=pending&page=2&page_size=15")
     assert detail.status_code == 200
     assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_page_00_e1&amp;page=2&amp;page_size=15" in detail.text
+
+
+def test_review_queue_excel_export_uses_only_date_slice(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-10",
+        run_uid="run_before",
+        started_at_utc="2026-03-10T10:00:00Z",
+        occurred_at_utc="2026-03-10T10:05:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_in_range",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+        direction="B_TO_A",
+        class_name="pickup",
+    )
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+
+    review_page = client.get("/ui/review", params={"date_from": "2026-03-11", "date_to": "2026-03-11"})
+    assert review_page.status_code == 200
+    assert (
+        '/ui/review/export.xlsx?date_from=2026-03-11&amp;date_to=2026-03-11'
+        in review_page.text
+    )
+    assert review_page.text.index("Download Excel") < review_page.text.index("Buka halaman detail")
+
+    response = client.get(
+        "/ui/review/export.xlsx",
+        params={"date_from": "2026-03-11", "date_to": "2026-03-11", "status": "qualified_no"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="antrian-review_2026-03-11.xlsx"'
+    )
+
+    workbook = load_workbook(BytesIO(response.content), read_only=True)
+    rows = list(workbook["Antrian Review"].iter_rows(values_only=True))
+    assert rows == [
+        ("Waktu (WIB)", "Camera", "Arah", "Tipe Kendaraan", "Akurasi (%)", "Review"),
+        ("2026-03-11 17:05 WIB", "cam_01", "Finished Goods", "pickup", 91, "Pending"),
+    ]
 
 
 def test_event_detail_includes_cross_page_review_navigation(tmp_path) -> None:

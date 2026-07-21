@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 import secrets
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
@@ -11,6 +12,8 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, 
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from openpyxl import Workbook
+from openpyxl.styles import Font
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import ROOT_DIR, ServiceConfig, SpoolRetentionConfig
@@ -23,6 +26,7 @@ from .event_uploader import (
 )
 from .review_store import DECISION_NO, DECISION_YES, ReviewStore
 from .spool_retention import apply_retention_policy
+from .time_utils import local_timezone
 from .ui_auth import LoginRateLimiter, UiAuthConfig, issue_session_token, validate_session_token
 from .ui_copy import DASHBOARD_PAGE, EVENT_DETAIL_PAGE, LOGIN_PAGE, REVIEW_PAGE
 
@@ -55,7 +59,6 @@ from ._api_helpers import (
     _build_ui_context,
     _clamp_limit,
     _coalesce_text,
-    _compact_path,
     _datetime_in_date_range,
     _delivery_state_label,
     _delivery_state_pill_class,
@@ -63,28 +66,19 @@ from ._api_helpers import (
     _empty_dashboard_trend,
     _event_occurrence_utc,
     _event_sort_key,
-    _format_count,
-    _format_date,
     _format_datetime,
     _format_direction,
-    _format_float,
-    _format_time,
     _load_json_dict,
-    _mapping_get_float,
     _mapping_get_int,
-    _month_start,
     _normalize_review_filter,
     _normalize_review_page_size,
     _normalize_ui_date_range,
     _parse_iso_datetime,
     _review_label,
-    _review_pill_class,
     _run_occurrence_utc,
     _run_sort_key,
     _serialize_retention_summary,
-    _serialize_retention_run_info,
     _select_trend_bucket_mode,
-    _short_event_uid,
     _text,
     _trend_grid_lines,
     _trend_svg_path,
@@ -94,7 +88,6 @@ from ._api_helpers import (
     _trend_y_position,
     _ui_date_range_context,
     _ui_event_detail_url,
-    _ui_query_string,
     _ui_review_queue_url,
     _utcnow_iso,
     _iter_jsonl_records,
@@ -408,6 +401,17 @@ class EdgeApiRuntime:
 
         items.sort(key=_event_sort_key)
         return items[: max(1, int(limit))]
+
+    def list_review_export(
+        self,
+        *,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
+        items = self._attach_review_data(list(self._iter_all_events(date_range=date_range)))
+        items.sort(key=_event_sort_key)
+        return items
 
     def review_queue_payload(
         self,
@@ -1632,6 +1636,73 @@ def create_app(
             )
         )
         return templates.TemplateResponse(request, "review_queue.html", context)
+
+    @router.get(f"{UI_BASE_PATH}/review/export.xlsx", include_in_schema=False)
+    def export_review_queue(
+        date_from: Optional[str] = Query(default=None),
+        date_to: Optional[str] = Query(default=None),
+        runtime: EdgeApiRuntime = Depends(_get_runtime),
+        _auth: None = Depends(_require_ui_auth_page),
+    ) -> Response:
+        
+        rows = runtime.list_review_export(date_from=date_from, date_to=date_to)
+        workbook = Workbook()
+        #create an excel sheet
+
+        sheet = workbook.active
+        sheet.title = "Antrian Review"
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = f"A1:F{max(1, len(rows) + 1)}"
+
+        headers = ("Waktu (WIB)", "Camera", "Arah", "Tipe Kendaraan", "Akurasi (%)", "Review")
+        sheet.append(headers)
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+
+        for item in rows:
+            confidence = item.get("confidence")
+            sheet.append(
+                (
+                    _format_datetime(_display_event_timestamp(item)),
+                    _text(item.get("camera_id")) or "Unknown",
+                    _format_direction(item.get("direction")),
+                    _coalesce_text(
+                        item.get("effective_class_name"),
+                        item.get("model_class_name"),
+                        item.get("class_name"),
+                    ) or "Unknown",
+                    round(float(confidence) * 100, 2) if confidence is not None else None,
+                    _review_label(item.get("review_status")),
+                )
+            )
+
+        #manual column size is kinda crazy lo
+        for column, width in zip("ABCDEF", (22, 16, 18, 22, 14, 14)):
+            sheet.column_dimensions[column].width = width
+
+        output = BytesIO()
+        workbook.save(output)
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
+        #check if both of the datafrom and dateto eist
+        if date_range.date_from and date_range.date_to:
+            date_label = (
+                date_range.date_from
+                if date_range.date_from == date_range.date_to
+                else f"{date_range.date_from}_to_{date_range.date_to}"
+            )
+        elif date_range.date_from:
+            date_label = f"from_{date_range.date_from}"
+        elif date_range.date_to:
+            date_label = f"to_{date_range.date_to}"
+        else:
+            date_label = datetime.now(local_timezone()).strftime("%Y-%m-%d")
+        filename = f"antrian-review_{date_label}.xlsx"
+
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @router.get(f"{UI_BASE_PATH}/events/{{event_uid}}", response_class=HTMLResponse, include_in_schema=False)
     def event_detail_page(

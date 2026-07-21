@@ -379,7 +379,8 @@ journalctl -u single_loop.service -f
 `single_loop.service`:
 
 - local-file mode: should process the file and exit cleanly at EOF
-- RTSP mode: should stay up and reconnect when the stream drops
+- RTSP mode: should stay up and retry indefinitely when the stream is unavailable
+  at startup or drops later
 
 Spool output should appear under:
 

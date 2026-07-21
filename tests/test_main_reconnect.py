@@ -179,6 +179,40 @@ def test_live_timeout_reconnect_resets_transient_state_and_preserves_totals(monk
     assert created_caps[1].released is True
 
 
+def test_live_startup_retries_until_stream_is_available(monkeypatch, capsys) -> None:
+    open_calls: List[str] = []
+
+    def _open_impl(source, **_kwargs):
+        open_calls.append(str(source))
+        if len(open_calls) < 3:
+            raise RuntimeError("stream is not published")
+        cap = _FakeCap("startup-cap")
+        frame = np.zeros((8, 8, 3), dtype=np.uint8)
+        return cap, frame, 30.0, 8, 8, "FAKE"
+
+    _install_live_fakes(
+        monkeypatch,
+        open_impl=_open_impl,
+        reader_plans=[[]],
+    )
+
+    _run_live_main(
+        monkeypatch,
+        [
+            "--rtsp-reconnect-max-attempts",
+            "0",
+            "--max-frames",
+            "1",
+        ],
+    )
+
+    out = capsys.readouterr().out
+    assert len(open_calls) == 3
+    assert "Initial RTSP open attempt 1/unlimited failed" in out
+    assert "Initial RTSP open attempt 2/unlimited failed" in out
+    assert "Initial RTSP connection established on attempt 3" in out
+
+
 def test_live_reconnect_attempts_exhausted_stops(monkeypatch, capsys) -> None:
     open_calls: List[str] = []
     first_cap = _FakeCap("cap0")

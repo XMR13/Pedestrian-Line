@@ -97,9 +97,11 @@
       <div class="queue-head-actions">
         {% if current %}
         <span class="hint" data-queue-selected-label>Selected: {{ short_event_uid(current.event_uid, 12, 6) }}</span>
+        <a class="btn secondary" href="{{ ui_base_path }}/review/export.xlsx?date_from={{ date_from }}&amp;date_to={{ date_to }}">Download Excel</a>
         <a class="btn primary" href="{{ current.detail_url }}" data-queue-selected-detail>Buka halaman detail</a>
         {% else %}
         <span class="pill" data-queue-selected-label>No selection</span>
+        <a class="btn secondary" href="{{ ui_base_path }}/review/export.xlsx?date_from={{ date_from }}&amp;date_to={{ date_to }}">Download Excel</a>
         <a class="btn primary" href="#" data-queue-selected-detail aria-disabled="true">Open selected detail</a>
         {% endif %}
       </div>

@@ -1586,25 +1586,53 @@ def main() -> None:
         else str(input_path)
     )
     
+    #resatr policy
     interrupted = False
-    try:
-        cap, frame0, fps, reported_w, reported_h, backend_name = _open_source_with_first_frame(
-            rtsp_url if is_live else input_path,
-            open_timeout_ms=args.open_timeout_ms,
-            read_timeout_ms=args.read_timeout_ms,
-            source_label=source_label,
-            is_live=is_live,
-            input_capture_backend=input_capture_backend,
-            input_gst_pipeline=input_gst_pipeline,
-            rtsp_capture_backend=rtsp_capture_backend,
-            rtsp_transport=rtsp_transport,
-            rtsp_latency_ms=int(cfg.io.rtsp_latency_ms),
-            rtsp_codec=rtsp_codec,
-            rtsp_gst_pipeline=rtsp_gst_pipeline,
-            queue_policy=queue_policy,
-        )
-    except RuntimeError as exc:
-        raise SystemExit(str(exc))
+    startup_attempt = 1
+    while True:
+        try:
+            cap, frame0, fps, reported_w, reported_h, backend_name = _open_source_with_first_frame(
+                rtsp_url if is_live else input_path,
+                open_timeout_ms=args.open_timeout_ms,
+                read_timeout_ms=args.read_timeout_ms,
+                source_label=source_label,
+                is_live=is_live,
+                input_capture_backend=input_capture_backend,
+                input_gst_pipeline=input_gst_pipeline,
+                rtsp_capture_backend=rtsp_capture_backend,
+                rtsp_transport=rtsp_transport,
+                rtsp_latency_ms=int(cfg.io.rtsp_latency_ms),
+                rtsp_codec=rtsp_codec,
+                rtsp_gst_pipeline=rtsp_gst_pipeline,
+                queue_policy=queue_policy,
+            )
+            if startup_attempt > 1:
+                print(f"[main] Initial RTSP connection established on attempt {startup_attempt}.")
+            break
+        except RuntimeError as exc:
+            startup_retry_enabled = bool(is_live and cfg.io.rtsp_reconnect_enabled)
+            if not startup_retry_enabled:
+                raise SystemExit(str(exc))
+
+            max_attempts = int(cfg.io.rtsp_reconnect_max_attempts)
+            max_attempts_text = "unlimited" if max_attempts == 0 else str(max_attempts)
+            print(
+                f"[main] Initial RTSP open attempt {startup_attempt}/{max_attempts_text} failed: {exc}"
+            )
+            if max_attempts > 0 and startup_attempt >= max_attempts:
+                raise SystemExit(
+                    f"Initial RTSP open failed after {startup_attempt} attempts: {exc}"
+                )
+
+            delay_s = _reconnect_delay_s(
+                startup_attempt,
+                initial_delay_s=float(cfg.io.rtsp_reconnect_initial_delay_s),
+                max_delay_s=float(cfg.io.rtsp_reconnect_max_delay_s),
+                backoff_factor=float(cfg.io.rtsp_reconnect_backoff_factor),
+            )
+            print(f"[main] Retrying initial RTSP open in {delay_s:.2f}s.")
+            time.sleep(delay_s)
+            startup_attempt += 1
 
     if fps <= 0.0:
         fps = float(args.target_fps) if (is_live and args.target_fps) else 30.0

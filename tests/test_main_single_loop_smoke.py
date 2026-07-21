@@ -218,7 +218,7 @@ def test_live_single_loop_integrated_upload_smoke(monkeypatch, tmp_path, capsys)
     assert "[main] Done." in out
 
 
-def test_live_startup_fails_when_camera_has_no_first_frame(monkeypatch) -> None:
+def test_live_startup_fails_when_reconnect_is_disabled(monkeypatch) -> None:
     def _open_fail(_source, **_kwargs):
         raise RuntimeError("Could not read any frame from source: rtsp://missing")
 
@@ -232,6 +232,7 @@ def test_live_startup_fails_when_camera_has_no_first_frame(monkeypatch) -> None:
                 "motion",
                 "--rtsp-url",
                 "rtsp://missing",
+                "--no-rtsp-reconnect",
                 "--no-write",
                 "--no-draw",
                 "--no-progress",
