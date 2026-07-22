@@ -609,6 +609,18 @@ class EdgeApiRuntime:
 
         queue_camera_id = _text(camera_id)
         normalized_decision = str(decision or "").strip().lower()
+        normalized_reject_reason = _text(reject_reason)
+        if normalized_decision == DECISION_NO:
+            if normalized_reject_reason is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="reject_reason is required when decision is qualified_no",
+                )
+            if normalized_reject_reason not in _reject_reason_labels():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="reject_reason is invalid",
+                )
         normalized_status = _normalize_review_filter(status_filter)
         normalized_reviewed_class = _normalize_reviewed_class_name(
             reviewed_class,
@@ -616,7 +628,7 @@ class EdgeApiRuntime:
         )
         normalized_notes = _compose_review_notes(
             notes,
-            reject_reason=reject_reason if normalized_decision == DECISION_NO else None,
+            reject_reason=normalized_reject_reason if normalized_decision == DECISION_NO else None,
         )
         normalized_page = max(1, int(page or 1))
         normalized_page_size = _normalize_review_page_size(page_size) if page_size is not None else DEFAULT_REVIEW_PAGE_SIZE

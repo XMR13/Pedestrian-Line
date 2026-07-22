@@ -4,8 +4,7 @@
     return;
   }
 
-  const DETAIL_SCROLL_Y_KEY = "plc:event-detail:scroll-y";
-  const DETAIL_SCROLL_PENDING_KEY = "plc:event-detail:scroll-pending";
+  const LAST_REVIEW_KEY = "plc:last-review";
 
   const getSessionStorage = () => {
     try {
@@ -13,24 +12,6 @@
     } catch (_error) {
       return null;
     }
-  };
-
-  const clearDetailScrollState = () => {
-    const storage = getSessionStorage();
-    if (!storage) {
-      return;
-    }
-    storage.removeItem(DETAIL_SCROLL_Y_KEY);
-    storage.removeItem(DETAIL_SCROLL_PENDING_KEY);
-  };
-
-  const saveDetailScrollState = () => {
-    const storage = getSessionStorage();
-    if (!storage || !body.classList.contains("page-event-detail")) {
-      return;
-    }
-    storage.setItem(DETAIL_SCROLL_Y_KEY, String(Math.max(0, Math.round(window.scrollY || window.pageYOffset || 0))));
-    storage.setItem(DETAIL_SCROLL_PENDING_KEY, "1");
   };
 
   const normalizeInternalUrl = (value) => {
@@ -48,74 +29,45 @@
     }
   };
 
-  const restoreDetailScrollState = () => {
-    if (!body.classList.contains("page-event-detail")) {
-      clearDetailScrollState();
-      return;
-    }
-    const storage = getSessionStorage();
-    if (!storage || storage.getItem(DETAIL_SCROLL_PENDING_KEY) !== "1") {
-      return;
-    }
-    const rawValue = storage.getItem(DETAIL_SCROLL_Y_KEY) || "";
-    const targetScrollY = Number.parseInt(rawValue, 10);
-    if (!Number.isFinite(targetScrollY) || targetScrollY < 1) {
-      clearDetailScrollState();
-      return;
-    }
-
-    let attempts = 0;
-    let settled = false;
-
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearDetailScrollState();
-    };
-
-    const attemptRestore = () => {
-      if (settled) {
-        return;
-      }
-      attempts += 1;
-      window.scrollTo(0, targetScrollY);
-
-      const currentY = Math.round(window.scrollY || window.pageYOffset || 0);
-      const maxScrollY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-      if (Math.abs(currentY - targetScrollY) <= 2) {
-        finish();
-        return;
-      }
-      if (attempts >= 12 && maxScrollY >= targetScrollY - 2) {
-        finish();
-        return;
-      }
-      if (attempts >= 20) {
-        finish();
-        return;
-      }
-      window.setTimeout(attemptRestore, 60);
-    };
-
-    const evidenceImage = document.querySelector(".detail-player .evidence-image");
-    if (evidenceImage instanceof HTMLImageElement && !evidenceImage.complete) {
-      evidenceImage.addEventListener("load", attemptRestore, { once: true });
-      evidenceImage.addEventListener("error", attemptRestore, { once: true });
-    }
-    window.addEventListener("load", attemptRestore, { once: true });
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(attemptRestore);
-    });
-  };
-
   const setBanner = (node, text, kind) => {
     if (!(node instanceof HTMLElement)) {
       return;
     }
     node.textContent = text;
     node.className = `status-banner is-visible ${kind}`;
+  };
+
+  const initLastReviewNotice = () => {
+    const notice = document.querySelector("[data-last-review-notice]");
+    const message = notice ? notice.querySelector("[data-last-review-message]") : null;
+    const link = notice ? notice.querySelector("[data-last-review-link]") : null;
+    const storage = getSessionStorage();
+    if (
+      !(notice instanceof HTMLElement)
+      || !(message instanceof HTMLElement)
+      || !(link instanceof HTMLAnchorElement)
+      || !storage
+    ) {
+      return;
+    }
+    const rawValue = storage.getItem(LAST_REVIEW_KEY);
+    if (!rawValue) {
+      return;
+    }
+    storage.removeItem(LAST_REVIEW_KEY);
+    try {
+      const saved = JSON.parse(rawValue);
+      const correctionUrl = normalizeInternalUrl(saved.correctionUrl);
+      const summary = String(saved.summary || "").trim();
+      if (!correctionUrl || !summary) {
+        return;
+      }
+      message.textContent = summary;
+      link.href = correctionUrl;
+      notice.hidden = false;
+    } catch (_error) {
+      return;
+    }
   };
 
   const setLoginStatus = (node, text, kind) => {
@@ -210,18 +162,18 @@
     const previousDetailUrl = actionRoot.dataset.previousDetailUrl || "";
     const nextDetailUrl = actionRoot.dataset.nextDetailUrl || "";
     const isDetailPage = body.classList.contains("page-event-detail");
-    const detailNavigationTargets = new Set(
-      [previousDetailUrl, nextDetailUrl]
-        .map((value) => normalizeInternalUrl(value))
-        .filter(Boolean),
-    );
     const yesButton = buttons.find((button) => String(button.dataset.decision || "") === "qualified_yes") || null;
-    const noButton = buttons.find((button) => String(button.dataset.decision || "") === "qualified_no") || null;
+    const rejectToggle = actionRoot.querySelector("[data-review-reject-toggle]");
+    const rejectPicker = actionRoot.querySelector("[data-review-reject-picker]");
+    const rejectCancel = actionRoot.querySelector("[data-review-reject-cancel]");
+    const rejectSubmit = actionRoot.querySelector("[data-review-reject-submit]");
     const reviewClassInput = actionRoot.querySelector("[data-review-class-input]");
     const reviewClassPreview = actionRoot.querySelector("[data-review-class-preview]");
-    const rejectReasonInput = actionRoot.querySelector("[data-review-reject-reason]");
-    const rejectReasonPreview = actionRoot.querySelector("[data-review-reject-preview]");
+    const rejectReasonInputs = Array.from(actionRoot.querySelectorAll("[data-review-reject-reason]")).filter(
+      (input) => input instanceof HTMLInputElement,
+    );
     const modelClass = String(actionRoot.dataset.modelClass || "").trim();
+    let rejectSubmissionPending = false;
 
     const updateReviewClassPreview = () => {
       if (
@@ -242,20 +194,33 @@
       reviewClassPreview.textContent = `Jika diterima tanpa koreksi, data ini dihitung sebagai ${detectedClass}. Jika ditolak, tidak ada class operasional baru yang dibuat.`;
     };
 
-    const updateRejectReasonPreview = () => {
+    const submitRejectReason = (input) => {
       if (
-        !(rejectReasonInput instanceof HTMLSelectElement)
-        || !(rejectReasonPreview instanceof HTMLElement)
+        rejectSubmissionPending
+        || !(input instanceof HTMLInputElement)
+        || !(rejectSubmit instanceof HTMLButtonElement)
       ) {
         return;
       }
-      const selected = rejectReasonInput.options[rejectReasonInput.selectedIndex];
-      const label = selected ? String(selected.textContent || "").trim() : "";
-      if (String(rejectReasonInput.value || "").trim() && label) {
-        rejectReasonPreview.textContent = `Jika ditolak, alasan "${label}" akan disimpan di catatan review.`;
+      rejectSubmissionPending = true;
+      input.checked = true;
+      actionRoot.requestSubmit(rejectSubmit);
+    };
+
+    const setRejectPickerOpen = (isOpen, shouldFocus = false) => {
+      if (!(rejectPicker instanceof HTMLFieldSetElement) || !(rejectToggle instanceof HTMLButtonElement)) {
         return;
       }
-      rejectReasonPreview.textContent = "Tolak berarti data tidak dipakai sebagai hasil operasional, tetapi bukti model tetap tersimpan untuk audit dan active learning berikutnya.";
+      rejectPicker.hidden = !isOpen;
+      rejectToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      rejectToggle.classList.toggle("is-active", isOpen);
+      if (isOpen && shouldFocus) {
+        const selected = rejectReasonInputs.find((input) => input.checked);
+        const focusTarget = selected || rejectReasonInputs[0];
+        if (focusTarget instanceof HTMLInputElement) {
+          focusTarget.focus();
+        }
+      }
     };
 
     actionRoot.addEventListener("submit", (event) => {
@@ -263,7 +228,23 @@
       if (!(submitter instanceof HTMLButtonElement) || !buttons.includes(submitter)) {
         return;
       }
-      saveDetailScrollState();
+      const storage = getSessionStorage();
+      if (storage && currentEventUid) {
+        const decision = String(submitter.dataset.decision || "");
+        const selectedReason = rejectReasonInputs.find((input) => input.checked) || null;
+        const reasonOption = selectedReason ? selectedReason.closest(".detail-reject-option") : null;
+        const reasonLabelNode = reasonOption ? reasonOption.querySelector(".detail-reject-option-label") : null;
+        const reasonLabel = reasonLabelNode ? String(reasonLabelNode.textContent || "").trim() : "";
+        const correctionUrl = new URL(window.location.href);
+        correctionUrl.searchParams.set("status", "all");
+        const summary = decision === "qualified_no" && reasonLabel
+          ? `Data terakhir ditolak: ${reasonLabel}.`
+          : "Data terakhir diterima.";
+        storage.setItem(LAST_REVIEW_KEY, JSON.stringify({
+          correctionUrl: `${correctionUrl.pathname}${correctionUrl.search}`,
+          summary,
+        }));
+      }
       setBanner(feedback, "Saving review…", "info");
       window.setTimeout(() => {
         buttons.forEach((button) => {
@@ -278,40 +259,52 @@
       updateReviewClassPreview();
     }
 
-    if (rejectReasonInput instanceof HTMLSelectElement) {
-      rejectReasonInput.addEventListener("change", updateRejectReasonPreview);
-      updateRejectReasonPreview();
+    if (rejectToggle instanceof HTMLButtonElement) {
+      rejectToggle.addEventListener("click", () => {
+        setRejectPickerOpen(true, true);
+      });
     }
 
-    if (isDetailPage && detailNavigationTargets.size > 0) {
-      document.addEventListener("click", (event) => {
-        if (event.defaultPrevented || event.button !== 0) {
-          return;
+    if (rejectCancel instanceof HTMLButtonElement) {
+      rejectCancel.addEventListener("click", () => {
+        setRejectPickerOpen(false);
+        if (rejectToggle instanceof HTMLButtonElement) {
+          rejectToggle.focus();
         }
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-          return;
-        }
-        const target = event.target;
-        if (!(target instanceof Element)) {
-          return;
-        }
-        const link = target.closest("a[href]");
-        if (!(link instanceof HTMLAnchorElement)) {
-          return;
-        }
-        if (link.target && link.target !== "_self") {
-          return;
-        }
-        const normalizedHref = normalizeInternalUrl(link.getAttribute("href") || "");
-        if (!normalizedHref || !detailNavigationTargets.has(normalizedHref)) {
-          return;
-        }
-        saveDetailScrollState();
+      });
+    }
+
+    if (rejectReasonInputs.length > 0) {
+      rejectReasonInputs.forEach((input) => {
+        input.addEventListener("change", () => {
+          submitRejectReason(input);
+        });
       });
     }
 
     document.addEventListener("keydown", (event) => {
       const active = document.activeElement;
+      if (event.key === "Escape" && rejectPicker instanceof HTMLFieldSetElement && !rejectPicker.hidden) {
+        event.preventDefault();
+        setRejectPickerOpen(false);
+        if (rejectToggle instanceof HTMLButtonElement) {
+          rejectToggle.focus();
+        }
+        return;
+      }
+      if (
+        rejectPicker instanceof HTMLFieldSetElement
+        && !rejectPicker.hidden
+        && /^[1-6]$/.test(event.key)
+      ) {
+        const reasonIndex = Number.parseInt(event.key, 10) - 1;
+        const reasonInput = rejectReasonInputs[reasonIndex];
+        if (reasonInput instanceof HTMLInputElement) {
+          event.preventDefault();
+          submitRejectReason(reasonInput);
+        }
+        return;
+      }
       if (
         active instanceof HTMLTextAreaElement
         || active instanceof HTMLInputElement
@@ -324,16 +317,14 @@
       if (key === "y" && yesButton) {
         event.preventDefault();
         actionRoot.requestSubmit(yesButton);
-      } else if (key === "n" && noButton) {
+      } else if (key === "n" && rejectToggle instanceof HTMLButtonElement) {
         event.preventDefault();
-        actionRoot.requestSubmit(noButton);
+        setRejectPickerOpen(true, true);
       } else if (key === "j" && nextDetailUrl && isDetailPage) {
         event.preventDefault();
-        saveDetailScrollState();
         window.location.assign(nextDetailUrl);
       } else if (key === "k" && previousDetailUrl && isDetailPage) {
         event.preventDefault();
-        saveDetailScrollState();
         window.location.assign(previousDetailUrl);
       } else if (key === "enter" && currentEventUid && body.classList.contains("page-review")) {
         event.preventDefault();
@@ -511,7 +502,7 @@
 
   initLogout();
   initLogin();
-  restoreDetailScrollState();
+  initLastReviewNotice();
   initReviewActions();
   initReviewQueueSelection();
 })();

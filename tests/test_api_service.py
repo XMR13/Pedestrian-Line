@@ -998,6 +998,7 @@ def test_review_api_does_not_use_corrected_class_as_effective_for_rejected_event
         json={
             "decision": "qualified_no",
             "reviewed_class": "pickup",
+            "reject_reason": "not_relevant",
             "notes": "wrong target for operations",
         },
     )
@@ -1101,6 +1102,20 @@ def test_event_detail_page_exposes_reviewed_class_input_and_suggestions(tmp_path
     assert '<select' in detail.text
     assert 'name="reviewed_class"' in detail.text
     assert 'name="reject_reason"' in detail.text
+    assert 'data-review-reject-picker' in detail.text
+    assert 'data-review-reject-toggle' in detail.text
+    assert 'data-review-reject-submit' in detail.text
+    assert 'data-last-review-notice' in detail.text
+    assert "Ubah keputusan terakhir" in detail.text
+    assert 'aria-expanded="false"' in detail.text
+    assert "Klik alasan atau tekan 1–6" in detail.text
+    assert "Tolak data ini" not in detail.text
+    reject_toggle_at = detail.text.index('data-review-reject-toggle')
+    reject_toggle_start = detail.text.rfind("<button", 0, reject_toggle_at)
+    reject_toggle_end = detail.text.find(">", reject_toggle_at)
+    reject_toggle_tag = detail.text[reject_toggle_start:reject_toggle_end]
+    assert 'type="button"' in reject_toggle_tag
+    assert 'name="decision"' not in reject_toggle_tag
     assert "Terima" in detail.text
     assert "Tolak" in detail.text
     assert detail.text.index("Terima") < detail.text.index('name="reviewed_class"')
@@ -1179,8 +1194,42 @@ def test_event_detail_reject_reason_is_saved_in_existing_notes(tmp_path) -> None
 
     detail = client.get("/ui/events/run_reject_reason_e1?status=all&page=1&page_size=25")
     assert detail.status_code == 200
-    assert '<option value="false_positive" selected' in detail.text
+    assert 'value="false_positive"' in detail.text
+    assert 'data-review-reject-reason' in detail.text
+    assert 'checked' in detail.text
     assert "shadow on the lane marker" in detail.text
+
+
+def test_rejected_review_requires_known_reason_for_api_and_form(tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_required_reject_reason",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+    review_url = "/events/run_required_reject_reason_e1/review"
+
+    missing_api_reason = client.post(review_url, json={"decision": "qualified_no"})
+    assert missing_api_reason.status_code == 422
+    assert missing_api_reason.json()["detail"] == (
+        "reject_reason is required when decision is qualified_no"
+    )
+
+    invalid_api_reason = client.post(
+        review_url,
+        json={"decision": "qualified_no", "reject_reason": "quick_default"},
+    )
+    assert invalid_api_reason.status_code == 422
+    assert invalid_api_reason.json()["detail"] == "reject_reason is invalid"
+
+    missing_form_reason = client.post(
+        "/ui/events/run_required_reject_reason_e1/review",
+        data={"decision": "qualified_no"},
+    )
+    assert missing_form_reason.status_code == 422
+    assert client.get("/events/run_required_reject_reason_e1").json()["review"] is None
 
 
 def test_review_api_returns_next_pending_event_for_detail_flow(tmp_path) -> None:
@@ -1688,7 +1737,14 @@ def test_ui_login_gates_pages_and_sets_cookie(tmp_path) -> None:
     assert dashboard.status_code == 200
     assert "Traffic Monitoring Dashboard" in dashboard.text
 
-    review_resp = client.post("/events/run_ui_e1/review", json={"decision": "qualified_no", "notes": "not target"})
+    review_resp = client.post(
+        "/events/run_ui_e1/review",
+        json={
+            "decision": "qualified_no",
+            "reject_reason": "not_relevant",
+            "notes": "not target",
+        },
+    )
     assert review_resp.status_code == 200
     assert review_resp.json()["review"]["decision"] == "qualified_no"
 

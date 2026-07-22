@@ -91,6 +91,11 @@
           {% block topbar_filters %}{% endblock %}
         </div>
 
+        <div class="last-review-notice" data-last-review-notice role="status" hidden>
+          <span data-last-review-message></span>
+          <a data-last-review-link href="#">Ubah keputusan terakhir</a>
+        </div>
+
         {% block content %}{% endblock %}
       </main>
     </div>

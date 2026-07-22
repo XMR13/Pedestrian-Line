@@ -28,7 +28,7 @@
   <div class="mode-copy">
     <div class="mode-eyebrow">REVIEW BERKELANJUTAN</div>
     <div class="mode-title">Review data yang melewati crossing</div>
-    <div class="mode-desc"><kbd class="kbd">J</kbd> pindah ke event berikutnya di queue, <kbd class="kbd">K</kbd> kembali ke event sebelumnya, dan <kbd class="kbd">Y</kbd> / <kbd class="kbd">N</kbd> menyimpan keputusan lalu lanjut.</div>
+    <div class="mode-desc"><kbd class="kbd">Y</kbd> menerima dan lanjut, <kbd class="kbd">N</kbd> membuka alasan tolak, lalu <kbd class="kbd">1–6</kbd> menolak dan lanjut. Gunakan <kbd class="kbd">J</kbd> / <kbd class="kbd">K</kbd> untuk berpindah data.</div>
   </div>
   <div class="mode-tags">
     {% if detail_queue.in_queue %}
@@ -191,9 +191,49 @@
       </div>
       <div class="detail-decision-grid">
         <button class="btn yes detail-decision-btn" type="submit" name="decision" value="{{ decision_yes }}" data-review-submit data-decision="{{ decision_yes }}">Terima</button>
-        <button class="btn no detail-decision-btn" type="submit" name="decision" value="{{ decision_no }}" data-review-submit data-decision="{{ decision_no }}">Tolak</button>
+        <button
+          class="btn no detail-decision-btn"
+          type="button"
+          data-review-reject-toggle
+          aria-expanded="false"
+          aria-controls="event-detail-reject-picker"
+        >Tolak</button>
       </div>
-      <p class="caption detail-review-hint">Terima memakai tipe operasional di bawah. Tolak mencatat alasan bila dipilih.</p>
+      <p class="caption detail-review-hint">Terima langsung menyimpan. Tolak membuka pilihan alasan.</p>
+      <fieldset
+        id="event-detail-reject-picker"
+        class="detail-reject-picker"
+        data-review-reject-picker
+        hidden
+      >
+        <legend>Pilih alasan penolakan</legend>
+        <p class="caption">Klik alasan atau tekan 1–6 untuk langsung menyimpan dan membuka data berikutnya.</p>
+        <div class="detail-reject-options">
+          {% for option in reject_reason_options %}
+          <label class="detail-reject-option">
+            <input
+              type="radio"
+              name="reject_reason"
+              value="{{ option.value }}"
+              data-review-reject-reason
+              {% if option.selected %}checked{% endif %}
+            />
+            <span class="detail-reject-shortcut" aria-hidden="true">{{ loop.index }}</span>
+            <span class="detail-reject-option-label">{{ option.label }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <button class="btn detail-reject-cancel" type="button" data-review-reject-cancel>Batal</button>
+        <button
+          type="submit"
+          name="decision"
+          value="{{ decision_no }}"
+          data-review-submit
+          data-decision="{{ decision_no }}"
+          data-review-reject-submit
+          hidden
+        >Simpan penolakan</button>
+      </fieldset>
       <div class="detail-nav-strip" aria-label="Queue navigation">
         <div class="detail-nav-card">
           <span class="detail-nav-label">Sebelumnya (K)</span>
@@ -254,32 +294,6 @@
           Data ini sedang ditolak. Jika nanti diterima, sistem akan memakai tipe terdeteksi atau koreksi yang dipilih.
           {% else %}
           Belum ada keputusan. Jika diterima, sistem memakai tipe terdeteksi atau koreksi yang dipilih di field ini.
-          {% endif %}
-        </div>
-      </div>
-      <div class="detail-reject-review">
-        <div class="section-head">
-          <div>
-            <h3>Jika ditolak, alasannya apa?</h3>
-            <p class="caption">Opsional. Pakai ini untuk membedakan data tidak relevan, false positive, duplikat, atau masalah crossing.</p>
-          </div>
-          <span class="pill no">Untuk data tidak valid</span>
-        </div>
-        <div class="field">
-          <label for="event-detail-reject-reason" class="detail-field-label">Alasan tolak</label>
-          <select id="event-detail-reject-reason" name="reject_reason" data-review-reject-reason>
-            <option value="">Tidak pilih alasan</option>
-            {% for option in reject_reason_options %}
-            <option value="{{ option.value }}" {% if option.selected %}selected{% endif %}>{{ option.label }}</option>
-            {% endfor %}
-          </select>
-          <p class="caption detail-class-input-note">False positive tetap disimpan sebagai data tolak, bukan sebagai class kendaraan baru.</p>
-        </div>
-        <div class="detail-reject-preview" data-review-reject-preview>
-          {% if event.review_status == decision_no and reject_reason_label %}
-          Alasan tolak tersimpan: <strong>{{ reject_reason_label }}</strong>.
-          {% else %}
-          Tolak berarti data tidak dipakai sebagai hasil operasional, tetapi bukti model tetap tersimpan untuk audit dan active learning berikutnya.
           {% endif %}
         </div>
       </div>
