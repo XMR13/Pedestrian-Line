@@ -989,9 +989,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   min-height: 108px;
   border-radius: 16px;
   border: 1px solid rgba(45, 55, 72, 0.14);
-  background:
-    radial-gradient(160px 110px at 100% 0%, rgba(232, 24, 32, 0.08), transparent 70%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.76));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.86));
   box-shadow: var(--shadow-soft);
   padding: 14px 13px;
   overflow: hidden;
@@ -1007,7 +1005,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   inset: auto 16px 0 16px;
   height: 3px;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(232, 24, 32, 0.3), rgba(64, 64, 64, 0.06));
+  background: linear-gradient(90deg, rgba(100, 116, 139, 0.22), rgba(100, 116, 139, 0.05));
 }
 
 .detail-overview-label {
@@ -1041,26 +1039,40 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
 .detail-overview-status {
   background:
-    radial-gradient(180px 120px at 100% 0%, rgba(232, 24, 32, 0.12), transparent 72%),
-    linear-gradient(180deg, rgba(255, 249, 250, 0.98), rgba(255, 255, 255, 0.82));
+      linear-gradient(180deg, rgba(255, 249, 250, 0.98), rgb(255, 255, 255));
 }
 
 .detail-overview-status.status-yes {
-  border-color: rgba(21, 128, 61, 0.26);
-  background:
-    radial-gradient(180px 120px at 100% 0%, rgba(21, 128, 61, 0.11), transparent 72%),
-    linear-gradient(180deg, rgba(240, 253, 244, 0.98), rgba(255, 255, 255, 0.82));
+   border-color: rgba(21,128,61,.3); background: linear-gradient(180deg, rgba(240,253,244,.92), rgba(255,255,255,.88));
+}
+
+.detail-overview-status.status-yes::after {
+  background: linear-gradient(
+    90deg,
+    rgba(21, 128, 61, 0.45),
+    rgba(21, 128, 61, 0.08)
+  );
 }
 
 .detail-overview-status.status-no {
-  border-color: rgba(185, 28, 28, 0.24);
-  background:
-    radial-gradient(180px 120px at 100% 0%, rgba(185, 28, 28, 0.11), transparent 72%),
-    linear-gradient(180deg, rgba(255, 241, 242, 0.98), rgba(255, 255, 255, 0.82));
+border-color: rgba(185,28,28,.28); background: linear-gradient(180deg, rgba(255,241,242,.92), rgba(255,255,255,.88));
+}
+
+.detail-overview-status.status-no::after {
+  background: linear-gradient(
+    90deg,
+    rgba(185, 28, 28, 0.45),
+    rgba(185, 28, 28, 0.08)
+  );
 }
 
 .detail-overview-status.status-unknown {
   border-color: rgba(64, 64, 64, 0.18);
+  background: #fff;
+}
+
+.detail-overview-status.status-unknown::after {
+  background: transparent;
 }
 
 .detail-shell {
