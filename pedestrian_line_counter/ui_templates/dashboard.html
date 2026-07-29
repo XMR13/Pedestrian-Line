@@ -55,8 +55,8 @@
   </section>
 
   <section class="kpis">
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Waste Paper</div><div class="kpi-accent ink">WP</div></div><div class="kpi-value">{{ format_count(metrics.count_a_to_b_total) }}</div><div class="kpi-hint">Total kendaraan waste paper</div></div></div>
-    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Finished Goods</div><div class="kpi-accent brand">FG</div></div><div class="kpi-value">{{ format_count(metrics.count_b_to_a_total) }}</div><div class="kpi-hint">Total kendaraan finished goods</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Waste Paper</div><div class="kpi-accent ink">WP</div></div><div class="kpi-value">{{ format_count(metrics.count_a_to_b_total) }}</div><div class="kpi-hint">Total kendaraan yang melewati area waste paper</div></div></div>
+    <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Finished Goods</div><div class="kpi-accent brand">FG</div></div><div class="kpi-value">{{ format_count(metrics.count_b_to_a_total) }}</div><div class="kpi-hint">Total kendaraan yang melewati area finished goods</div></div></div>
     <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Review Pending</div><div class="kpi-accent">P</div></div><div class="kpi-value">{{ format_count(pending_reviews) }}</div><div class="kpi-hint">Menunggu konfirmasi review</div></div></div>
     <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Diterima</div><div class="kpi-accent yes">Y</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_yes) }}</div></div></div>
     <div class="card"><div class="pad"><div class="kpi-top"><div class="kpi-label">Ditolak</div><div class="kpi-accent no">N</div></div><div class="kpi-value">{{ format_count(review_counts.qualified_no) }}</div></div></div>
