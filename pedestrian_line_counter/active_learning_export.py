@@ -57,8 +57,8 @@ class _Candidate:
     effective_class_name: str
     confidence: Optional[float]
     occurred_at: str
-    reviewed_status: str
-    reviewed_updated_at_utc: Optional[str]
+    review_status: str
+    review_updated_at_utc: Optional[str]
     #####
     
     @property
