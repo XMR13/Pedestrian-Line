@@ -2,6 +2,16 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple, Literal
 
 
+_VEHICLE_WEIGHT_MAPPING = {
+    "pickup" : 1.5,
+    "double engkel": 6.0,
+    "engkel" : 12.0,
+    "tronton": 18.0,
+    "trailer" : 21.0,
+    "container 20ft" : 12.0,
+    "container 40ft" : 24.0, 
+}
+
 @dataclass
 class Detection:
     """
@@ -80,3 +90,4 @@ class CrossingEvent:
     confidence: Optional[float] = None
     bbox_xyxy: Optional[Tuple[int, int, int, int]] = None
     line_mode: LineMode = "line"
+

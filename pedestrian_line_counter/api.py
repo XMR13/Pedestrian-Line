@@ -26,6 +26,7 @@ from .event_uploader import (
 )
 from .review_store import DECISION_NO, DECISION_YES, ReviewStore
 from .spool_retention import apply_retention_policy
+from .structures import _VEHICLE_WEIGHT_MAPPING
 from .time_utils import local_timezone
 from .ui_auth import LoginRateLimiter, UiAuthConfig, issue_session_token, validate_session_token
 from .ui_copy import DASHBOARD_PAGE, EVENT_DETAIL_PAGE, LOGIN_PAGE, REVIEW_PAGE
@@ -408,6 +409,9 @@ class EdgeApiRuntime:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """
+        Melist data - data yang akan diexport berdasarkan filter date yang diberikan
+        """
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
         items = self._attach_review_data(list(self._iter_all_events(date_range=date_range)))
         items.sort(key=_event_sort_key)
@@ -1687,36 +1691,45 @@ def create_app(
         sheet = workbook.active
         sheet.title = "Antrian Review"
         sheet.freeze_panes = "A2"
-        sheet.auto_filter.ref = f"A1:F{max(1, len(rows) + 1)}"
+        sheet.auto_filter.ref = f"A1:G{max(1, len(rows) + 1)}"
 
-        headers = ("Waktu (WIB)", "Camera", "Arah", "Tipe Kendaraan", "Akurasi (%)", "Review")
+        headers = ("Waktu (WIB)", "Camera", "Arah", "Tipe Kendaraan", "Estimasi Berat Muatan(T)","Akurasi (%)", "Review",)
         sheet.append(headers)
         for cell in sheet[1]:
             cell.font = Font(bold=True)
 
         for item in rows:
             confidence = item.get("confidence")
+            vehicle_name = _coalesce_text(
+                item.get("effective_class_name"),
+                item.get("model_class_name"),
+                item.get("class_name"),
+                
+            ) or "Unknown"
+
+            estimated_vehicle_weight = (
+                _VEHICLE_WEIGHT_MAPPING.get(vehicle_name.casefold())
+            )
             sheet.append(
                 (
                     _format_datetime(_display_event_timestamp(item)),
                     _text(item.get("camera_id")) or "Unknown",
                     _format_direction(item.get("direction")),
-                    _coalesce_text(
-                        item.get("effective_class_name"),
-                        item.get("model_class_name"),
-                        item.get("class_name"),
-                    ) or "Unknown",
+                    vehicle_name,
+                    #this is for the estimasi Berat Muatan(T)
+                    estimated_vehicle_weight,
                     round(float(confidence) * 100, 2) if confidence is not None else None,
                     _review_label(item.get("review_status")),
                 )
             )
 
         #manual column size is kinda crazy lo
-        for column, width in zip("ABCDEF", (22, 16, 18, 22, 14, 14)):
+        for column, width in zip("ABCDEFG", (22, 16, 18, 22, 22, 14, 14)):
             sheet.column_dimensions[column].width = width
 
         output = BytesIO()
         workbook.save(output)
+
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
         #check if both of the datafrom and dateto eist
         if date_range.date_from and date_range.date_to:
