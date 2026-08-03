@@ -1724,7 +1724,7 @@ def create_app(
             )
 
         #manual column size is kinda crazy lo
-        for column, width in zip("ABCDEFG", (22, 16, 18, 22, 22, 14, 14)):
+        for column, width in zip("ABCDEFG", (22, 16, 18, 22, 30, 14, 14)):
             sheet.column_dimensions[column].width = width
 
 
