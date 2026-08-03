@@ -1612,7 +1612,7 @@ def test_review_queue_paginates_and_preserves_page_state(tmp_path) -> None:
     assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_page_00_e1&amp;page=2&amp;page_size=15" in detail.text
 
 
-def test_review_queue_excel_export_uses_only_date_slice(tmp_path) -> None:
+def test_review_queue_excel_export_uses_date_slice_and_builds_weight_summary(tmp_path) -> None:
     _write_run(
         tmp_path,
         day="2026-03-10",
@@ -1651,12 +1651,76 @@ def test_review_queue_excel_export_uses_only_date_slice(tmp_path) -> None:
         'attachment; filename="antrian-review_2026-03-11.xlsx"'
     )
 
-    workbook = load_workbook(BytesIO(response.content), read_only=True)
+    workbook = load_workbook(BytesIO(response.content))
+    assert workbook.sheetnames == ["Antrian Review", "Summary"]
+
     rows = list(workbook["Antrian Review"].iter_rows(values_only=True))
     assert rows == [
-        ("Waktu (WIB)", "Camera", "Arah", "Tipe Kendaraan", "Akurasi (%)", "Review"),
-        ("2026-03-11 17:05 WIB", "cam_01", "Finished Goods", "pickup", 91, "Pending"),
+        (
+            "Waktu (WIB)",
+            "Camera",
+            "Arah",
+            "Tipe Kendaraan",
+            "Estimasi Berat Muatan(T)",
+            "Akurasi (%)",
+            "Review",
+        ),
+        (
+            "2026-03-11 17:05 WIB",
+            "cam_01",
+            "Finished Goods",
+            "pickup",
+            1.5,
+            91,
+            "Pending",
+        ),
     ]
+
+    summary = workbook["Summary"]
+    assert summary.freeze_panes == "A3"
+    assert summary.auto_filter.ref == "A2:D9"
+    assert [str(cell_range) for cell_range in summary.merged_cells.ranges] == ["B1:D1"]
+    assert [summary.cell(row=row_number, column=1).value for row_number in range(3, 10)] == [
+        "pickup",
+        "double engkel",
+        "engkel",
+        "tronton",
+        "trailer",
+        "container 20ft",
+        "container 40ft",
+    ]
+    assert summary["B3"].value == (
+        "=SUMIFS("
+        "'Antrian Review'!$E:$E,"
+        "'Antrian Review'!$D:$D,$A3,"
+        "'Antrian Review'!$C:$C,B$2"
+        ")"
+    )
+    assert summary["C3"].value == (
+        "=SUMIFS("
+        "'Antrian Review'!$E:$E,"
+        "'Antrian Review'!$D:$D,$A3,"
+        "'Antrian Review'!$C:$C,C$2"
+        ")"
+    )
+    assert summary["D3"].value == "=SUM(B3:C3)"
+    assert (
+        summary["A10"].value,
+        summary["B10"].value,
+        summary["C10"].value,
+        summary["D10"].value,
+    ) == (
+        "Grand Total",
+        "=SUM(B3:B9)",
+        "=SUM(C3:C9)",
+        "=SUM(B10:C10)",
+    )
+    for column in "ABCD":
+        header_cell = summary[f"{column}2"]
+        total_cell = summary[f"{column}10"]
+        assert total_cell.font.bold is True
+        assert total_cell.fill.fill_type == header_cell.fill.fill_type
+        assert total_cell.fill.fgColor.rgb == header_cell.fill.fgColor.rgb
 
 
 def test_event_detail_includes_cross_page_review_navigation(tmp_path) -> None:

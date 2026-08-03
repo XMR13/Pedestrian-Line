@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import ROOT_DIR, ServiceConfig, SpoolRetentionConfig
@@ -1704,12 +1704,12 @@ def create_app(
                 item.get("effective_class_name"),
                 item.get("model_class_name"),
                 item.get("class_name"),
-                
             ) or "Unknown"
 
             estimated_vehicle_weight = (
                 _VEHICLE_WEIGHT_MAPPING.get(vehicle_name.casefold())
             )
+            #append every row
             sheet.append(
                 (
                     _format_datetime(_display_event_timestamp(item)),
@@ -1727,6 +1727,86 @@ def create_app(
         for column, width in zip("ABCDEFG", (22, 16, 18, 22, 22, 14, 14)):
             sheet.column_dimensions[column].width = width
 
+
+        # Tambah excel sheet summary untuk hasil data dari sheet awal
+        sheet2 = workbook.create_sheet("Summary")
+        sheet2_style = PatternFill(fgColor="DCE6F1", fill_type="solid")
+        sheet2.freeze_panes = "A3"
+        headers_top = ("Sum of Estimate Berat Muatan(T)", "Arah")
+        headers_bottom = ("Tipe kendaraan", "Finished Goods", "Waste Paper", "Grand Total")
+
+
+        #append headers
+        sheet2.append(headers_top)
+        sheet2.append(headers_bottom)
+
+        #merge the first headers
+        sheet2.merge_cells("B1:D1")
+
+        #add the sheet names
+        for vehicle_name in _VEHICLE_WEIGHT_MAPPING:
+            sheet2.append([vehicle_name])
+
+        sheet2.append(["Grand Total"])
+
+        #create sheet
+        first_vehicle_row = 3
+        last_vehicle_row = (
+            first_vehicle_row + len(_VEHICLE_WEIGHT_MAPPING) - 1
+        )
+
+        #Mengisi sheet untuk excel sheet summary
+        for row_number in range(
+            first_vehicle_row,
+            last_vehicle_row + 1
+        ):
+            for direction_column in ("B", "C"):
+                sheet2[f"{direction_column}{row_number}"] = (
+                    "=SUMIFS("
+                    "'Antrian Review'!$E:$E,"
+                    f"'Antrian Review'!$D:$D,$A{row_number},"
+                    f"'Antrian Review'!$C:$C,{direction_column}$2"
+                    ")"
+                )
+
+            #menambah nilai total
+            sheet2[f"D{row_number}"] = (
+                "=SUM("
+                f"B{row_number}:C{row_number})"
+            )
+
+
+        #barisan untuk grand total
+        grand_total_row = last_vehicle_row + 1
+
+        for direction_column in ("B", "C"):
+            sheet2[f"{direction_column}{grand_total_row}"] = (
+                f"=SUM("
+                f"{direction_column}{first_vehicle_row}:"
+                f"{direction_column}{last_vehicle_row}"
+                f")"
+            )
+
+        #total untuk directiom
+        sheet2[f"D{grand_total_row}"] = (
+            "=SUM("
+            f"B{grand_total_row}:C{grand_total_row})"
+        )
+
+        #filter the second sheet
+        sheet2.auto_filter.ref = f"A2:D{last_vehicle_row}"
+
+        #make them bold
+        for style_row_number in (1,2, grand_total_row):
+            for cell in sheet2[style_row_number]:
+                cell.font = Font(bold=True)
+                cell.fill = sheet2_style
+
+        #manual column check for the second sheet
+        for column, width in zip("ABCD",(32, 16, 14, 14)):
+            sheet2.column_dimensions[column].width = width
+
+        #save the workbook
         output = BytesIO()
         workbook.save(output)
 
