@@ -1949,3 +1949,73 @@ def test_ui_login_form_redirects_when_rate_limited(tmp_path) -> None:
     blocked_page = client.get(blocked_login.headers["location"])
     assert blocked_page.status_code == 200
     assert "Too many login attempts. Wait a bit before trying again." in blocked_page.text
+
+
+def test_get_event_uses_catalog_without_scanning_jsonl(monkeypatch, tmp_path) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_catalog_lookup",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    app = create_app(
+        spool_dir=tmp_path,
+        review_db_path=tmp_path / "reviews.sqlite3",
+    )
+
+    def fail_if_jsonl_is_scanned(path: Path):
+        raise AssertionError(f"legacy JSONL scan used: {path}")
+
+    monkeypatch.setattr(
+        api_module,
+        "_iter_jsonl_records",
+        fail_if_jsonl_is_scanned,
+    )
+
+    event = app.state.runtime.get_event("run_catalog_lookup_e1")
+
+    assert event is not None
+    assert event["event_uid"] == "run_catalog_lookup_e1"
+    assert event["run"]["run_uid"] == "run_catalog_lookup"
+    assert event["review_status"] == "pending"
+    assert event["timeline"]
+
+def test_iter_all_events_uses_ordered_catalog_without_scanning_jsonl(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_new",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_old",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    app = create_app(
+        spool_dir=tmp_path,
+        review_db_path=tmp_path / "reviews.sqlite3",
+    )
+
+    def fail_if_jsonl_is_scanned(path: Path):
+        raise AssertionError(f"legacy JSONL scan used: {path}")
+
+    monkeypatch.setattr(
+        api_module,
+        "_iter_jsonl_records",
+        fail_if_jsonl_is_scanned,
+    )
+
+    events = list(app.state.runtime._iter_all_events())
+
+    assert [event["event_uid"] for event in events] == [
+        "run_old_e1",
+        "run_new_e1",
+    ]

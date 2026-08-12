@@ -24,6 +24,7 @@ from .event_uploader import (
     process_pending_runs,
     process_single_run,
 )
+from .event_catalog import EventCatalog
 from .review_store import DECISION_NO, DECISION_YES, ReviewStore
 from .spool_retention import apply_retention_policy
 from .structures import _VEHICLE_WEIGHT_MAPPING
@@ -100,6 +101,7 @@ from ._api_helpers import (
 @dataclass
 class EdgeApiRuntime:
     spool_dir: Path
+    event_catalog: EventCatalog
     uploader_cfg: Optional[UploaderConfig] = None
     retention_cfg: SpoolRetentionConfig = field(default_factory=SpoolRetentionConfig)
     service_cfg: ServiceConfig = field(default_factory=ServiceConfig)
@@ -367,22 +369,37 @@ class EdgeApiRuntime:
         if target_uid == "":
             return None
 
-        for run_dir in iter_spool_runs(self.spool_dir):
-            run_meta = _load_json_dict(run_dir / "run.json")
-            if run_meta is None:
-                continue
-            status_meta = _load_json_dict(run_dir / "status.json")
-            state_meta = _load_json_dict(run_dir / self._state_filename())
-            run_summary = _build_run_summary(run_dir, run_meta, status_meta, state_meta)
-            for event in _iter_jsonl_records(run_dir / "events.jsonl"):
-                if _text(event.get("event_uid")) != target_uid:
-                    continue
-                event_summary = _build_event_summary(run_dir, run_meta, event, spool_dir=self.spool_dir)
-                event_summary["run"] = run_summary
-                event_summary = self._attach_review_data([event_summary])[0]
-                event_summary["timeline"] = self._build_event_timeline(event_summary)
-                return event_summary
-        return None
+        # Refresh to detect appended events or retention deletions.
+        self.event_catalog.refresh()
+        # Get the target event through the cached UID index.
+        cached_event = self.event_catalog.get(target_uid)
+
+        if cached_event is None:
+            return None
+        event_summary = dict(cached_event)
+        run_dir_text = _text(event_summary.get("run_dir"))
+        if run_dir_text is None:
+            return None
+
+        # Load current run and delivery metadata.
+        run_dir = Path(run_dir_text)
+        run_meta = _load_json_dict(run_dir / "run.json")
+        if run_meta is None:
+            return None
+
+        status_meta = _load_json_dict(run_dir / "status.json")
+        state_meta = _load_json_dict(run_dir / self._state_filename())
+        event_summary["run"] = _build_run_summary(
+            run_dir,
+            run_meta,
+            status_meta,
+            state_meta,
+        )
+
+        # Attach current review state and timeline.
+        event_summary = self._attach_review_data([event_summary])[0]
+        event_summary["timeline"] = self._build_event_timeline(event_summary)
+        return event_summary
 
     def list_review_queue(
         self,
@@ -892,18 +909,28 @@ class EdgeApiRuntime:
         camera_id: Optional[str] = None,
         date_range: Optional[UiDateRange] = None,
     ) -> Iterable[Dict[str, Any]]:
+        """Yield filtered events from the current catalog snapshot."""
+        self.event_catalog.refresh()
         target_camera_id = _text(camera_id)
-        for run_dir in iter_spool_runs(self.spool_dir):
-            run_meta = _load_json_dict(run_dir / "run.json")
-            if run_meta is None:
+
+        for cached_event in self.event_catalog.list_events():
+            summary = dict(cached_event)
+
+            if (
+                target_camera_id is not None
+                and _text(summary.get("camera_id")) != target_camera_id
+            ):
                 continue
-            for event in _iter_jsonl_records(run_dir / "events.jsonl"):
-                summary = _build_event_summary(run_dir, run_meta, event, spool_dir=self.spool_dir)
-                if target_camera_id is not None and _text(summary.get("camera_id")) != target_camera_id:
-                    continue
-                if date_range is not None and not _datetime_in_date_range(_event_occurrence_utc(summary), date_range):
-                    continue
-                yield summary
+
+            if (
+                date_range is not None
+                and not _datetime_in_date_range(
+                    _event_occurrence_utc(summary),
+                    date_range,
+                )
+            ):
+                continue
+            yield summary
 
     def _review_counts_for_items(self, items: List[Dict[str, Any]]) -> Dict[str, int]:
         yes_count = sum(1 for item in items if _text(item.get("review_status")) == DECISION_YES)
@@ -1265,14 +1292,20 @@ def create_app(
         openapi_url=openapi_url
     )
 
+    # Resolve the spool directory once for the runtime and catalog.
+    resolved_spool_dir = Path(spool_dir)
+    event_catalog = EventCatalog(resolved_spool_dir)
+    event_catalog.refresh()
+
     app.state.runtime = EdgeApiRuntime(
-        spool_dir=Path(spool_dir),
+        spool_dir=resolved_spool_dir,
+        event_catalog=event_catalog,
         uploader_cfg=uploader_cfg,
         retention_cfg=retention_cfg if retention_cfg is not None else SpoolRetentionConfig(),
         service_cfg=resolved_service_cfg,
         mutation_auth_cfg=mutation_auth_cfg if mutation_auth_cfg is not None else MutationAuthConfig(),
         ui_auth_cfg=ui_auth_cfg if ui_auth_cfg is not None else UiAuthConfig(),
-        review_store=ReviewStore(Path(review_db_path) if review_db_path is not None else Path(spool_dir) / DEFAULT_REVIEW_DB_FILENAME),
+        review_store=ReviewStore(Path(review_db_path) if review_db_path is not None else resolved_spool_dir / DEFAULT_REVIEW_DB_FILENAME),
         login_rate_limiter=LoginRateLimiter(cfg=ui_auth_cfg if ui_auth_cfg is not None else UiAuthConfig()),
     )
     app.state.templates = Jinja2Templates(directory=str(UI_TEMPLATE_DIR))
