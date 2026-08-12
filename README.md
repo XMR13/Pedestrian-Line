@@ -170,6 +170,68 @@ data/traffic_runs/YYYY-MM-DD/<run_uid>/thumbs/<event_uid>.jpg
 
 `run.json` terdiri dari health summary. `report.csv` memiliki satu baris per satu crossign vehicle, timestamp, class, direction, notes, dan field lainnya.
 
+## Reviewed Active-Learning COCO Export
+
+Aktifkan penyimpanan clean training frame sebelum mengumpulkan data produksi:
+
+```bash
+PLC_SPOOL_TRAINING_FRAMES=1
+```
+
+Export event yang sudah diterima dan event Pending menjadi dua candidate
+dataset COCO yang terpisah:
+
+```bash
+uv run python -m pedestrian_line_counter.active_learning_export \
+  --spool-dir data/traffic_runs \
+  --output-dir data/active_learning_exports/2026-07-reviewed \
+  --date-from 2026-07-01 \
+  --date-to 2026-07-31
+```
+
+Default export mempertahankan semua class yang diterima, termasuk class langka
+seperti `trailer`. Jika class mayoritas terlalu besar, gunakan soft cap:
+
+```bash
+uv run python -m pedestrian_line_counter.active_learning_export \
+  --spool-dir data/traffic_runs \
+  --output-dir data/active_learning_exports/2026-07-balanced \
+  --date-from 2026-07-01 \
+  --date-to 2026-07-31 \
+  --max-per-class 1000
+```
+
+Soft cap memilih sampel sepanjang rentang waktu dan tetap menyimpan semua box
+yang sudah diterima pada frame terpilih. Output berisi:
+
+```text
+<output-dir>/
+  reviewed/
+    images/default/
+    annotations/instances_default.json
+  pending/
+    images/default/
+    annotations/instances_default.json
+  audit_manifest.json
+  README.txt
+```
+
+`audit_manifest.json` melaporkan distribusi class sebelum/sesudah cap dan
+matriks koreksi seperti `trailer -> pickup`. Taxonomy lengkap tetap ada di
+COCO, termasuk class dengan nol sampel.
+
+Dataset `reviewed` menggunakan class hasil keputusan operator. Dataset
+`pending` menggunakan prediksi model sebagai pre-annotation yang belum
+dipercaya. Import `pending` ke CVAT untuk dikoreksi; jangan langsung digunakan
+untuk training. Masing-masing folder mengikuti struktur archive **COCO 1.0**
+CVAT (`images/default/` dan `annotations/instances_default.json`); zip isi
+folder `reviewed` atau `pending` sebelum memilih **Import dataset → COCO 1.0**.
+
+Box berasal otomatis dari detector/tracker. Review operator memastikan event
+dan class, bukan ketepatan koordinat box atau semua kendaraan lain pada frame.
+Validasi seluruh frame di CVAT dan tambahkan box yang belum ada sebelum
+digunakan untuk training.
+
 ## Operator UI / Local API
 Start the FastAPi edge service on loopback:
 
