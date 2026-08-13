@@ -1612,6 +1612,111 @@ def test_review_queue_paginates_and_preserves_page_state(tmp_path) -> None:
     assert "/ui/review?camera_id=cam_01&amp;status=pending&amp;event_uid=run_page_00_e1&amp;page=2&amp;page_size=15" in detail.text
 
 
+def test_review_queue_only_enriches_visible_page_and_adjacent_items(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    for index in range(40):
+        _write_run(
+            tmp_path,
+            day="2026-03-11",
+            run_uid=f"run_bounded_{index:02d}",
+            started_at_utc=f"2026-03-11T10:{index:02d}:00Z",
+            occurred_at_utc=f"2026-03-11T10:{index:02d}:30Z",
+        )
+
+    app = create_app(
+        spool_dir=tmp_path,
+        review_db_path=tmp_path / "reviews.sqlite3",
+    )
+    runtime = app.state.runtime
+    original_attach = runtime._attach_review_data
+    enriched_batch_sizes = []
+
+    def record_attach(items, *, review_map=None):
+        enriched_batch_sizes.append(len(items))
+        return original_attach(items, review_map=review_map)
+
+    monkeypatch.setattr(runtime, "_attach_review_data", record_attach)
+    monkeypatch.setattr(
+        runtime.review_store,
+        "get_reviews",
+        lambda event_uids: (_ for _ in ()).throw(
+            AssertionError("backlog-sized IN query used")
+        ),
+    )
+
+    payload = runtime.review_queue_payload(
+        status_filter="pending",
+        page=2,
+        page_size=15,
+    )
+
+    assert payload["queue_total"] == 40
+    assert payload["page_item_count"] == 15
+    assert enriched_batch_sizes == [16]
+
+
+def test_review_queue_preserves_filtered_status_counts(tmp_path) -> None:
+    for run_uid, minute, camera_id in (
+        ("run_count_yes", "00", "cam_01"),
+        ("run_count_no", "01", "cam_02"),
+        ("run_count_pending", "02", "cam_01"),
+    ):
+        _write_run(
+            tmp_path,
+            day="2026-03-11",
+            run_uid=run_uid,
+            started_at_utc=f"2026-03-11T10:{minute}:00Z",
+            occurred_at_utc=f"2026-03-11T10:{minute}:30Z",
+            camera_id=camera_id,
+        )
+
+    app = create_app(
+        spool_dir=tmp_path,
+        review_db_path=tmp_path / "reviews.sqlite3",
+    )
+    store = app.state.runtime.review_store
+    store.save_review(
+        event_uid="run_count_yes_e1",
+        run_uid="run_count_yes",
+        site_id="site_a",
+        camera_id="cam_01",
+        decision="qualified_yes",
+        reviewed_class=None,
+        notes="",
+        now_utc="2026-03-11T10:03:00Z",
+    )
+    store.save_review(
+        event_uid="run_count_no_e1",
+        run_uid="run_count_no",
+        site_id="site_a",
+        camera_id="cam_02",
+        decision="qualified_no",
+        reviewed_class=None,
+        notes="",
+        now_utc="2026-03-11T10:04:00Z",
+    )
+
+    payload = app.state.runtime.review_queue_payload(
+        camera_id="cam_01",
+        status_filter="all",
+    )
+
+    assert payload["queue_total"] == 2
+    assert payload["cameras"] == ["cam_01", "cam_02"]
+    assert payload["counts"] == {
+        "pending": 1,
+        "qualified_yes": 1,
+        "qualified_no": 0,
+        "reviewed_total": 1,
+    }
+    assert [item["event_uid"] for item in payload["items"]] == [
+        "run_count_yes_e1",
+        "run_count_pending_e1",
+    ]
+
+
 def test_review_queue_excel_export_uses_date_slice_and_builds_weight_summary(tmp_path) -> None:
     _write_run(
         tmp_path,

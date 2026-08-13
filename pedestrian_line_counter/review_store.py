@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, Iterator, List, Optional
 
 
 DECISION_YES = "qualified_yes"
@@ -48,10 +49,18 @@ class ReviewStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -179,6 +188,22 @@ class ReviewStore:
         )
         with self._connect() as conn:
             rows = conn.execute(query, keys).fetchall()
+        return {
+            str(row["event_uid"]): review
+            for row in rows
+            if (review := _row_to_review(row)) is not None
+        }
+
+    def get_all_reviews(self) -> Dict[str, ReviewRecord]:
+        """Return current manual decisions without a backlog-sized IN query."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT event_uid, run_uid, site_id, camera_id, decision,
+                       reviewed_class, notes, created_at_utc, updated_at_utc
+                FROM event_reviews
+                """
+            ).fetchall()
         return {
             str(row["event_uid"]): review
             for row in rows

@@ -446,24 +446,80 @@ class EdgeApiRuntime:
         date_to: Optional[str] = None,
     ) -> Dict[str, Any]:
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
-        all_items = self._attach_review_data(list(self._iter_all_events(camera_id=camera_id, date_range=date_range)))
         normalized_status = _normalize_review_filter(status_filter)
-        queue = list(all_items)
-        if normalized_status != REVIEW_STATUS_ALL:
-            queue = [item for item in queue if _text(item.get("review_status")) == normalized_status]
-        queue.sort(key=_event_sort_key)
-        cameras = self.list_cameras()
-        normalized_page_size = _normalize_review_page_size(page_size)
+        target_camera_id = _text(camera_id)
         target_uid = _text(current_event_uid)
+        review_map = self.review_store.get_all_reviews()
+
+        self.event_catalog.refresh()
+        queue: List[Mapping[str, Any]] = []
+        cameras = set()
+        review_counts = {
+            DECISION_YES: 0,
+            DECISION_NO: 0,
+            REVIEW_STATUS_PENDING: 0,
+            "reviewed_total": 0,
+        }
+        target_index = None
+
+        # The catalog is already chronological. Scan its immutable mappings once
+        # for filters, counts, and camera options without copying/enriching every
+        # backlog item.
+        for item in self.event_catalog.list_events():
+            item_camera_id = _text(item.get("camera_id"))
+            if item_camera_id is not None:
+                cameras.add(item_camera_id)
+            if target_camera_id is not None and item_camera_id != target_camera_id:
+                continue
+            if not _datetime_in_date_range(_event_occurrence_utc(item), date_range):
+                continue
+
+            event_uid = _text(item.get("event_uid")) or ""
+            review = review_map.get(event_uid)
+            review_status = review.decision if review is not None else REVIEW_STATUS_PENDING
+            review_counts[review_status] += 1
+            if review is not None:
+                review_counts["reviewed_total"] += 1
+
+            if normalized_status != REVIEW_STATUS_ALL and review_status != normalized_status:
+                continue
+            if target_uid is not None and event_uid == target_uid:
+                target_index = len(queue)
+            queue.append(item)
+
+        normalized_page_size = _normalize_review_page_size(page_size)
         total_items = len(queue)
         total_pages = max(1, (total_items + normalized_page_size - 1) // normalized_page_size)
         current_page = max(1, int(page))
 
-        target_index = None
-        for idx, item in enumerate(queue):
-            item_page = (idx // normalized_page_size) + 1
+        if target_index is not None:
+            current_page = (target_index // normalized_page_size) + 1
+
+        current_page = min(current_page, total_pages)
+        start_index = (current_page - 1) * normalized_page_size
+        end_index = start_index + normalized_page_size
+
+        current_index = 0
+        if target_index is not None and start_index <= target_index < end_index:
+            current_index = target_index - start_index
+
+        current_absolute_index = start_index + current_index if total_items > 0 else None
+        display_indices = set(range(start_index, min(end_index, total_items)))
+        if current_absolute_index is not None:
+            if current_absolute_index > 0:
+                display_indices.add(current_absolute_index - 1)
+            if current_absolute_index + 1 < total_items:
+                display_indices.add(current_absolute_index + 1)
+
+        display_rows = self._attach_review_data(
+            [dict(queue[index]) for index in sorted(display_indices)],
+            review_map=review_map,
+        )
+        rows_by_index = dict(zip(sorted(display_indices), display_rows))
+        for index, item in rows_by_index.items():
+            item_page = (index // normalized_page_size) + 1
             event_uid = _text(item.get("event_uid")) or ""
-            item["queue_position"] = idx + 1
+            item["queue_position"] = index + 1
             item["queue_page"] = item_page
             item["queue_select_url"] = _ui_review_queue_url(
                 camera_id=camera_id,
@@ -483,33 +539,22 @@ class EdgeApiRuntime:
                 date_from=date_range.date_from,
                 date_to=date_range.date_to,
             )
-            if target_uid is not None and event_uid == target_uid:
-                target_index = idx
-        if target_index is not None:
-            current_page = (target_index // normalized_page_size) + 1
 
-        current_page = min(current_page, total_pages)
-        start_index = (current_page - 1) * normalized_page_size
-        end_index = start_index + normalized_page_size
-        page_items = queue[start_index:end_index]
-
-        current_index = 0
-        if target_index is not None and start_index <= target_index < end_index:
-            current_index = target_index - start_index
-
-        current = page_items[current_index] if page_items else None
-        current_absolute_index: Optional[int] = None
-        if current is not None:
-            current_absolute_index = start_index + current_index
-
-        previous_item = None
-        next_item = None
-        if current_absolute_index is not None:
-            if current_absolute_index > 0:
-                previous_item = queue[current_absolute_index - 1]
-            if current_absolute_index + 1 < len(queue):
-                next_item = queue[current_absolute_index + 1]
-        review_counts = self._review_counts_for_items(all_items)
+        page_items = [
+            rows_by_index[index]
+            for index in range(start_index, min(end_index, total_items))
+        ]
+        current = rows_by_index.get(current_absolute_index) if current_absolute_index is not None else None
+        previous_item = (
+            rows_by_index.get(current_absolute_index - 1)
+            if current_absolute_index is not None and current_absolute_index > 0
+            else None
+        )
+        next_item = (
+            rows_by_index.get(current_absolute_index + 1)
+            if current_absolute_index is not None and current_absolute_index + 1 < total_items
+            else None
+        )
         page_start = start_index + 1 if total_items > 0 else 0
         page_end = min(end_index, total_items)
         page_window_start = max(1, current_page - 2)
@@ -549,7 +594,7 @@ class EdgeApiRuntime:
             "next_item": next_item,
             "camera_id": _text(camera_id),
             "status_filter": normalized_status,
-            "cameras": cameras,
+            "cameras": sorted(cameras),
             "page_size": normalized_page_size,
             "page_size_options": list(REVIEW_PAGE_SIZE_OPTIONS),
             "date_from": date_range.date_from or "",
@@ -943,10 +988,16 @@ class EdgeApiRuntime:
             "reviewed_total": yes_count + no_count,
         }
 
-    def _attach_review_data(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        review_map = self.review_store.get_reviews(
-            [_text(item.get("event_uid")) or "" for item in items]
-        )
+    def _attach_review_data(
+        self,
+        items: List[Dict[str, Any]],
+        *,
+        review_map: Optional[Mapping[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        if review_map is None:
+            review_map = self.review_store.get_reviews(
+                [_text(item.get("event_uid")) or "" for item in items]
+            )
         merged: List[Dict[str, Any]] = []
         for item in items:
             event_uid = _text(item.get("event_uid"))
