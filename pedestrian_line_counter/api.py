@@ -92,7 +92,6 @@ from ._api_helpers import (
     _ui_event_detail_url,
     _ui_review_queue_url,
     _utcnow_iso,
-    _iter_jsonl_records,
     _align_datetime_to_bucket,
     _build_trend_buckets,
 )
@@ -746,11 +745,12 @@ class EdgeApiRuntime:
                 if (class_name := _text(candidate)) is not None
             )
 
-            class_names.update(
-                class_name
-                for event in _iter_jsonl_records(run_dir / "events.jsonl")
-                if (class_name := _text(event.get("class_name"))) is not None
-            )
+        self.event_catalog.refresh()
+        class_names.update(
+            class_name
+            for event in self.event_catalog.list_events()
+            if (class_name := _text(event.get("class_name"))) is not None
+        )
         return sorted(item for item in class_names if item)
 
     def dashboard_payload(

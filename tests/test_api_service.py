@@ -1971,6 +1971,7 @@ def test_get_event_uses_catalog_without_scanning_jsonl(monkeypatch, tmp_path) ->
         api_module,
         "_iter_jsonl_records",
         fail_if_jsonl_is_scanned,
+        raising=False,
     )
 
     event = app.state.runtime.get_event("run_catalog_lookup_e1")
@@ -2011,6 +2012,7 @@ def test_iter_all_events_uses_ordered_catalog_without_scanning_jsonl(
         api_module,
         "_iter_jsonl_records",
         fail_if_jsonl_is_scanned,
+        raising=False,
     )
 
     events = list(app.state.runtime._iter_all_events())
@@ -2018,4 +2020,51 @@ def test_iter_all_events_uses_ordered_catalog_without_scanning_jsonl(
     assert [event["event_uid"] for event in events] == [
         "run_old_e1",
         "run_new_e1",
+    ]
+
+
+def test_list_reviewable_classes_uses_catalog_without_scanning_jsonl(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_catalog_classes",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+        class_name="observed truck",
+        run_class_names={0: "taxonomy pickup"},
+    )
+    app = create_app(
+        spool_dir=tmp_path,
+        review_db_path=tmp_path / "reviews.sqlite3",
+    )
+    app.state.runtime.review_store.save_review(
+        event_uid="previously_reviewed_event",
+        run_uid=None,
+        site_id=None,
+        camera_id=None,
+        decision="qualified_yes",
+        reviewed_class="reviewed trailer",
+        notes="",
+        now_utc="2026-03-11T10:06:00Z",
+    )
+
+    def fail_if_jsonl_is_scanned(path: Path):
+        raise AssertionError(f"legacy JSONL scan used: {path}")
+
+    monkeypatch.setattr(
+        api_module,
+        "_iter_jsonl_records",
+        fail_if_jsonl_is_scanned,
+        raising=False,
+    )
+
+    class_names = app.state.runtime.list_reviewable_classes()
+
+    assert class_names == [
+        "observed truck",
+        "reviewed trailer",
+        "taxonomy pickup",
     ]
