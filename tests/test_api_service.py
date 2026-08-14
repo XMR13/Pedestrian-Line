@@ -1276,6 +1276,48 @@ def test_review_api_returns_next_pending_event_for_detail_flow(tmp_path) -> None
     assert "data-pending-queue-url=\"/ui/review?camera_id=cam_01&amp;status=pending&amp;page=1&amp;page_size=25\"" in detail.text
 
 
+def test_review_save_does_not_enrich_complete_backlog(monkeypatch, tmp_path) -> None:
+    for index in range(40):
+        _write_run(
+            tmp_path,
+            day="2026-03-11",
+            run_uid=f"run_save_bounded_{index:02d}",
+            started_at_utc=f"2026-03-11T10:{index:02d}:00Z",
+            occurred_at_utc=f"2026-03-11T10:{index:02d}:30Z",
+        )
+
+    app = create_app(
+        spool_dir=tmp_path,
+        review_db_path=tmp_path / "reviews.sqlite3",
+    )
+    runtime = app.state.runtime
+    original_attach = runtime._attach_review_data
+    enriched_batch_sizes = []
+
+    def record_attach(items, *, review_map=None):
+        enriched_batch_sizes.append(len(items))
+        return original_attach(items, review_map=review_map)
+
+    monkeypatch.setattr(runtime, "_attach_review_data", record_attach)
+    client = TestClient(app)
+
+    response = client.post(
+        "/events/run_save_bounded_39_e1/review",
+        json={
+            "decision": "qualified_yes",
+            "camera_id": "cam_01",
+            "status_filter": "pending",
+            "page": 3,
+            "page_size": 15,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["next_event_uid"] == "run_save_bounded_00_e1"
+    assert enriched_batch_sizes
+    assert max(enriched_batch_sizes) <= 16
+
+
 def test_review_api_uses_global_pending_queue_when_detail_is_not_camera_filtered(tmp_path) -> None:
     _write_run(
         tmp_path,

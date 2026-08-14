@@ -419,6 +419,47 @@ class EdgeApiRuntime:
         items.sort(key=_event_sort_key)
         return items[: max(1, int(limit))]
 
+    def _find_first_pending_event_uid(
+        self,
+        *,
+        camera_id: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Function to find the frist pending event that can i can get
+        into the value of the uids
+        """
+        date_range = _normalize_ui_date_range(
+            date_from=date_from,
+            date_to=date_to,
+        )
+        target_camera_id = _text(camera_id)
+        review_map = self.review_store.get_all_reviews()
+
+        #refresh the catalog before listing the events
+        self.event_catalog.refresh()
+        for event in self.event_catalog.list_events():
+            event_camera_id = _text(event.get("camera_id"))
+            if (
+                target_camera_id is not None
+                and event_camera_id != target_camera_id
+            ):
+                continue
+
+            #if the event do not occured at the specified datetime
+            if not _datetime_in_date_range(
+                _event_occurrence_utc(event),
+                date_range,
+            ):
+                continue
+
+            event_uid = _text(event.get("event_uid"))
+            if event_uid is not None and event_uid not in review_map:
+                return event_uid
+            
+        return None
+
     def list_review_export(
         self,
         *,
@@ -668,6 +709,10 @@ class EdgeApiRuntime:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """
+        Function for making conditioning and control the review process
+        for vehicle counting project
+        """
         event = self.get_event(event_uid)
         if event is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"event_uid not found: {event_uid}")
@@ -724,14 +769,14 @@ class EdgeApiRuntime:
             now_utc=_utcnow_iso(),
         )
         updated_event = self.get_event(event_uid)
-        next_pending = self.list_review_queue(
-            limit=1,
+
+        #get the next pending based on the first pending event uid
+        next_event_uid = self._find_first_pending_event_uid(
             camera_id=queue_camera_id,
-            status_filter=REVIEW_STATUS_PENDING,
-            date_from=date_range.date_from,
-            date_to=date_range.date_to,
+            date_from = date_range.date_from,
+            date_to=date_range.date_to
         )
-        next_event_uid = _text(next_pending[0].get("event_uid")) if next_pending else None
+
         return {
             "ok": True,
             "event_uid": event_uid,
@@ -1769,6 +1814,9 @@ def create_app(
     ) -> Response:
         
         rows = runtime.list_review_export(date_from=date_from, date_to=date_to)
+
+        #filetered rows to get just the diterima row
+        filtered_rows = 
         workbook = Workbook()
         #create an excel sheet
 
