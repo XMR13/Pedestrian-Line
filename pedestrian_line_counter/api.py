@@ -1816,7 +1816,6 @@ def create_app(
         rows = runtime.list_review_export(date_from=date_from, date_to=date_to)
 
         #filetered rows to get just the diterima row
-        filtered_rows = 
         workbook = Workbook()
         #create an excel sheet
 
