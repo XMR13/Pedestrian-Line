@@ -1804,7 +1804,6 @@ def create_app(
             )
         )
         return templates.TemplateResponse(request, "review_queue.html", context)
-
     @router.get(f"{UI_BASE_PATH}/review/export.xlsx", include_in_schema=False)
     def export_review_queue(
         date_from: Optional[str] = Query(default=None),
@@ -1815,6 +1814,14 @@ def create_app(
         
         rows = runtime.list_review_export(date_from=date_from, date_to=date_to)
 
+        #data yang telah difitler sehingga hanya data yang memiliki tag
+        # DITERIMA yang diproses dan masuk ke dalam excel
+        accepted_rows = [
+            item 
+            for item in rows
+            if _text(item.get("review_status")) == DECISION_YES
+        ]
+
         #filetered rows to get just the diterima row
         workbook = Workbook()
         #create an excel sheet
@@ -1822,14 +1829,14 @@ def create_app(
         sheet = workbook.active
         sheet.title = "Antrian Review"
         sheet.freeze_panes = "A2"
-        sheet.auto_filter.ref = f"A1:G{max(1, len(rows) + 1)}"
+        sheet.auto_filter.ref = f"A1:G{max(1, len(accepted_rows) + 1)}"
 
         headers = ("Waktu (WIB)", "Camera", "Arah", "Tipe Kendaraan", "Estimasi Berat Muatan(T)","Akurasi (%)", "Review",)
         sheet.append(headers)
         for cell in sheet[1]:
             cell.font = Font(bold=True)
 
-        for item in rows:
+        for item in accepted_rows:
             confidence = item.get("confidence")
             vehicle_name = _coalesce_text(
                 item.get("effective_class_name"),

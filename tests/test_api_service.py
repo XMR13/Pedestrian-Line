@@ -1770,13 +1770,51 @@ def test_review_queue_excel_export_uses_date_slice_and_builds_weight_summary(tmp
     _write_run(
         tmp_path,
         day="2026-03-11",
-        run_uid="run_in_range",
+        run_uid="run_accepted",
         started_at_utc="2026-03-11T10:00:00Z",
         occurred_at_utc="2026-03-11T10:05:00Z",
         direction="B_TO_A",
         class_name="pickup",
     )
-    client = TestClient(create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3"))
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_pending",
+        started_at_utc="2026-03-11T10:10:00Z",
+        occurred_at_utc="2026-03-11T10:15:00Z",
+        class_name="tronton",
+    )
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_rejected",
+        started_at_utc="2026-03-11T10:20:00Z",
+        occurred_at_utc="2026-03-11T10:25:00Z",
+        class_name="trailer",
+    )
+    app = create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3")
+    store = app.state.runtime.review_store
+    store.save_review(
+        event_uid="run_accepted_e1",
+        run_uid="run_accepted",
+        site_id="site_a",
+        camera_id="cam_01",
+        decision="qualified_yes",
+        reviewed_class=None,
+        notes="",
+        now_utc="2026-03-11T10:30:00Z",
+    )
+    store.save_review(
+        event_uid="run_rejected_e1",
+        run_uid="run_rejected",
+        site_id="site_a",
+        camera_id="cam_01",
+        decision="qualified_no",
+        reviewed_class=None,
+        notes="",
+        now_utc="2026-03-11T10:31:00Z",
+    )
+    client = TestClient(app)
 
     review_page = client.get("/ui/review", params={"date_from": "2026-03-11", "date_to": "2026-03-11"})
     assert review_page.status_code == 200
@@ -1801,7 +1839,8 @@ def test_review_queue_excel_export_uses_date_slice_and_builds_weight_summary(tmp
     workbook = load_workbook(BytesIO(response.content))
     assert workbook.sheetnames == ["Antrian Review", "Summary"]
 
-    rows = list(workbook["Antrian Review"].iter_rows(values_only=True))
+    detail = workbook["Antrian Review"]
+    rows = list(detail.iter_rows(values_only=True))
     assert rows == [
         (
             "Waktu (WIB)",
@@ -1819,9 +1858,10 @@ def test_review_queue_excel_export_uses_date_slice_and_builds_weight_summary(tmp
             "pickup",
             1.5,
             91,
-            "Pending",
+            "Diterima",
         ),
     ]
+    assert detail.auto_filter.ref == "A1:G2"
 
     summary = workbook["Summary"]
     assert summary.freeze_panes == "A3"
