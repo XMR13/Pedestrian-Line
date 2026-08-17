@@ -1864,10 +1864,19 @@ def test_review_queue_excel_export_uses_date_slice_and_builds_weight_summary(tmp
     assert detail.auto_filter.ref == "A1:G2"
 
     summary = workbook["Summary"]
-    assert summary.freeze_panes == "A3"
-    assert summary.auto_filter.ref == "A2:D9"
-    assert [str(cell_range) for cell_range in summary.merged_cells.ranges] == ["B1:D1"]
-    assert [summary.cell(row=row_number, column=1).value for row_number in range(3, 10)] == [
+    assert summary.freeze_panes == "A4"
+    assert summary.auto_filter.ref == "A3:D10"
+    assert [str(cell_range) for cell_range in summary.merged_cells.ranges] == [
+        "A1:D1",
+        "B2:D2",
+    ]
+    assert summary["A1"].value == "Periode Data: 2026-03-11"
+    assert summary["A1"].font.bold is True
+    assert summary["A1"].font.color.rgb == "00FFFFFF"
+    assert summary["A1"].fill.fgColor.rgb == "001F4E78"
+    assert summary["A1"].alignment.horizontal == "center"
+    assert summary.sheet_view.showGridLines is False
+    assert [summary.cell(row=row_number, column=1).value for row_number in range(4, 11)] == [
         "pickup",
         "double engkel",
         "engkel",
@@ -1876,38 +1885,38 @@ def test_review_queue_excel_export_uses_date_slice_and_builds_weight_summary(tmp
         "container 20ft",
         "container 40ft",
     ]
-    assert summary["B3"].value == (
+    assert summary["B4"].value == (
         "=SUMIFS("
         "'Antrian Review'!$E:$E,"
-        "'Antrian Review'!$D:$D,$A3,"
-        "'Antrian Review'!$C:$C,B$2"
+        "'Antrian Review'!$D:$D,$A4,"
+        "'Antrian Review'!$C:$C,B$3"
         ")"
     )
-    assert summary["C3"].value == (
+    assert summary["C4"].value == (
         "=SUMIFS("
         "'Antrian Review'!$E:$E,"
-        "'Antrian Review'!$D:$D,$A3,"
-        "'Antrian Review'!$C:$C,C$2"
+        "'Antrian Review'!$D:$D,$A4,"
+        "'Antrian Review'!$C:$C,C$3"
         ")"
     )
-    assert summary["D3"].value == "=SUM(B3:C3)"
+    assert summary["D4"].value == "=SUM(B4:C4)"
     assert (
-        summary["A10"].value,
-        summary["B10"].value,
-        summary["C10"].value,
-        summary["D10"].value,
+        summary["A11"].value,
+        summary["B11"].value,
+        summary["C11"].value,
+        summary["D11"].value,
     ) == (
         "Grand Total",
-        "=SUM(B3:B9)",
-        "=SUM(C3:C9)",
-        "=SUM(B10:C10)",
+        "=SUM(B4:B10)",
+        "=SUM(C4:C10)",
+        "=SUM(B11:C11)",
     )
     for column in "ABCD":
-        header_cell = summary[f"{column}2"]
-        total_cell = summary[f"{column}10"]
+        header_cell = summary[f"{column}3"]
+        total_cell = summary[f"{column}11"]
         assert total_cell.font.bold is True
         assert total_cell.fill.fill_type == header_cell.fill.fill_type
-        assert total_cell.fill.fgColor.rgb == header_cell.fill.fgColor.rgb
+        assert total_cell.fill.fgColor.rgb == "00BDD7EE"
 
 
 def test_event_detail_includes_cross_page_review_navigation(tmp_path) -> None:

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import ROOT_DIR, ServiceConfig, SpoolRetentionConfig
@@ -1811,13 +1811,16 @@ def create_app(
         runtime: EdgeApiRuntime = Depends(_get_runtime),
         _auth: None = Depends(_require_ui_auth_page),
     ) -> Response:
-        
-        rows = runtime.list_review_export(date_from=date_from, date_to=date_to)
+        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
+        rows = runtime.list_review_export(
+            date_from=date_range.date_from,
+            date_to=date_range.date_to,
+        )
 
         #data yang telah difitler sehingga hanya data yang memiliki tag
         # DITERIMA yang diproses dan masuk ke dalam excel
         accepted_rows = [
-            item 
+            item
             for item in rows
             if _text(item.get("review_status")) == DECISION_YES
         ]
@@ -1868,18 +1871,50 @@ def create_app(
 
         # Tambah excel sheet summary untuk hasil data dari sheet awal
         sheet2 = workbook.create_sheet("Summary")
-        sheet2_style = PatternFill(fgColor="DCE6F1", fill_type="solid")
-        sheet2.freeze_panes = "A3"
+        sheet2.sheet_view.showGridLines = False
+        sheet2.freeze_panes = "A4"
+
+        if date_range.date_from and date_range.date_to:
+            period_value = (
+                date_range.date_from
+                if date_range.date_from == date_range.date_to
+                else f"{date_range.date_from} s.d. {date_range.date_to}"
+            )
+        elif date_range.date_from:
+            period_value = f"Mulai {date_range.date_from}"
+        elif date_range.date_to:
+            period_value = f"Sampai {date_range.date_to}"
+        else:
+            period_value = "Semua tanggal"
+
+        period_fill = PatternFill(fgColor="1F4E78", fill_type="solid")
+        section_fill = PatternFill(fgColor="D9EAF7", fill_type="solid")
+        total_fill = PatternFill(fgColor="BDD7EE", fill_type="solid")
+        total_border = Border(top=Side(style="thin", color="5B9BD5"))
         headers_top = ("Sum of Estimate Berat Muatan(T)", "Arah")
         headers_bottom = ("Tipe kendaraan", "Finished Goods", "Waste Paper", "Grand Total")
 
-
         #append headers
+        sheet2.append([f"Periode Data: {period_value}"])
         sheet2.append(headers_top)
         sheet2.append(headers_bottom)
 
         #merge the first headers
-        sheet2.merge_cells("B1:D1")
+        sheet2.merge_cells("A1:D1")
+        sheet2.merge_cells("B2:D2")
+
+        for cell in sheet2[1]:
+            cell.fill = period_fill
+        sheet2["A1"].font = Font(bold=True, color="FFFFFF", size=14)
+        sheet2["A1"].alignment = Alignment(horizontal="center", vertical="center")
+        sheet2.row_dimensions[1].height = 28
+
+        for style_row_number in (2, 3):
+            for cell in sheet2[style_row_number]:
+                cell.font = Font(bold=True, color="1F1F1F")
+                cell.fill = section_fill
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+        sheet2.row_dimensions[3].height = 24
 
         #add the sheet names
         for vehicle_name in _VEHICLE_WEIGHT_MAPPING:
@@ -1888,7 +1923,7 @@ def create_app(
         sheet2.append(["Grand Total"])
 
         #create sheet
-        first_vehicle_row = 3
+        first_vehicle_row = 4
         last_vehicle_row = (
             first_vehicle_row + len(_VEHICLE_WEIGHT_MAPPING) - 1
         )
@@ -1903,7 +1938,7 @@ def create_app(
                     "=SUMIFS("
                     "'Antrian Review'!$E:$E,"
                     f"'Antrian Review'!$D:$D,$A{row_number},"
-                    f"'Antrian Review'!$C:$C,{direction_column}$2"
+                    f"'Antrian Review'!$C:$C,{direction_column}$3"
                     ")"
                 )
 
@@ -1932,13 +1967,16 @@ def create_app(
         )
 
         #filter the second sheet
-        sheet2.auto_filter.ref = f"A2:D{last_vehicle_row}"
+        sheet2.auto_filter.ref = f"A3:D{last_vehicle_row}"
 
-        #make them bold
-        for style_row_number in (1,2, grand_total_row):
-            for cell in sheet2[style_row_number]:
-                cell.font = Font(bold=True)
-                cell.fill = sheet2_style
+        for row_number in range(first_vehicle_row, grand_total_row + 1):
+            for column in range(2, 5):
+                sheet2.cell(row=row_number, column=column).number_format = "0.00"
+
+        for cell in sheet2[grand_total_row]:
+            cell.font = Font(bold=True, color="1F1F1F")
+            cell.fill = total_fill
+            cell.border = total_border
 
         #manual column check for the second sheet
         for column, width in zip("ABCD",(32, 16, 14, 14)):
@@ -1948,7 +1986,6 @@ def create_app(
         output = BytesIO()
         workbook.save(output)
 
-        date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
         #check if both of the datafrom and dateto eist
         if date_range.date_from and date_range.date_to:
             date_label = (
