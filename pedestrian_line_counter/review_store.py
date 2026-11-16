@@ -10,6 +10,8 @@ from typing import Dict, Iterable, Iterator, List, Optional
 DECISION_YES = "qualified_yes"
 DECISION_NO = "qualified_no"
 VALID_DECISIONS = {DECISION_YES, DECISION_NO}
+# SQLite's default variable limit is 999 on old builds and 32766 on new ones.
+_MAX_QUERY_PARAMS = 900
 
 
 @dataclass(frozen=True)
@@ -178,37 +180,28 @@ class ReviewStore:
 
     def get_reviews(self, event_uids: Iterable[str]) -> Dict[str, ReviewRecord]:
         keys = [str(item).strip() for item in event_uids if str(item).strip()]
-        if not keys:
-            return {}
-
-        placeholders = ",".join("?" for _ in keys)
-        query = (
-            "SELECT event_uid, run_uid, site_id, camera_id, decision, reviewed_class, notes, created_at_utc, updated_at_utc "
-            f"FROM event_reviews WHERE event_uid IN ({placeholders})"
-        )
+        reviews: Dict[str, ReviewRecord] = {}
         with self._connect() as conn:
-            rows = conn.execute(query, keys).fetchall()
-        return {
-            str(row["event_uid"]): review
-            for row in rows
-            if (review := _row_to_review(row)) is not None
-        }
+            # Chunk so large lookups stay under every SQLite build's variable limit.
+            for start in range(0, len(keys), _MAX_QUERY_PARAMS):
+                chunk = keys[start : start + _MAX_QUERY_PARAMS]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    "SELECT event_uid, run_uid, site_id, camera_id, decision, reviewed_class, notes, "
+                    f"created_at_utc, updated_at_utc FROM event_reviews WHERE event_uid IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    review = _row_to_review(row)
+                    if review is not None:
+                        reviews[review.event_uid] = review
+        return reviews
 
-    def get_all_reviews(self) -> Dict[str, ReviewRecord]:
-        """Return current manual decisions without a backlog-sized IN query."""
+    def get_decisions(self) -> Dict[str, str]:
+        """Return only event_uid -> decision, the cheapest input for queue scans and counts."""
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT event_uid, run_uid, site_id, camera_id, decision,
-                       reviewed_class, notes, created_at_utc, updated_at_utc
-                FROM event_reviews
-                """
-            ).fetchall()
-        return {
-            str(row["event_uid"]): review
-            for row in rows
-            if (review := _row_to_review(row)) is not None
-        }
+            rows = conn.execute("SELECT event_uid, decision FROM event_reviews").fetchall()
+        return {str(row["event_uid"]): str(row["decision"]) for row in rows}
 
     def summary(self) -> Dict[str, int]:
         counts = {

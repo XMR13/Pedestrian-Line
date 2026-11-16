@@ -6,9 +6,16 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Dict, FrozenSet, Mapping, Optional, Tuple
+from datetime import datetime
+from typing import Any, Dict, FrozenSet, Iterable, Mapping, Optional, Tuple
 
-from ._api_helpers import _build_event_summary, _event_sort_key, _load_json_dict
+from ._api_helpers import (
+    _build_event_summary,
+    _event_occurrence_utc,
+    _event_sort_key,
+    _load_json_dict,
+    _text,
+)
 from .event_uploader import iter_spool_runs
 
 
@@ -42,6 +49,11 @@ class EventCatalog:
         self._events_by_uid: Dict[str, Mapping[str, Any]] = {}
         self._ordered_events: Tuple[Mapping[str, Any], ...] = ()
         self._run_states: Dict[Path, _RunCatalogState] = {}
+        # Parsed once per event so request-time filters never re-parse ISO text.
+        # Only refresh() writes it; readers only do single-key lookups.
+        self._occurred_at: Dict[str, Optional[datetime]] = {}
+        self._camera_ids: FrozenSet[str] = frozenset()
+        self._class_names: FrozenSet[str] = frozenset()
 
     def refresh(self) -> CatalogRefreshResult:
         """Read only new complete JSONL records and atomically publish a snapshot."""
@@ -53,6 +65,8 @@ class EventCatalog:
         with self._lock:
             current_events = self._events_by_uid
             current_ordered_events = self._ordered_events
+            current_camera_ids = self._camera_ids
+            current_class_names = self._class_names
             run_states = dict(self._run_states)
 
         events_by_uid = current_events
@@ -77,6 +91,7 @@ class EventCatalog:
             mutable_events = writable_events()
             for event_uid in old_state.event_uids:
                 mutable_events.pop(event_uid, None)
+                self._occurred_at.pop(event_uid, None)
             catalog_changed = catalog_changed or bool(old_state.event_uids)
             requires_full_sort = requires_full_sort or bool(old_state.event_uids)
             removed_runs += 1
@@ -124,6 +139,7 @@ class EventCatalog:
                     mutable_events = writable_events()
                     for event_uid in old_event_uids:
                         mutable_events.pop(event_uid, None)
+                        self._occurred_at.pop(event_uid, None)
                     catalog_changed = True
                     requires_full_sort = True
                 event_uids = set()
@@ -145,6 +161,7 @@ class EventCatalog:
                 event_already_exists = event_uid in events_by_uid
                 cached_summary = MappingProxyType(summary)
                 writable_events()[event_uid] = cached_summary
+                self._occurred_at[event_uid] = _event_occurrence_utc(cached_summary)
                 event_uids.add(event_uid)
                 if event_already_exists:
                     requires_full_sort = True
@@ -162,14 +179,22 @@ class EventCatalog:
             )
 
         ordered_events = current_ordered_events
+        camera_ids = current_camera_ids
+        class_names = current_class_names
         if catalog_changed:
             if requires_full_sort:
                 ordered_events = tuple(sorted(events_by_uid.values(), key=_event_sort_key))
+                camera_ids = _distinct_text(events_by_uid.values(), "camera_id")
+                class_names = _distinct_text(events_by_uid.values(), "class_name")
             else:
                 ordered_events = _merge_added_events(current_ordered_events, added_events)
+                camera_ids = current_camera_ids | _distinct_text(added_events, "camera_id")
+                class_names = current_class_names | _distinct_text(added_events, "class_name")
         with self._lock:
             self._events_by_uid = events_by_uid
             self._ordered_events = ordered_events
+            self._camera_ids = camera_ids
+            self._class_names = class_names
             self._run_states = run_states
 
         return CatalogRefreshResult(
@@ -193,6 +218,21 @@ class EventCatalog:
         """Return the current immutable, chronologically ordered snapshot."""
         with self._lock:
             return self._ordered_events
+
+    def occurred_at(self, event: Mapping[str, Any]) -> Optional[datetime]:
+        """Return the event's UTC occurrence time parsed at load time."""
+        event_uid = _text(event.get("event_uid")) or ""
+        if event_uid in self._occurred_at:
+            return self._occurred_at[event_uid]
+        return _event_occurrence_utc(event)
+
+    def camera_ids(self) -> FrozenSet[str]:
+        with self._lock:
+            return self._camera_ids
+
+    def class_names(self) -> FrozenSet[str]:
+        with self._lock:
+            return self._class_names
 
 
 def _run_requires_rebuild(
@@ -281,6 +321,10 @@ def _safe_stat(path: Path) -> Optional[Any]:
         return path.stat()
     except OSError:
         return None
+
+def _distinct_text(events: Iterable[Mapping[str, Any]], key: str) -> FrozenSet[str]:
+    return frozenset(value for event in events if (value := _text(event.get(key))) is not None)
+
 
 #another text helper function smhhh, how many of this function do we truly need bruh
 def _required_text(value: object) -> Optional[str]:

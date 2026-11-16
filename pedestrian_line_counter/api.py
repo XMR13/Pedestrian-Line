@@ -66,7 +66,6 @@ from ._api_helpers import (
     _delivery_state_pill_class,
     _display_event_timestamp,
     _empty_dashboard_trend,
-    _event_occurrence_utc,
     _event_sort_key,
     _format_datetime,
     _format_direction,
@@ -95,6 +94,30 @@ from ._api_helpers import (
     _align_datetime_to_bucket,
     _build_trend_buckets,
 )
+
+
+@dataclass(frozen=True)
+class _EventStats:
+    """Counts and trend points gathered in one pass over date-filtered events."""
+
+    events_total: int
+    count_a_to_b: int
+    count_b_to_a: int
+    review_counts: Dict[str, int]
+    # (occurred_at_utc, direction, is_pending) for every event with a timestamp.
+    trend_points: List[Tuple[datetime, Optional[str], bool]]
+
+
+@dataclass(frozen=True)
+class _ReviewQueueScan:
+    """Result of one pass over camera/date-filtered events for the review queue."""
+
+    queue: List[Mapping[str, Any]]
+    target_index: Optional[int]
+    review_counts: Dict[str, int]
+    # First two Pending event UIDs regardless of status filter, so a save can
+    # pick the next Pending event without another scan.
+    first_pending_uids: List[str]
 
 
 @dataclass
@@ -170,18 +193,27 @@ class EdgeApiRuntime:
         date_to: Optional[str] = None,
     ) -> Dict[str, Any]:
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
-        run_summaries = list(self._iter_all_runs(date_range=date_range))
-        filtered_events = self._attach_review_data(list(self._iter_all_events(date_range=date_range)))
+        return self._build_metrics(
+            run_summaries=list(self._iter_all_runs(date_range=date_range)),
+            event_stats=self._scan_event_stats(date_range=date_range),
+        )
+
+    def _build_metrics(
+        self,
+        *,
+        run_summaries: List[Dict[str, Any]],
+        event_stats: "_EventStats",
+    ) -> Dict[str, Any]:
         delivery_counts = self._collect_delivery_counts(run_summaries=run_summaries)
-        review_counts = self._review_counts_for_items(filtered_events)
+        review_counts = event_stats.review_counts
         lifecycle_status_counts: Dict[str, int] = {}
         totals = {
-            "events_total": len(filtered_events),
+            "events_total": event_stats.events_total,
             "frames_total": 0,
             "frames_processed": 0,
             "events_emitted_total": 0,
-            "count_a_to_b_total": sum(1 for item in filtered_events if _text(item.get("direction")) == "A_TO_B"),
-            "count_b_to_a_total": sum(1 for item in filtered_events if _text(item.get("direction")) == "B_TO_A"),
+            "count_a_to_b_total": event_stats.count_a_to_b,
+            "count_b_to_a_total": event_stats.count_b_to_a,
         }
         latest_run: Optional[Dict[str, Any]] = None
         latest_key: tuple[str, str] = ("", "")
@@ -337,9 +369,7 @@ class EdgeApiRuntime:
         date_to: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
-        rows = list(self._iter_all_runs(date_range=date_range))
-        rows.sort(key=_run_sort_key, reverse=True)
-        return rows[: _clamp_limit(limit, MAX_RUNS_LIMIT)]
+        return _newest_runs(self._iter_all_runs(date_range=date_range), limit=limit)
 
     def list_recent_events(
         self,
@@ -350,18 +380,20 @@ class EdgeApiRuntime:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        items: List[Dict[str, Any]] = []
+        items: List[Mapping[str, Any]] = []
         target_run_uid = str(run_uid).strip() if run_uid else None
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
+        max_items = _clamp_limit(limit, MAX_EVENTS_LIMIT)
 
-        for summary in self._iter_all_events(camera_id=camera_id, date_range=date_range):
+        # The catalog is chronological, so walking it backwards yields newest
+        # first and can stop as soon as enough events are found.
+        for summary in self._iter_all_events(camera_id=camera_id, date_range=date_range, newest_first=True):
             if target_run_uid is not None and _text(summary.get("run_uid")) != target_run_uid:
                 continue
             items.append(summary)
-
-        items.sort(key=_event_sort_key, reverse=True)
-        merged = self._attach_review_data(items[: _clamp_limit(limit, MAX_EVENTS_LIMIT)])
-        return merged
+            if len(items) >= max_items:
+                break
+        return self._attach_review_data(items)
 
     def get_event(self, event_uid: str) -> Optional[Dict[str, Any]]:
         target_uid = str(event_uid).strip()
@@ -419,46 +451,48 @@ class EdgeApiRuntime:
         items.sort(key=_event_sort_key)
         return items[: max(1, int(limit))]
 
-    def _find_first_pending_event_uid(
+    def _scan_review_queue(
         self,
         *,
-        camera_id: Optional[str] = None,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-    ) -> Optional[str]:
-        """
-        Function to find the frist pending event that can i can get
-        into the value of the uids
-        """
-        date_range = _normalize_ui_date_range(
-            date_from=date_from,
-            date_to=date_to,
+        camera_id: Optional[str],
+        status_filter: str,
+        date_range: UiDateRange,
+        target_uid: Optional[str] = None,
+    ) -> _ReviewQueueScan:
+        """One pass over the catalog for queue rows, counts, and next Pending UIDs."""
+        decisions = self.review_store.get_decisions()
+        queue: List[Mapping[str, Any]] = []
+        review_counts = {
+            DECISION_YES: 0,
+            DECISION_NO: 0,
+            REVIEW_STATUS_PENDING: 0,
+            "reviewed_total": 0,
+        }
+        first_pending_uids: List[str] = []
+        target_index = None
+
+        for item in self._iter_all_events(camera_id=camera_id, date_range=date_range):
+            event_uid = _text(item.get("event_uid")) or ""
+            review_status = decisions.get(event_uid, REVIEW_STATUS_PENDING)
+            review_counts[review_status] += 1
+            if review_status == REVIEW_STATUS_PENDING:
+                if event_uid and len(first_pending_uids) < 2:
+                    first_pending_uids.append(event_uid)
+            else:
+                review_counts["reviewed_total"] += 1
+
+            if status_filter != REVIEW_STATUS_ALL and review_status != status_filter:
+                continue
+            if target_uid is not None and event_uid == target_uid:
+                target_index = len(queue)
+            queue.append(item)
+
+        return _ReviewQueueScan(
+            queue=queue,
+            target_index=target_index,
+            review_counts=review_counts,
+            first_pending_uids=first_pending_uids,
         )
-        target_camera_id = _text(camera_id)
-        review_map = self.review_store.get_all_reviews()
-
-        #refresh the catalog before listing the events
-        self.event_catalog.refresh()
-        for event in self.event_catalog.list_events():
-            event_camera_id = _text(event.get("camera_id"))
-            if (
-                target_camera_id is not None
-                and event_camera_id != target_camera_id
-            ):
-                continue
-
-            #if the event do not occured at the specified datetime
-            if not _datetime_in_date_range(
-                _event_occurrence_utc(event),
-                date_range,
-            ):
-                continue
-
-            event_uid = _text(event.get("event_uid"))
-            if event_uid is not None and event_uid not in review_map:
-                return event_uid
-            
-        return None
 
     def list_review_export(
         self,
@@ -489,54 +523,26 @@ class EdgeApiRuntime:
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
         normalized_status = _normalize_review_filter(status_filter)
         target_camera_id = _text(camera_id)
-        target_uid = _text(current_event_uid)
-        review_map = self.review_store.get_all_reviews()
-
-        self.event_catalog.refresh()
-        queue: List[Mapping[str, Any]] = []
-        cameras = set()
-        review_counts = {
-            DECISION_YES: 0,
-            DECISION_NO: 0,
-            REVIEW_STATUS_PENDING: 0,
-            "reviewed_total": 0,
-        }
-        target_index = None
-
-        # The catalog is already chronological. Scan its immutable mappings once
-        # for filters, counts, and camera options without copying/enriching every
-        # backlog item.
-        for item in self.event_catalog.list_events():
-            item_camera_id = _text(item.get("camera_id"))
-            if item_camera_id is not None:
-                cameras.add(item_camera_id)
-            if target_camera_id is not None and item_camera_id != target_camera_id:
-                continue
-            if not _datetime_in_date_range(_event_occurrence_utc(item), date_range):
-                continue
-
-            event_uid = _text(item.get("event_uid")) or ""
-            review = review_map.get(event_uid)
-            review_status = review.decision if review is not None else REVIEW_STATUS_PENDING
-            review_counts[review_status] += 1
-            if review is not None:
-                review_counts["reviewed_total"] += 1
-
-            if normalized_status != REVIEW_STATUS_ALL and review_status != normalized_status:
-                continue
-            if target_uid is not None and event_uid == target_uid:
-                target_index = len(queue)
-            queue.append(item)
+        scan = self._scan_review_queue(
+            camera_id=target_camera_id,
+            status_filter=normalized_status,
+            date_range=date_range,
+            target_uid=_text(current_event_uid),
+        )
+        queue = scan.queue
+        target_index = scan.target_index
+        review_counts = scan.review_counts
+        cameras = self.event_catalog.camera_ids()
 
         normalized_page_size = _normalize_review_page_size(page_size)
         total_items = len(queue)
         total_pages = max(1, (total_items + normalized_page_size - 1) // normalized_page_size)
-        current_page = max(1, int(page))
-
-        if target_index is not None:
-            current_page = (target_index // normalized_page_size) + 1
-
-        current_page = min(current_page, total_pages)
+        current_page = _queue_page(
+            requested_page=page,
+            target_index=target_index,
+            page_size=normalized_page_size,
+            total_items=total_items,
+        )
         start_index = (current_page - 1) * normalized_page_size
         end_index = start_index + normalized_page_size
 
@@ -553,8 +559,7 @@ class EdgeApiRuntime:
                 display_indices.add(current_absolute_index + 1)
 
         display_rows = self._attach_review_data(
-            [dict(queue[index]) for index in sorted(display_indices)],
-            review_map=review_map,
+            [queue[index] for index in sorted(display_indices)],
         )
         rows_by_index = dict(zip(sorted(display_indices), display_rows))
         for index, item in rows_by_index.items():
@@ -743,20 +748,42 @@ class EdgeApiRuntime:
         normalized_page = max(1, int(page or 1))
         normalized_page_size = _normalize_review_page_size(page_size) if page_size is not None else DEFAULT_REVIEW_PAGE_SIZE
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
-        queue_context = self.review_queue_payload(
+        # One scan of the queue as it was before saving gives the continuation
+        # neighbour, the page to return to, and the next Pending event.
+        scan = self._scan_review_queue(
             camera_id=queue_camera_id,
             status_filter=normalized_status,
-            current_event_uid=event_uid,
-            page=normalized_page,
-            page_size=normalized_page_size,
-            date_from=date_range.date_from,
-            date_to=date_range.date_to,
+            date_range=date_range,
+            target_uid=event_uid,
         )
-        in_queue_before_save = _text(queue_context.get("selected_event_uid")) == event_uid
-        continuation_item = None
-        if in_queue_before_save:
-            continuation_item = queue_context.get("next_item") or queue_context.get("previous_item")
-        queue_page_number = int(queue_context["pagination"]["current_page"])
+        queue_page_number = _queue_page(
+            requested_page=normalized_page,
+            target_index=scan.target_index,
+            page_size=normalized_page_size,
+            total_items=len(scan.queue),
+        )
+        next_detail_url = None
+        if scan.target_index is not None:
+            if scan.target_index + 1 < len(scan.queue):
+                continuation_index: Optional[int] = scan.target_index + 1
+            elif scan.target_index > 0:
+                continuation_index = scan.target_index - 1
+            else:
+                continuation_index = None
+            if continuation_index is not None:
+                next_detail_url = _ui_event_detail_url(
+                    _text(scan.queue[continuation_index].get("event_uid")) or "",
+                    camera_id=queue_camera_id,
+                    status=normalized_status,
+                    page=(continuation_index // normalized_page_size) + 1,
+                    page_size=normalized_page_size,
+                    date_from=date_range.date_from,
+                    date_to=date_range.date_to,
+                )
+        next_event_uid = next(
+            (uid for uid in scan.first_pending_uids if uid != event_uid),
+            None,
+        )
 
         record = self.review_store.save_review(
             event_uid=str(event["event_uid"]),
@@ -770,20 +797,13 @@ class EdgeApiRuntime:
         )
         updated_event = self.get_event(event_uid)
 
-        #get the next pending based on the first pending event uid
-        next_event_uid = self._find_first_pending_event_uid(
-            camera_id=queue_camera_id,
-            date_from = date_range.date_from,
-            date_to=date_range.date_to
-        )
-
         return {
             "ok": True,
             "event_uid": event_uid,
             "review": record.to_dict(),
             "event": updated_event,
             "next_event_uid": next_event_uid,
-            "next_detail_url": _text(continuation_item.get("detail_url")) if isinstance(continuation_item, Mapping) else None,
+            "next_detail_url": next_detail_url,
             "queue_page_url": _ui_review_queue_url(
                 camera_id=queue_camera_id,
                 status=normalized_status,
@@ -812,8 +832,8 @@ class EdgeApiRuntime:
         }
 
     def list_cameras(self) -> List[str]:
-        cameras = {_text(item.get("camera_id")) for item in self._iter_all_events()}
-        return sorted(item for item in cameras if item)
+        self.event_catalog.refresh()
+        return sorted(self.event_catalog.camera_ids())
 
     def list_reviewable_classes(self) -> List[str]:
         class_names = set(self.review_store.list_reviewed_classes())
@@ -836,11 +856,7 @@ class EdgeApiRuntime:
             )
 
         self.event_catalog.refresh()
-        class_names.update(
-            class_name
-            for event in self.event_catalog.list_events()
-            if (class_name := _text(event.get("class_name"))) is not None
-        )
+        class_names.update(self.event_catalog.class_names())
         return sorted(item for item in class_names if item)
 
     def dashboard_payload(
@@ -850,7 +866,10 @@ class EdgeApiRuntime:
         date_to: Optional[str] = None,
     ) -> Dict[str, Any]:
         date_range = _normalize_ui_date_range(date_from=date_from, date_to=date_to)
-        metrics = self.metrics_payload(date_from=date_range.date_from, date_to=date_range.date_to)
+        # Read runs and scan events once; every dashboard section reuses them.
+        run_summaries = list(self._iter_all_runs(date_range=date_range))
+        event_stats = self._scan_event_stats(date_range=date_range)
+        metrics = self._build_metrics(run_summaries=run_summaries, event_stats=event_stats)
         recent_events = self.list_recent_events(limit=8, date_from=date_range.date_from, date_to=date_range.date_to)
         for item in recent_events:
             item["detail_url"] = _ui_event_detail_url(
@@ -859,19 +878,16 @@ class EdgeApiRuntime:
                 date_from=date_range.date_from,
                 date_to=date_range.date_to,
             )
-        recent_runs = self.list_recent_runs(limit=5, date_from=date_range.date_from, date_to=date_range.date_to)
         latest_run = metrics.get("latest_run") or {}
         review_counts = metrics.get("review_counts") or {}
         pending_reviews = max(0, int(metrics.get("events_total", 0)) - int(review_counts.get("reviewed_total", 0)))
-        trend = self._build_dashboard_trend(date_range=date_range)
+        trend = self._build_dashboard_trend(date_range=date_range, points=event_stats.trend_points)
         return {
             "metrics": metrics,
             "recent_events": recent_events,
-            "recent_runs": recent_runs,
+            "recent_runs": _newest_runs(run_summaries, limit=5),
             "latest_run": latest_run,
-            "sync_overview": self._build_sync_overview(
-                run_summaries=list(self._iter_all_runs(date_range=date_range)),
-            ),
+            "sync_overview": metrics["sync_overview"],
             "pending_reviews": pending_reviews,
             "review_counts": review_counts,
             "cameras": self.list_cameras(),
@@ -886,15 +902,12 @@ class EdgeApiRuntime:
             ),
         }
 
-    def _build_dashboard_trend(self, *, date_range: UiDateRange) -> Dict[str, Any]:
-        events = self._attach_review_data(list(self._iter_all_events(date_range=date_range)))
-        points: List[tuple[datetime, Dict[str, Any]]] = []
-        for event in events:
-            event_dt = _event_occurrence_utc(event)
-            if event_dt is None:
-                continue
-            points.append((event_dt, event))
-
+    def _build_dashboard_trend(
+        self,
+        *,
+        date_range: UiDateRange,
+        points: List[Tuple[datetime, Optional[str], bool]],
+    ) -> Dict[str, Any]:
         if not points:
             return _empty_dashboard_trend(date_range=date_range)
 
@@ -910,17 +923,17 @@ class EdgeApiRuntime:
             for index, bucket in enumerate(buckets)
         }
 
-        for event_dt, event in points:
+        for event_dt, direction, is_pending in points:
             event_bucket = _align_datetime_to_bucket(event_dt, bucket_mode=bucket_mode)
             offset = bucket_index.get(event_bucket)
             if offset is None:
                 continue
             bucket = buckets[offset]
-            if _text(event.get("direction")) == "A_TO_B":
+            if direction == "A_TO_B":
                 bucket["a_to_b"] += 1
-            elif _text(event.get("direction")) == "B_TO_A":
+            elif direction == "B_TO_A":
                 bucket["b_to_a"] += 1
-            if _text(event.get("review_status")) == REVIEW_STATUS_PENDING:
+            if is_pending:
                 bucket["pending"] += 1
 
         y_max = max(
@@ -998,40 +1011,72 @@ class EdgeApiRuntime:
         *,
         camera_id: Optional[str] = None,
         date_range: Optional[UiDateRange] = None,
-    ) -> Iterable[Dict[str, Any]]:
-        """Yield filtered events from the current catalog snapshot."""
+        newest_first: bool = False,
+    ) -> Iterable[Mapping[str, Any]]:
+        """Yield filtered, read-only events from the current catalog snapshot.
+
+        Callers that add fields must copy (``_attach_review_data`` already does).
+        """
         self.event_catalog.refresh()
         target_camera_id = _text(camera_id)
+        events = self.event_catalog.list_events()
 
-        for cached_event in self.event_catalog.list_events():
-            summary = dict(cached_event)
-
+        for cached_event in reversed(events) if newest_first else events:
             if (
                 target_camera_id is not None
-                and _text(summary.get("camera_id")) != target_camera_id
+                and _text(cached_event.get("camera_id")) != target_camera_id
             ):
                 continue
 
             if (
                 date_range is not None
                 and not _datetime_in_date_range(
-                    _event_occurrence_utc(summary),
+                    self.event_catalog.occurred_at(cached_event),
                     date_range,
                 )
             ):
                 continue
-            yield summary
+            yield cached_event
 
-    def _review_counts_for_items(self, items: List[Dict[str, Any]]) -> Dict[str, int]:
-        yes_count = sum(1 for item in items if _text(item.get("review_status")) == DECISION_YES)
-        no_count = sum(1 for item in items if _text(item.get("review_status")) == DECISION_NO)
-        pending_count = sum(1 for item in items if _text(item.get("review_status")) == REVIEW_STATUS_PENDING)
-        return {
-            DECISION_YES: yes_count,
-            DECISION_NO: no_count,
-            REVIEW_STATUS_PENDING: pending_count,
-            "reviewed_total": yes_count + no_count,
-        }
+    def _scan_event_stats(self, *, date_range: UiDateRange) -> _EventStats:
+        """One pass over date-filtered events for metrics counts and trend points."""
+        decisions = self.review_store.get_decisions()
+        events_total = count_a_to_b = count_b_to_a = yes_count = no_count = pending_count = 0
+        trend_points: List[Tuple[datetime, Optional[str], bool]] = []
+
+        for event in self._iter_all_events(date_range=date_range):
+            events_total += 1
+            direction = _text(event.get("direction"))
+            if direction == "A_TO_B":
+                count_a_to_b += 1
+            elif direction == "B_TO_A":
+                count_b_to_a += 1
+
+            decision = decisions.get(_text(event.get("event_uid")) or "")
+            is_pending = decision is None
+            if is_pending:
+                pending_count += 1
+            elif decision == DECISION_YES:
+                yes_count += 1
+            elif decision == DECISION_NO:
+                no_count += 1
+
+            occurred_at = self.event_catalog.occurred_at(event)
+            if occurred_at is not None:
+                trend_points.append((occurred_at, direction, is_pending))
+
+        return _EventStats(
+            events_total=events_total,
+            count_a_to_b=count_a_to_b,
+            count_b_to_a=count_b_to_a,
+            review_counts={
+                DECISION_YES: yes_count,
+                DECISION_NO: no_count,
+                REVIEW_STATUS_PENDING: pending_count,
+                "reviewed_total": yes_count + no_count,
+            },
+            trend_points=trend_points,
+        )
 
     def _attach_review_data(
         self,
@@ -2159,6 +2204,26 @@ def create_app(
 
     app.include_router(router)
     return app
+
+
+def _newest_runs(run_summaries: Iterable[Dict[str, Any]], *, limit: int) -> List[Dict[str, Any]]:
+    rows = sorted(run_summaries, key=_run_sort_key, reverse=True)
+    return rows[: _clamp_limit(limit, MAX_RUNS_LIMIT)]
+
+
+def _queue_page(
+    *,
+    requested_page: int,
+    target_index: Optional[int],
+    page_size: int,
+    total_items: int,
+) -> int:
+    """Page that shows the target event, else the requested page, clamped to the queue."""
+    total_pages = max(1, (total_items + page_size - 1) // page_size)
+    current_page = max(1, int(requested_page))
+    if target_index is not None:
+        current_page = (target_index // page_size) + 1
+    return min(current_page, total_pages)
 
 
 def _normalize_reviewed_class_name(

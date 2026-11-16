@@ -1680,13 +1680,15 @@ def test_review_queue_only_enriches_visible_page_and_adjacent_items(
         return original_attach(items, review_map=review_map)
 
     monkeypatch.setattr(runtime, "_attach_review_data", record_attach)
-    monkeypatch.setattr(
-        runtime.review_store,
-        "get_reviews",
-        lambda event_uids: (_ for _ in ()).throw(
-            AssertionError("backlog-sized IN query used")
-        ),
-    )
+    original_get_reviews = runtime.review_store.get_reviews
+    review_lookup_sizes = []
+
+    def record_get_reviews(event_uids):
+        event_uids = list(event_uids)
+        review_lookup_sizes.append(len(event_uids))
+        return original_get_reviews(event_uids)
+
+    monkeypatch.setattr(runtime.review_store, "get_reviews", record_get_reviews)
 
     payload = runtime.review_queue_payload(
         status_filter="pending",
@@ -1697,6 +1699,9 @@ def test_review_queue_only_enriches_visible_page_and_adjacent_items(
     assert payload["queue_total"] == 40
     assert payload["page_item_count"] == 15
     assert enriched_batch_sizes == [16]
+    # Full review rows are fetched only for the visible page plus its neighbour,
+    # never for the whole backlog.
+    assert review_lookup_sizes == [16]
 
 
 def test_review_queue_preserves_filtered_status_counts(tmp_path) -> None:
@@ -2302,3 +2307,59 @@ def test_event_evidence_refreshes_catalog_for_new_events(tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.content == b"jpg"
+
+
+def _count_calls(monkeypatch, target, name: str) -> list:
+    original = getattr(target, name)
+    calls = []
+
+    def recorder(*args, **kwargs):
+        calls.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(target, name, recorder)
+    return calls
+
+
+def test_dashboard_scans_review_decisions_once_and_enriches_only_recent_rows(monkeypatch, tmp_path) -> None:
+    for index in range(12):
+        _write_run(
+            tmp_path,
+            day="2026-03-11",
+            run_uid=f"run_dashboard_{index:02d}",
+            started_at_utc=f"2026-03-11T10:{index:02d}:00Z",
+            occurred_at_utc=f"2026-03-11T10:{index:02d}:30Z",
+        )
+    runtime = create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3").state.runtime
+    decision_calls = _count_calls(monkeypatch, runtime.review_store, "get_decisions")
+    review_lookups = _count_calls(monkeypatch, runtime.review_store, "get_reviews")
+
+    payload = runtime.dashboard_payload()
+
+    assert payload["metrics"]["events_total"] == 12
+    assert payload["pending_reviews"] == 12
+    assert [item["event_uid"] for item in payload["recent_events"]][:2] == [
+        "run_dashboard_11_e1",
+        "run_dashboard_10_e1",
+    ]
+    assert len(decision_calls) == 1
+    assert [len(list(args[0])) for args in review_lookups] == [8]
+
+
+def test_review_save_scans_the_queue_once(monkeypatch, tmp_path) -> None:
+    for index in range(3):
+        _write_run(
+            tmp_path,
+            day="2026-03-11",
+            run_uid=f"run_single_scan_{index}",
+            started_at_utc=f"2026-03-11T10:0{index}:00Z",
+            occurred_at_utc=f"2026-03-11T10:0{index}:30Z",
+        )
+    runtime = create_app(spool_dir=tmp_path, review_db_path=tmp_path / "reviews.sqlite3").state.runtime
+    decision_calls = _count_calls(monkeypatch, runtime.review_store, "get_decisions")
+
+    payload = runtime.save_review("run_single_scan_0_e1", decision="qualified_yes", status_filter="pending")
+
+    assert len(decision_calls) == 1
+    assert payload["next_event_uid"] == "run_single_scan_1_e1"
+    assert payload["next_detail_url"].startswith("/ui/events/run_single_scan_1_e1?")
