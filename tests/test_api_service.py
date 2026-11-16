@@ -2264,3 +2264,41 @@ def test_list_reviewable_classes_uses_catalog_without_scanning_jsonl(
         "reviewed trailer",
         "taxonomy pickup",
     ]
+
+
+def test_event_evidence_uses_cached_catalog_without_refresh(tmp_path, monkeypatch) -> None:
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_cached_evidence",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+    app = create_app(spool_dir=tmp_path)
+    catalog = app.state.runtime.event_catalog
+
+    def fail_refresh():
+        raise AssertionError("evidence lookup must not rescan the spool for cached events")
+
+    monkeypatch.setattr(catalog, "refresh", fail_refresh)
+
+    response = TestClient(app).get("/events/run_cached_evidence_e1/thumbnail")
+
+    assert response.status_code == 200
+    assert response.content == b"jpg"
+
+
+def test_event_evidence_refreshes_catalog_for_new_events(tmp_path) -> None:
+    client = TestClient(create_app(spool_dir=tmp_path))
+    _write_run(
+        tmp_path,
+        day="2026-03-11",
+        run_uid="run_late_evidence",
+        started_at_utc="2026-03-11T10:00:00Z",
+        occurred_at_utc="2026-03-11T10:05:00Z",
+    )
+
+    response = client.get("/events/run_late_evidence_e1/scene")
+
+    assert response.status_code == 200
+    assert response.content == b"jpg"

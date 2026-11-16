@@ -453,7 +453,9 @@ def iter_spool_runs(root_dir: Path) -> Iterator[Path]:
     if not root.exists():
         return iter(())
 
-    run_jsons = sorted(root.rglob("run.json"))
+    # Runs live at <spool>/<day>/<run_uid>/. A fixed-depth glob avoids walking
+    # every evidence image under thumbs/ and scene/ on each call.
+    run_jsons = sorted(root.glob("*/*/run.json"))
     run_dirs: List[Path] = []
     for path in run_jsons:
         run_dir = path.parent

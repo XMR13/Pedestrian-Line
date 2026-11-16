@@ -24,7 +24,6 @@ class CatalogRefreshResult:
 
 @dataclass(frozen=True)
 class _RunCatalogState:
-    run_meta_signature: Tuple[int, int]
     events_device: int
     events_inode: int
     events_mtime_ns: int
@@ -83,17 +82,14 @@ class EventCatalog:
             removed_runs += 1
 
         for run_dir in sorted(run_dirs):
-            run_json_path = run_dir / "run.json"
             events_path = run_dir / "events.jsonl"
-            run_meta_signature = _file_metadata_signature(run_json_path)
             events_stat = _safe_stat(events_path)
-            if run_meta_signature is None or events_stat is None:
+            if events_stat is None:
                 continue
 
             previous_state = run_states.get(run_dir)
             rebuild = _run_requires_rebuild(
                 previous_state,
-                run_meta_signature=run_meta_signature,
                 events_device=int(events_stat.st_dev),
                 events_inode=int(events_stat.st_ino),
                 events_mtime_ns=int(events_stat.st_mtime_ns),
@@ -106,7 +102,7 @@ class EventCatalog:
             else:
                 start_offset = 0
 
-            run_meta = _load_json_dict(run_json_path)
+            run_meta = _load_json_dict(run_dir / "run.json")
             if run_meta is None:
                 continue
 
@@ -157,7 +153,6 @@ class EventCatalog:
                 catalog_changed = True
 
             run_states[run_dir] = _RunCatalogState(
-                run_meta_signature=run_meta_signature,
                 events_device=int(events_stat.st_dev),
                 events_inode=int(events_stat.st_ino),
                 events_mtime_ns=int(events_stat.st_mtime_ns),
@@ -203,15 +198,14 @@ class EventCatalog:
 def _run_requires_rebuild(
     state: Optional[_RunCatalogState],
     *,
-    run_meta_signature: Tuple[int, int],
     events_device: int,
     events_inode: int,
     events_mtime_ns: int,
     events_size: int,
 ) -> bool:
+    # run.json is ignored on purpose: the live run rewrites it every status
+    # tick, and the fields events use from it (site/camera) never change.
     if state is None:
-        return True
-    if state.run_meta_signature != run_meta_signature:
         return True
     if (state.events_device, state.events_inode) != (events_device, events_inode):
         return True
@@ -279,13 +273,6 @@ def _read_complete_jsonl_records(
             continue
         records.append(record)
     return tuple(records), malformed_records, confirmed_offset
-
-
-def _file_metadata_signature(path: Path) -> Optional[Tuple[int, int]]:
-    stat_result = _safe_stat(path)
-    if stat_result is None:
-        return None
-    return int(stat_result.st_mtime_ns), int(stat_result.st_size)
 
 
 def _safe_stat(path: Path) -> Optional[Any]:

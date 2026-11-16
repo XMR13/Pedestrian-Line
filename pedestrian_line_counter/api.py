@@ -1080,7 +1080,12 @@ class EdgeApiRuntime:
         return f"/events/{uid}/{kind}"
 
     def resolve_event_evidence_path(self, event_uid: str, *, kind: str) -> Optional[Path]:
-        event = self.get_event(event_uid)
+        # Evidence only needs the cached paths. Refresh only on a cache miss so
+        # each <img> request does not rescan the spool.
+        event = self.event_catalog.get(event_uid)
+        if event is None:
+            self.event_catalog.refresh()
+            event = self.event_catalog.get(event_uid)
         if event is None:
             return None
 

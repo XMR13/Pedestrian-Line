@@ -234,3 +234,37 @@ def test_catalog_merges_an_out_of_order_appended_event(tmp_path: Path) -> None:
         "event_older",
         "event_newer",
     ]
+
+
+def test_catalog_ignores_run_json_status_rewrites(tmp_path: Path) -> None:
+    _write_run(tmp_path)
+    catalog = EventCatalog(tmp_path)
+    catalog.refresh()
+    original_event = catalog.get("event_newer")
+    run_json = tmp_path / "2026-08-11" / "run_catalog" / "run.json"
+    run_meta = json.loads(run_json.read_text(encoding="utf-8"))
+    run_meta["lifecycle_status"] = "running"
+    run_json.write_text(json.dumps(run_meta), encoding="utf-8")
+
+    result = catalog.refresh()
+
+    assert result.processed_records == 0
+    assert result.rebuilt_runs == 0
+    assert catalog.get("event_newer") is original_event
+
+
+def test_catalog_discovers_runs_only_at_day_run_depth(tmp_path: Path) -> None:
+    _write_run(tmp_path)
+    nested_dir = tmp_path / "2026-08-11" / "run_catalog" / "thumbs" / "nested"
+    nested_dir.mkdir(parents=True)
+    (nested_dir / "run.json").write_text("{}", encoding="utf-8")
+    (nested_dir / "events.jsonl").write_text(
+        json.dumps({"event_uid": "event_too_deep", "run_uid": "x"}) + "\n",
+        encoding="utf-8",
+    )
+    catalog = EventCatalog(tmp_path)
+
+    result = catalog.refresh()
+
+    assert result.loaded_events == 2
+    assert catalog.get("event_too_deep") is None
